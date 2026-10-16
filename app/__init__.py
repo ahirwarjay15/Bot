@@ -1,0 +1,1 @@
+"""File Bot application package."""

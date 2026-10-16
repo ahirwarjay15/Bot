@@ -1,0 +1,19 @@
+# Example systemd unit. Copy to /etc/systemd/system/file-bot.service and edit User/WorkingDirectory.
+[Unit]
+Description=Telegram File Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/File-Bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/File-Bot/.venv/bin/python /home/ubuntu/File-Bot/main.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
