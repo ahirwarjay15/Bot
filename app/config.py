@@ -1,6 +1,6 @@
 """Validated environment configuration; secrets belong in .env, never Git."""
 from functools import lru_cache
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     owner_id: int = Field(validation_alias="OWNER_ID", gt=0)
     mongodb_uri: SecretStr = Field(validation_alias="MONGODB_URI")
     mongodb_db_name: str = Field(default="file_bot", validation_alias="MONGODB_DB_NAME")
-    source_channel_id: int | None = Field(default=None, validation_alias="SOURCE_CHANNEL_ID")
+    source_channel_id: int | None = Field(default=None, validation_alias=AliasChoices("SOURCE_CHANNEL_ID", "DB_CHANNEL_ID"))
     force_join_channels: list[str] = Field(default_factory=list, validation_alias="FORCE_JOIN_CHANNELS")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
 
