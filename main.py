@@ -1,5 +1,6 @@
 """Application entry point."""
-import asyncio,logging,sys
+import asyncio,logging,sys,os
+from aiohttp import web
 from aiogram import Bot,Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -15,6 +16,20 @@ from app.handlers.shortener import router as shortener_router
 from app.handlers.misc import router as misc_router
 from app.services.delivery import run_task_worker, run_batch_delivery_worker
 
+async def health(_request):
+    return web.json_response({"status": "ok", "service": "Titania"})
+
+async def start_health_server():
+    app = web.Application()
+    app.router.add_get("/", health)
+    app.router.add_get("/health", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", "10000")))
+    await site.start()
+    logging.getLogger(__name__).info("Health endpoint started")
+    return runner
+
 async def supervise_worker(worker, *args, name: str, restart_delay: float = 5.0):
     """Restart a background worker after an unexpected exception."""
     log = logging.getLogger(__name__)
@@ -28,10 +43,10 @@ async def supervise_worker(worker, *args, name: str, restart_delay: float = 5.0)
             log.exception("Background worker %s crashed; restarting in %.1f seconds", name, restart_delay)
         await asyncio.sleep(restart_delay)
 
-
 async def main():
     settings=get_settings()
     logging.basicConfig(level=getattr(logging,settings.log_level.upper(),logging.INFO),format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",stream=sys.stdout)
+    health_runner = await start_health_server()
     # Do not set a global parse mode: custom messages may contain arbitrary user text.
     bot=Bot(token=settings.bot_token.get_secret_value(),default=DefaultBotProperties(link_preview_is_disabled=True))
     database=Database(settings);worker=None;batch_worker=None;broadcast_worker=None;delivery_worker=None;join_request_cleanup_worker=None
@@ -58,7 +73,7 @@ async def main():
                     pass
                 except Exception:
                     logging.getLogger(__name__).exception("Background worker exited with an error during shutdown")
-        await database.close();await bot.session.close()
+        await database.close();await bot.session.close();await health_runner.cleanup()
 
 if __name__=="__main__":
     try:asyncio.run(main())
