@@ -671,10 +671,13 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
     url3 = cfg.get("button3_url", "")
     label3 = cfg.get("button3_text", "")
     parsed3 = urlparse(url3)
+    button3 = None
     if cfg.get("button3_enabled", False) and label3 and parsed3.scheme in ("http", "https") and parsed3.netloc:
-        configured_buttons.append(InlineKeyboardButton(text=label3, url=url3))
+        button3 = InlineKeyboardButton(text=label3, url=url3)
     if configured_buttons:
         rows.append(configured_buttons)
+    if button3:
+        rows.append([button3])
     if cfg.get("about_enabled", True):
         rows.append([InlineKeyboardButton(text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="start:about")])
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
