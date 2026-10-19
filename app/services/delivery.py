@@ -243,13 +243,24 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                     if doc.get("notice_entities") is not None:
                         notice_cfg["notice_entities"] = doc.get("notice_entities")
                     notice_text, notice_entities, custom_format = format_notice(notice_cfg, int(doc["minutes"]))
+                    notice_buttons = [
+                        InlineKeyboardButton(text=str(doc.get(f"button{i}_text", "")), url=str(doc.get(f"button{i}_url", "")))
+                        for i in (1, 2)
+                        if doc.get(f"button{i}_enabled", False)
+                        and doc.get(f"button{i}_text") and doc.get(f"button{i}_url")
+                        and str(doc.get(f"button{i}_url", "")).startswith(("http://", "https://"))
+                    ]
+                    notice_markup = InlineKeyboardMarkup(inline_keyboard=[notice_buttons]) if notice_buttons else None
                     if custom_format:
                         alert = await bot.send_message(
-                            doc["user_id"], notice_text, entities=notice_entities, parse_mode=None
+                            doc["user_id"], notice_text, entities=notice_entities, parse_mode=None,
+                            reply_markup=notice_markup,
                         )
                     else:
                         # Legacy/default notices use the built-in HTML template.
-                        alert = await bot.send_message(doc["user_id"], notice_text, parse_mode="HTML")
+                        alert = await bot.send_message(
+                            doc["user_id"], notice_text, parse_mode="HTML", reply_markup=notice_markup
+                        )
                     await db.batch_deliveries.update_one(
                         {"request_key": request_key, "status": "processing"},
                         {"$set": {"alert_status": "sent", "alert_message_id": alert.message_id, "alert_sent_at": _now()}},
@@ -310,6 +321,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
             "next_index": 0, "delivered_message_ids": [], "failed_count": 0,
             "auto_delete": bool(auto), "minutes": _minutes(auto) if auto else None,
             "notice": (auto or {}).get("notice", DEFAULT_NOTICE),
+            **({key: auto[key] for key in ("button1_text", "button1_url", "button1_enabled", "button2_text", "button2_url", "button2_enabled") if key in auto} if auto else {}),
             **({"notice_entities": auto["notice_entities"]} if auto and auto.get("notice_entities") is not None else {}),
             "deadline": None,
             "alert_status": "pending", "deeplink": deeplink, "status": "processing",
