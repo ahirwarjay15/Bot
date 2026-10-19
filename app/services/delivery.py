@@ -53,12 +53,12 @@ async def finish_delivery_request(db, request_key: str, success: bool):
 
 
 def _minutes(cfg):
-    allowed = (2, 5, 15, 30, 60, 180, 360, 720, 1440)
+    allowed = (2, 5, 10, 15, 30, 60, 180, 360, 720, 1440)
     try:
-        value = int((cfg or {}).get("minutes", 30))
+        value = int((cfg or {}).get("minutes", 10))
     except (TypeError, ValueError):
-        return 30
-    return value if value in allowed else 30
+        return 10
+    return value if value in allowed else 10
 
 
 def format_notice(cfg, minutes, default_notice=DEFAULT_NOTICE):
@@ -69,7 +69,7 @@ def format_notice(cfg, minutes, default_notice=DEFAULT_NOTICE):
         hours = minutes // 60
         label = f"{hours} hour" if hours == 1 else f"{hours} hours"
     elif minutes < 60:
-        label = f"{minutes} minutes"
+        label = f"{minutes} ᴍɪɴᴜᴛᴇs"
     else:
         label = f"{minutes // 60}h {minutes % 60}m"
     marker = "{auto_delete_time}"
