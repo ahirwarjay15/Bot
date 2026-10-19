@@ -293,8 +293,8 @@ async def test_button_panel_refresh_keeps_inline_back_navigation():
         if button.callback_data
     ]
     assert "settings:start" in callback_data
-    assert "settings:start_button_1" in callback_data
-    assert "settings:start_button_2" in callback_data
+    assert "settings:start_button_toggle:1" in callback_data
+    assert "settings:start_button_toggle:2" in callback_data
 
 
 def test_start_message_default_and_markdown_are_normalized_without_leaked_markers():

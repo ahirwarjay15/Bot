@@ -173,15 +173,9 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                 continue
             item = items[index]
             try:
-                sent = await bot.copy_message(
-                    chat_id=doc["user_id"], from_chat_id=item["source_chat_id"],
-                    message_id=item["source_message_id"],
-                )
-                # Telegram copyMessage does not copy reply_markup. Restore saved
-                # inline buttons on the copied message when the source exposed them.
+                # Prepare the keyboard before copying so the file and its buttons
+                # arrive in one Telegram API request (instead of copy + edit).
                 markup_data = item.get("reply_markup")
-                # Original per-file buttons always win. Custom buttons are a
-                # fallback only for files whose saved source has no buttons.
                 has_original_buttons = item.get(
                     "original_has_buttons", bool(markup_data)
                 )
@@ -197,16 +191,17 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                         markup_data = InlineKeyboardMarkup(inline_keyboard=[valid_buttons]).model_dump(
                             mode="json", exclude_none=True
                         )
+                markup = None
                 if markup_data:
                     try:
                         markup = InlineKeyboardMarkup.model_validate(markup_data)
-                        await bot.edit_message_reply_markup(
-                            chat_id=doc["user_id"], message_id=sent.message_id,
-                            reply_markup=markup,
-                        )
-                    except (TelegramAPIError, ValueError, TypeError):
-                        log.warning("Could not restore/customize inline buttons for source message %s",
+                    except (ValueError, TypeError):
+                        log.warning("Invalid inline buttons for source message %s",
                                     item["source_message_id"], exc_info=True)
+                sent = await bot.copy_message(
+                    chat_id=doc["user_id"], from_chat_id=item["source_chat_id"],
+                    message_id=item["source_message_id"], reply_markup=markup,
+                )
                 deadline = doc.get("deadline")
                 if doc.get("auto_delete") and deadline is None:
                     deadline = _now() + timedelta(minutes=int(doc["minutes"]))

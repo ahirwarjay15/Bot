@@ -47,11 +47,21 @@ async def file_command(message:Message,state:FSMContext,settings:Settings,databa
         await message.answer(f"Storage channel check failed. {reason}")
         return
     await state.set_state(FileStates.waiting_for_message)
-    await message.answer("Send me the files you want to store. or use /cancel to stop.")
+    prompt = await message.answer("Send me the files you want to store. or use /cancel to stop.")
+    await state.update_data(prompt_message_id=prompt.message_id, prompt_chat_id=prompt.chat.id)
 
 @router.message(FileStates.waiting_for_message,Command("cancel"))
 async def cancel_file(message:Message,state:FSMContext):
-    await state.clear();await message.answer("File link creation cancelled.")
+    data = await state.get_data()
+    await state.clear()
+    prompt_message_id = data.get("prompt_message_id")
+    prompt_chat_id = data.get("prompt_chat_id")
+    if prompt_message_id and prompt_chat_id:
+        try:
+            await message.bot.delete_message(chat_id=prompt_chat_id, message_id=prompt_message_id)
+        except TelegramAPIError:
+            log.debug("Could not delete file prompt on cancellation", exc_info=True)
+    await message.answer("File link creation cancelled.")
 
 @router.message(FileStates.waiting_for_message,F.text.startswith("/"))
 async def waiting_command(message:Message,state:FSMContext):
@@ -63,6 +73,7 @@ async def waiting_command(message:Message,state:FSMContext):
 @router.message(FileStates.waiting_for_message)
 async def receive_file(message:Message,state:FSMContext,settings:Settings,database):
     if not message.from_user:return
+    state_data = await state.get_data()
     try:
         # If the user forwarded a post from the configured storage channel, reuse
         # its original channel message ID instead of trying to copy the forwarded
@@ -101,6 +112,14 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])
         await message.answer(link, reply_markup=keyboard)
+        # Remove the collection prompt only after the deeplink has been delivered.
+        prompt_message_id = state_data.get("prompt_message_id")
+        prompt_chat_id = state_data.get("prompt_chat_id")
+        if prompt_message_id and prompt_chat_id:
+            try:
+                await message.bot.delete_message(chat_id=prompt_chat_id, message_id=prompt_message_id)
+            except TelegramAPIError:
+                log.warning("Could not delete file collection prompt after sending deeplink", exc_info=True)
         # Delete the submitted message after its storage copy and link are saved.
         try:
             await message.delete()

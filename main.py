@@ -1,9 +1,14 @@
-"""Application entry point."""
-import asyncio,logging,sys,os
+"""Application entry point and service lifecycle."""
+import asyncio
+import logging
+import os
+import sys
+
 from aiohttp import web
-from aiogram import Bot,Dispatcher
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
+
 from app.config import get_settings
 from app.database.connection import Database
 from app.handlers.start import router as start_router, run_pending_join_request_cleanup_worker
@@ -16,8 +21,16 @@ from app.handlers.shortener import router as shortener_router
 from app.handlers.misc import router as misc_router
 from app.services.delivery import run_task_worker, run_batch_delivery_worker
 
+SERVICE_READY = False
+log = logging.getLogger(__name__)
+
+
 async def health(_request):
+    """Report readiness, not merely that the HTTP listener is alive."""
+    if not SERVICE_READY:
+        return web.json_response({"status": "starting", "service": "Titania"}, status=503)
     return web.json_response({"status": "ok", "service": "Titania"})
+
 
 async def start_health_server():
     app = web.Application()
@@ -27,12 +40,27 @@ async def start_health_server():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", "10000")))
     await site.start()
-    logging.getLogger(__name__).info("Health endpoint started")
+    log.info("Health endpoint started on port %s", os.getenv("PORT", "10000"))
     return runner
+
+
+async def connect_database_with_retry(database, *, initial_delay: float = 5.0, max_delay: float = 60.0):
+    """Retry transient database outages with bounded exponential backoff."""
+    delay = initial_delay
+    while True:
+        try:
+            await database.connect()
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("MongoDB unavailable; retrying in %.1f seconds", delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, max_delay)
+
 
 async def supervise_worker(worker, *args, name: str, restart_delay: float = 5.0):
     """Restart a background worker after an unexpected exception."""
-    log = logging.getLogger(__name__)
     while True:
         try:
             await worker(*args)
@@ -43,38 +71,76 @@ async def supervise_worker(worker, *args, name: str, restart_delay: float = 5.0)
             log.exception("Background worker %s crashed; restarting in %.1f seconds", name, restart_delay)
         await asyncio.sleep(restart_delay)
 
-async def main():
-    settings=get_settings()
-    logging.basicConfig(level=getattr(logging,settings.log_level.upper(),logging.INFO),format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",stream=sys.stdout)
-    health_runner = await start_health_server()
-    # Do not set a global parse mode: custom messages may contain arbitrary user text.
-    bot=Bot(token=settings.bot_token.get_secret_value(),default=DefaultBotProperties(link_preview_is_disabled=True))
-    database=Database(settings);worker=None;batch_worker=None;broadcast_worker=None;delivery_worker=None;join_request_cleanup_worker=None
-    try:
-        await database.connect()
-        dp=Dispatcher(storage=MemoryStorage());dp["settings"]=settings;dp["database"]=database
-        # Keep the catch-all invalid-post handler last so file, batch, and settings handlers can process their own messages first.
-        for r in (start_router,file_router,batch_router,admin_router,settings_router,broadcast_router,shortener_router,misc_router):dp.include_router(r)
-        await bot.delete_webhook(drop_pending_updates=False)
-        worker=asyncio.create_task(supervise_worker(run_task_worker, bot, database.db, name="delivery-task-worker"),name="delivery-task-worker")
-        batch_worker=asyncio.create_task(supervise_worker(run_batch_session_worker, bot, database.db, name="batch-session-worker"),name="batch-session-worker")
-        delivery_worker=asyncio.create_task(supervise_worker(run_batch_delivery_worker, bot, database.db, name="batch-delivery-worker"),name="batch-delivery-worker")
-        broadcast_worker=asyncio.create_task(supervise_worker(run_broadcast_worker, bot, database.db, name="broadcast-worker"),name="broadcast-worker")
-        join_request_cleanup_worker=asyncio.create_task(supervise_worker(run_pending_join_request_cleanup_worker, database.db, name="pending-join-request-cleanup-worker"),name="pending-join-request-cleanup-worker")
-        logging.getLogger(__name__).info("Polling started")
-        await dp.start_polling(bot,allowed_updates=dp.resolve_used_update_types())
-    finally:
-        for task in (worker, batch_worker, broadcast_worker, delivery_worker, join_request_cleanup_worker):
-            if task:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    logging.getLogger(__name__).exception("Background worker exited with an error during shutdown")
-        await database.close();await bot.session.close();await health_runner.cleanup()
 
-if __name__=="__main__":
-    try:asyncio.run(main())
-    except (KeyboardInterrupt,SystemExit):pass
+async def main():
+    global SERVICE_READY
+    # Configure a minimal logger before configuration validation so startup
+    # failures are visible even when environment variables are missing.
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        stream=sys.stdout,
+    )
+    health_runner = await start_health_server()
+    bot = None
+    database = None
+    tasks = []
+    try:
+        settings = get_settings()
+        logging.getLogger().setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+        # Do not set a global parse mode: custom messages may contain arbitrary user text.
+        bot = Bot(
+            token=settings.bot_token.get_secret_value(),
+            default=DefaultBotProperties(link_preview_is_disabled=True),
+        )
+        database = Database(settings)
+        await connect_database_with_retry(database)
+
+        dp = Dispatcher(storage=MemoryStorage())
+        dp["settings"] = settings
+        dp["database"] = database
+        # Keep the catch-all invalid-post handler last so other handlers run first.
+        for router in (
+            start_router, file_router, batch_router, admin_router,
+            settings_router, broadcast_router, shortener_router, misc_router,
+        ):
+            dp.include_router(router)
+
+        await bot.delete_webhook(drop_pending_updates=False)
+        workers = (
+            (run_task_worker, (bot, database.db), "delivery-task-worker"),
+            (run_batch_session_worker, (bot, database.db), "batch-session-worker"),
+            (run_batch_delivery_worker, (bot, database.db), "batch-delivery-worker"),
+            (run_broadcast_worker, (bot, database.db), "broadcast-worker"),
+            (run_pending_join_request_cleanup_worker, (database.db,), "pending-join-request-cleanup-worker"),
+        )
+        for worker, args, name in workers:
+            tasks.append(asyncio.create_task(
+                supervise_worker(worker, *args, name=name),
+                name=name,
+            ))
+
+        SERVICE_READY = True
+        log.info("Titania is ready; polling started")
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    finally:
+        SERVICE_READY = False
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+                    log.error("Background worker exited with an error during shutdown: %r", result)
+        if database is not None:
+            await database.close()
+        if bot is not None:
+            await bot.session.close()
+        await health_runner.cleanup()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
