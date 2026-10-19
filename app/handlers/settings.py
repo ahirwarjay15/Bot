@@ -157,7 +157,13 @@ def custom_button_settings_rows(buttons):
 
 def kb(rows):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=unicode_buttons(label), callback_data=data) for label, data in row]
+        [
+            InlineKeyboardButton(
+                text=str(label) if str(data).startswith("settings:forcejoin_channel:") else unicode_buttons(label),
+                callback_data=data,
+            )
+            for label, data in row
+        ]
         for row in rows
     ])
 
