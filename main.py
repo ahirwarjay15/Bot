@@ -131,7 +131,7 @@ async def main():
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for result in results:
                 if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
-                    log.error("Background worker exited with an error during shutdown", exc_info=result)
+                    log.error("Background worker exited with an error during shutdown: %r", result)
         if database is not None:
             await database.close()
         if bot is not None:
