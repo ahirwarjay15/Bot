@@ -119,17 +119,8 @@ async def _mark_verified(db, user_id: int, channels: list[str]):
     )
 
 def force_join_button_label(channel_cfg: dict, position: int) -> str:
-    """Keep channel-name labels in the exact Telegram casing, including legacy small caps."""
-    import unicodedata
-
-    channel_title = str(channel_cfg.get("channel_title") or "").strip()
+    """Use a saved custom label or number the visible missing-channel list."""
     custom = str(channel_cfg.get("button_text") or "").strip()
-    if channel_title and (
-        not custom
-        or unicodedata.normalize("NFKD", custom).casefold()
-        == unicodedata.normalize("NFKD", channel_title).casefold()
-    ):
-        return channel_title[:64]
     return (custom or f"Join {position}")[:64]
 
 
