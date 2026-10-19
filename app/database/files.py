@@ -16,14 +16,16 @@ class FileRepository:
 
     async def reserve_code(self, length: int, kind: str) -> str:
         """Reserve a random alphanumeric code permanently, even if a session is abandoned."""
-        if length not in (10, 15):
-            raise ValueError("Deeplink codes must be 10 or 15 characters")
+        if length not in (10, 15, 20):
+            raise ValueError("Deeplink codes must be 10, 15, or 20 characters")
         for _ in range(100):
             code = "".join(choice(_CODE_ALPHABET) for _ in range(length))
             # Prevent collisions with links created before the permanent registry existed.
             if await self.db.files.find_one({"file_key": code}, {"_id": 1}):
                 continue
             if await self.db.batches.find_one({"batch_id": code}, {"_id": 1}):
+                continue
+            if await self.db.batch_sessions.find_one({"batch_id": code}, {"_id": 1}):
                 continue
             try:
                 await self.db.deeplink_codes.insert_one({
@@ -42,7 +44,7 @@ class FileRepository:
         original_has_buttons: bool = False,
     ) -> dict:
         for _ in range(8):
-            key = await self.reserve_code(10, "file")
+            key = await self.reserve_code(20, "file")
             doc = {
                 "file_key": key, "source_chat_id": source_chat_id,
                 "source_message_id": source_message_id, "created_by": created_by,
@@ -78,7 +80,7 @@ class FileRepository:
             )
             return await self.db.batches.find_one({"batch_id": batch_id, "kind": "batch"})
         for _ in range(8):
-            key = await self.reserve_code(15, "batch")
+            key = await self.reserve_code(20, "batch")
             doc = {
                 "batch_id": key, "items": items, "created_by": created_by,
                 "created_at": _now(), "kind": "batch",
