@@ -82,10 +82,13 @@ def _invalid_markup(cfg):
         configured_buttons.append(InlineKeyboardButton(text=button2_text, url=button2_url))
     button3_text = cfg.get("button3_text", "")
     button3_url = cfg.get("button3_url", "")
+    button3 = None
     if cfg.get("button3_enabled", False) and button3_text and button3_url:
-        configured_buttons.append(InlineKeyboardButton(text=button3_text, url=button3_url))
+        button3 = InlineKeyboardButton(text=button3_text, url=button3_url)
     if configured_buttons:
         rows.append(configured_buttons)
+    if button3:
+        rows.append([button3])
     if cfg.get("about_enabled"):
         rows.append([InlineKeyboardButton(
             text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="invalid:about"

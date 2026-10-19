@@ -604,10 +604,13 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         button3_url = cfg.get("button3_url", "")
         button3_text = cfg.get("button3_text", "")
         parsed3 = urlparse(button3_url)
+        button3 = None
         if cfg.get("button3_enabled", False) and button3_text and parsed3.scheme in ("http", "https") and parsed3.netloc:
-            configured_buttons.append(InlineKeyboardButton(text=button3_text, url=button3_url))
+            button3 = InlineKeyboardButton(text=button3_text, url=button3_url)
         if configured_buttons:
             rows.append(configured_buttons)
+        if button3:
+            rows.append([button3])
         if cfg.get("about_enabled", True):
             rows.append([InlineKeyboardButton(text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="start:about")])
         markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
