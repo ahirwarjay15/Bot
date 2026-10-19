@@ -499,11 +499,42 @@ async def render_auto_time(query, db):
 
 async def render_auto_message(query, db):
     cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
-    await edit_page(query, "AUTO DELETE MESSAGE\nCustomize the message sent after file delivery.", kb([
+    await edit_page(query, "AUTO DELETE MESSAGE\nCustomize the message and buttons sent after file delivery.", kb([
         [("EDIT", "settings:auto_message_edit"), ("SEE", "settings:auto_message_see")],
-        [("DEFAULT", "settings:auto_message_default")],
+        [("BUTTONS", "settings:auto_buttons"), ("DEFAULT", "settings:auto_message_default")],
         [("《 BACK", "settings:auto")],
     ]))
+
+
+async def render_auto_buttons(query, db):
+    cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
+    status1 = "ON ✅" if cfg.get("button1_enabled", False) else "OFF ❌"
+    status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
+    await edit_page(query, f"AUTO DELETE MESSAGE BUTTONS\nCustomize the two buttons shown with the auto-delete notice.\n\nButton 1: {status1}\nButton 2: {status2}", kb([
+        [(f"1 {status1}", "settings:auto_button_toggle:1"), (f"2 {status2}", "settings:auto_button_toggle:2")],
+        [("《 BACK", "settings:auto_message")],
+    ]))
+
+
+async def refresh_auto_button_panel(bot, chat_id, message_id, db):
+    if not chat_id or not message_id:
+        return
+    cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
+    status1 = "ON ✅" if cfg.get("button1_enabled", False) else "OFF ❌"
+    status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text=format_settings_page(f"AUTO DELETE MESSAGE BUTTONS\nCustomize the two buttons shown with the auto-delete notice.\n\nButton 1: {status1}\nButton 2: {status2}"),
+            parse_mode="HTML",
+            reply_markup=kb([
+                [(f"1 {status1}", "settings:auto_button_toggle:1"), (f"2 {status2}", "settings:auto_button_toggle:2")],
+                [("《 BACK", "settings:auto_message")],
+            ]),
+            link_preview_options={"is_disabled": True},
+        )
+    except TelegramAPIError:
+        pass
 
 async def render_after(query, db):
     auto = await db.settings.find_one({"key": "auto_delete"}) or {}
@@ -638,7 +669,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     await remove_input_prompt(query.bot, pending)
     await state.update_data(temporary_prompt_ids=[], input_prompt_chat_id=None, input_prompt_message_id=None)
     if action in {"home", "home_back", "start", "start_text", "start_button", "start_poster", "start_about",
-                  "auto", "auto_time", "auto_message", "after", "after_text", "invalid", "invalid_text",
+                  "auto", "auto_time", "auto_message", "auto_buttons", "after", "after_text", "invalid", "invalid_text",
                   "invalid_button", "invalid_poster", "invalid_about", "forcejoin", "forcejoin_add",
                   "forcejoin_message", "forcejoin_media", "forcejoin_animation", "animation_mode",
                   "mods", "shortener", "custom_button"}:
@@ -883,6 +914,19 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await patch(db, "auto_delete", {"minutes": next_value}, {"enabled": False, "notice": DEFAULT_NOTICE})
         await render_auto_time(query, db)
     elif action == "auto_message": await render_auto_message(query, db)
+    elif action == "auto_buttons": await render_auto_buttons(query, db)
+    elif action.startswith("auto_button_toggle:"):
+        index = action.rsplit(":", 1)[1]
+        cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
+        key = f"button{index}_enabled"
+        if cfg.get(key, False):
+            await patch(db, "auto_delete", {key: False}, {"enabled": False, "minutes": 30, "notice": DEFAULT_NOTICE})
+            await render_auto_buttons(query, db)
+        else:
+            await state.set_state(SettingInput.waiting)
+            await state.update_data(field=f"auto_button_{index}_text", button_index=index, panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="auto")
+            if query.message:
+                await tracked_answer(query.message, state, f"Send text for Auto Delete Button {index}.")
     elif action == "auto_message_edit":
         await state.set_state(SettingInput.waiting); await state.update_data(field="auto_notice")
         if query.message: await tracked_answer(query.message, state, "Send your new auto-delete message. Use {auto_delete_time} to insert the timer.")
@@ -1507,6 +1551,22 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await clear_state_preserving_prompts(state); await tracked_answer(message, state, "✨ Invalid-post poster updated successfully."); return
     if not value:
         await tracked_answer(message, state, "Please send a non-empty value.")
+        return
+    if field.startswith("auto_button_") and field.endswith("_text"):
+        index = field.split("_")[2]
+        await state.update_data(button_text=value, field=f"auto_button_{index}_link")
+        await tracked_answer(message, state, f"Now send the URL for Auto Delete Button {index}.")
+        return
+    if field.startswith("auto_button_") and field.endswith("_link"):
+        normalized_url = normalize_http_url(value)
+        if not normalized_url:
+            await tracked_answer(message, state, "Button link must be a valid URL, e.g. example.com, t.me/channel, @channel, or https://example.com.")
+            return
+        index = field.split("_")[2]
+        prev = await state.get_data()
+        await patch(db, "auto_delete", {f"button{index}_text": prev.get("button_text", ""), f"button{index}_url": normalized_url, f"button{index}_enabled": True}, {"enabled": False, "minutes": 30, "notice": DEFAULT_NOTICE})
+        await refresh_auto_button_panel(message.bot, prev.get("panel_chat_id"), prev.get("panel_message_id"), db)
+        await clear_state_preserving_prompts(state)
         return
     if field.startswith("start_button_") and field.endswith("_text"):
         index = field.split("_")[2]
