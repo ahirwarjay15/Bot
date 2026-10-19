@@ -143,8 +143,8 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
             {"_id": existing["_id"]},
             {"$set": {"status": "collecting", "last_activity_ts": time.time(), "last_activity_at": _now()}},
         )
-        if not existing.get("batch_id") or len(str(existing.get("batch_id", ""))) != 15:
-            batch_id = await FileRepository(database.db).reserve_code(15, "batch")
+        if not existing.get("batch_id") or len(str(existing.get("batch_id", ""))) != 20:
+            batch_id = await FileRepository(database.db).reserve_code(20, "batch")
             await database.db.batch_sessions.update_one(
                 {"_id": existing["_id"]},
                 {"$set": {"batch_id": batch_id}},
@@ -157,7 +157,7 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
         return
     if existing:
         await _expire_session(database.db, uid)
-    batch_id = await FileRepository(database.db).reserve_code(15, "batch")
+    batch_id = await FileRepository(database.db).reserve_code(20, "batch")
     await database.db.batch_sessions.update_one(
         {"admin_id": uid},
         {"$set": {"admin_id": uid, "items": [], "status": "collecting",
