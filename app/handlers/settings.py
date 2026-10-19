@@ -55,7 +55,7 @@ def unicode_buttons(value: str) -> str:
         "Y": "ʏ", "Z": "ᴢ",
     })
     return "".join(ch.translate(table) if ch.isascii() and ch.isalpha() else ch for ch in str(value))
-AUTO_DELETE_MINUTES = (2, 5, 15, 30, 60, 180, 360, 720, 1440)
+AUTO_DELETE_MINUTES = (2, 5, 10, 15, 30, 60, 180, 360, 720, 1440)
 DEFAULT_NOTICE = "<b>⚠️ Cᴏᴘʏʀɪɢʜᴛ Nᴏᴛɪᴄᴇ..</b>\n<blockquote>Yᴏᴜʀ ғɪʟᴇs ᴡɪʟʟ ʙᴇ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪɴ {auto_delete_time}.</blockquote>\n<blockquote>ᴘʟᴇᴀsᴇ ғᴏʀᴡᴀʀᴅ ᴏʀ sᴀᴠᴇ ʏᴏᴜʀ ғɪʟᴇs sᴏᴍᴇᴡʜᴇʀᴇ sᴀғᴇ sᴏ ʏᴏᴜ ᴄᴀɴ ᴀᴄᴄᴇss ᴛʜᴇᴍ ᴀɴʏᴛɪᴍᴇ!</blockquote>"
 DEFAULT_START_TEXT = "<b>Hey {user_mention}✨</b>\n\n<i>Welcome to the fastest and most secure file store bot!</i>"
 DEFAULT_AFTER_TEXT = "Yᴏᴜʀ Vɪᴅᴇᴏ / Fɪʟᴇ Iꜱ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ Dᴇʟᴇᴛᴇᴅ ✅"
@@ -142,7 +142,7 @@ def time_words(minutes: int) -> str:
     if minutes >= 60 and minutes % 60 == 0:
         hours = minutes // 60
         return f"{hours} hour" if hours == 1 else f"{hours} hours"
-    return f"{minutes} minutes"
+    return f"{minutes} ᴍɪɴᴜᴛᴇs"
 
 def custom_button_settings_rows(buttons):
     """Render at most two configured custom buttons, one per row with its remove control."""
@@ -478,7 +478,7 @@ async def render_animation(query, db):
 async def render_auto(query, db):
     cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
     after = await db.settings.find_one({"key": "after_delete"}) or {}
-    minutes = int(cfg.get("minutes", 30))
+    minutes = int(cfg.get("minutes", 10))
     status = "ENABLED ✅" if cfg.get("enabled", False) else "DISABLED ❌"
     after_status = "ENABLED ✅" if after.get("enabled", False) and cfg.get("enabled", False) else "DISABLED ❌"
     await edit_page(query, f"AUTO DELETE\nAutomatically delete delivered files and the auto-delete message after {time_label(minutes)}.\nStatus: {status}", kb([
@@ -490,7 +490,7 @@ async def render_auto(query, db):
 
 async def render_auto_time(query, db):
     cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
-    minutes = int(cfg.get("minutes", 30))
+    minutes = int(cfg.get("minutes", 10))
     label = time_label(minutes)
     await edit_page(query, f"AUTO DELETE TIME\nCurrent time: {label}\nTap below to change the auto-delete time.", kb([
         [("CHANGE TIME", "settings:auto_time_change")],
@@ -898,7 +898,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "auto_toggle":
         cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
         turning_on = not cfg.get("enabled", False)
-        await patch(db, "auto_delete", {"enabled": turning_on}, {"minutes": 30, "notice": DEFAULT_NOTICE})
+        await patch(db, "auto_delete", {"enabled": turning_on}, {"minutes": 10, "notice": DEFAULT_NOTICE})
         if not turning_on:
             await patch(db, "after_delete", {"enabled": False}, {"text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON})
             await db.tasks.update_many(
@@ -909,7 +909,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "auto_time": await render_auto_time(query, db)
     elif action == "auto_time_change":
         cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
-        current = int(cfg.get("minutes", 30))
+        current = int(cfg.get("minutes", 10))
         next_value = AUTO_DELETE_MINUTES[(AUTO_DELETE_MINUTES.index(current) + 1) % len(AUTO_DELETE_MINUTES)] if current in AUTO_DELETE_MINUTES else 2
         await patch(db, "auto_delete", {"minutes": next_value}, {"enabled": False, "notice": DEFAULT_NOTICE})
         await render_auto_time(query, db)
@@ -920,7 +920,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
         key = f"button{index}_enabled"
         if cfg.get(key, False):
-            await patch(db, "auto_delete", {key: False}, {"enabled": False, "minutes": 30, "notice": DEFAULT_NOTICE})
+            await patch(db, "auto_delete", {key: False}, {"enabled": False, "minutes": 10, "notice": DEFAULT_NOTICE})
             await render_auto_buttons(query, db)
         else:
             await state.set_state(SettingInput.waiting)
@@ -935,19 +935,19 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         from html import unescape
         cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
         from app.services.delivery import format_notice
-        saved, _, is_custom = format_notice(cfg, int(cfg.get("minutes", 30)), default_notice=DEFAULT_NOTICE)
+        saved, _, is_custom = format_notice(cfg, int(cfg.get("minutes", 10)), default_notice=DEFAULT_NOTICE)
         # Match Start Message SEE: Telegram popup alerts are plain text and
         # have a short length limit, so strip formatting tags and show preview there.
         preview = unescape(re.sub(r"</?[^>]+>", "", str(saved)))
         await query.answer(preview[:190], show_alert=True)
         return
     elif action == "auto_message_default":
-        await patch(db, "auto_delete", {"notice": DEFAULT_NOTICE}, {"enabled": False, "minutes": 30})
+        await patch(db, "auto_delete", {"notice": DEFAULT_NOTICE}, {"enabled": False, "minutes": 10})
         await db.settings.update_one({"key": "auto_delete"}, {"$unset": {"notice_entities": ""}})
         cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
         import re
         from html import unescape
-        default_text = DEFAULT_NOTICE.replace("{auto_delete_time}", time_words(int(cfg.get("minutes", 30))))
+        default_text = DEFAULT_NOTICE.replace("{auto_delete_time}", time_words(int(cfg.get("minutes", 10))))
         preview = unescape(re.sub(r"</?[^>]+>", "", default_text))
         # Match Start Message DEFAULT: show the restored default in the popup.
         await query.answer("✅ Default successfully set!\n\n" + preview[:145], show_alert=True)
@@ -1564,7 +1564,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             return
         index = field.split("_")[2]
         prev = await state.get_data()
-        await patch(db, "auto_delete", {f"button{index}_text": prev.get("button_text", ""), f"button{index}_url": normalized_url, f"button{index}_enabled": True}, {"enabled": False, "minutes": 30, "notice": DEFAULT_NOTICE})
+        await patch(db, "auto_delete", {f"button{index}_text": prev.get("button_text", ""), f"button{index}_url": normalized_url, f"button{index}_enabled": True}, {"enabled": False, "minutes": 10, "notice": DEFAULT_NOTICE})
         await refresh_auto_button_panel(message.bot, prev.get("panel_chat_id"), prev.get("panel_message_id"), db)
         await clear_state_preserving_prompts(state)
         return
@@ -1631,7 +1631,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await patch(
             db, "auto_delete",
             {"notice": notice_text, "notice_entities": notice_entities},
-            {"enabled": False, "minutes": 30},
+            {"enabled": False, "minutes": 10},
         )
         await tracked_answer(message, state, "✨ Auto-delete message updated successfully.")
     elif field == "after_text_message":
@@ -1742,7 +1742,7 @@ async def setautodelete(m: Message, settings: Settings, database):
     p=(m.text or "").split(maxsplit=1)
     if len(p)!=2 or p[1].lower() not in ("on","off"): await m.answer("Usage: /setautodelete on|off"); return
     turning_on = p[1].lower() == "on"
-    await patch(database.db, "auto_delete", {"enabled": turning_on}, {"minutes": 30, "notice": DEFAULT_NOTICE})
+    await patch(database.db, "auto_delete", {"enabled": turning_on}, {"minutes": 10, "notice": DEFAULT_NOTICE})
     if not turning_on:
         await patch(database.db, "after_delete", {"enabled": False}, {"text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON})
         await database.db.tasks.update_many(
@@ -1756,7 +1756,7 @@ async def setautodeletemin(m: Message, settings: Settings, database):
     if not await allowed(m, settings, database): return
     p=(m.text or "").split()
     if len(p)!=2 or not p[1].isdigit() or int(p[1]) not in AUTO_DELETE_MINUTES:
-        await m.answer("Choose one: 2, 5, 15, 30, 60, 180, 360, 720, or 1440 minutes."); return
+        await m.answer("Choose one: 2, 5, 10, 15, 30, 60, 180, 360, 720, or 1440 minutes."); return
     await patch(database.db, "auto_delete", {"minutes":int(p[1])}, {"enabled":False,"notice":DEFAULT_NOTICE})
     await m.answer(f"✨ Auto-delete time changed to {time_label(int(p[1]))}.")
 
@@ -1765,7 +1765,7 @@ async def setnotice(m: Message, settings: Settings, database):
     if not await allowed(m, settings, database): return
     p=(m.text or "").split(maxsplit=1)
     if len(p)<2: await m.answer("Usage: /setnotice TEXT"); return
-    await patch(database.db, "auto_delete", {"notice":p[1]}, {"enabled":False,"minutes":30})
+    await patch(database.db, "auto_delete", {"notice":p[1]}, {"enabled":False,"minutes":10})
     await m.answer("✨ Auto-delete message updated successfully.")
 
 @router.message(Command("setafterdelete"))
