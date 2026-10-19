@@ -601,6 +601,11 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         parsed2 = urlparse(button2_url)
         if cfg.get("button2_enabled", False) and button2_text and parsed2.scheme in ("http", "https") and parsed2.netloc:
             configured_buttons.append(InlineKeyboardButton(text=button2_text, url=button2_url))
+        button3_url = cfg.get("button3_url", "")
+        button3_text = cfg.get("button3_text", "")
+        parsed3 = urlparse(button3_url)
+        if cfg.get("button3_enabled", False) and button3_text and parsed3.scheme in ("http", "https") and parsed3.netloc:
+            configured_buttons.append(InlineKeyboardButton(text=button3_text, url=button3_url))
         if configured_buttons:
             rows.append(configured_buttons)
         if cfg.get("about_enabled", True):
@@ -660,6 +665,11 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
     parsed2 = urlparse(url2)
     if cfg.get("button2_enabled", False) and label2 and parsed2.scheme in ("http", "https") and parsed2.netloc:
         configured_buttons.append(InlineKeyboardButton(text=label2, url=url2))
+    url3 = cfg.get("button3_url", "")
+    label3 = cfg.get("button3_text", "")
+    parsed3 = urlparse(url3)
+    if cfg.get("button3_enabled", False) and label3 and parsed3.scheme in ("http", "https") and parsed3.netloc:
+        configured_buttons.append(InlineKeyboardButton(text=label3, url=url3))
     if configured_buttons:
         rows.append(configured_buttons)
     if cfg.get("about_enabled", True):

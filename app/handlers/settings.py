@@ -382,10 +382,11 @@ async def render_start_button(query, db):
     cfg = await db.settings.find_one({"key": "start_message"}) or {}
     status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", True)) else "OFF ❌"
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
-    text = f"START MESSAGE BUTTONS\nCustomize buttons shown with your start message.\n\nButton 1: {status1}\nButton 2: {status2}"
+    status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
+    text = f"START MESSAGE BUTTONS\nCustomize buttons shown with your start message.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}"
     await edit_page(query, text, kb([
-        [(f"1 {status1}", "settings:start_button_toggle:1"), (f"2 {status2}", "settings:start_button_toggle:2")],
-        [("1 BUTTON", "settings:start_button_1"), ("2 BUTTON", "settings:start_button_2")],
+        [(f"1 {status1}", "settings:start_button_toggle:1"), (f"2 {status2}", "settings:start_button_toggle:2"), (f"3 {status3}", "settings:start_button_toggle:3")],
+        [("1 BUTTON", "settings:start_button_1"), ("2 BUTTON", "settings:start_button_2"), ("3 BUTTON", "settings:start_button_3")],
         [("《 BACK", "settings:start")],
     ]))
     return query.message
@@ -399,13 +400,14 @@ async def refresh_button_panel(bot, chat_id, message_id, db, kind):
     cfg = await db.settings.find_one({"key": "start_message" if is_start else "invalid_post"}) or {}
     status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", True) if is_start else bool(cfg.get("button_text") and cfg.get("button_url"))) else "OFF ❌"
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
+    status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     title = "START MESSAGE BUTTONS" if is_start else "INVALID POST BUTTONS"
     back = "settings:start" if is_start else "settings:invalid"
     prefix = "start" if is_start else "invalid"
-    page_text = format_settings_page(f"{title}\nCustomize buttons shown with {'your start message' if is_start else 'invalid posts'}.\n\nButton 1: {status1}\nButton 2: {status2}")
+    page_text = format_settings_page(f"{title}\nCustomize buttons shown with {'your start message' if is_start else 'invalid posts'}.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}")
     keyboard = kb([
-        [(f"1 {status1}", f"settings:{prefix}_button_toggle:1"), (f"2 {status2}", f"settings:{prefix}_button_toggle:2")],
-        [("1 BUTTON", f"settings:{prefix}_button_1"), ("2 BUTTON", f"settings:{prefix}_button_2")],
+        [(f"1 {status1}", f"settings:{prefix}_button_toggle:1"), (f"2 {status2}", f"settings:{prefix}_button_toggle:2"), (f"3 {status3}", f"settings:{prefix}_button_toggle:3")],
+        [("1 BUTTON", f"settings:{prefix}_button_1"), ("2 BUTTON", f"settings:{prefix}_button_2"), ("3 BUTTON", f"settings:{prefix}_button_3")],
         [("《 BACK", back)],
     ])
     try:
@@ -528,10 +530,11 @@ async def render_invalid_button(query, db):
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
     status1 = "ON ✅" if cfg.get("button1_enabled", bool(cfg.get("button_text") and cfg.get("button_url"))) else "OFF ❌"
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
-    text = f"INVALID POST BUTTONS\nCustomize buttons shown with invalid posts.\n\nButton 1: {status1}\nButton 2: {status2}"
+    status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
+    text = f"INVALID POST BUTTONS\nCustomize buttons shown with invalid posts.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}"
     await edit_page(query, text, kb([
-        [(f"1 {status1}", "settings:invalid_button_toggle:1"), (f"2 {status2}", "settings:invalid_button_toggle:2")],
-        [("1 BUTTON", "settings:invalid_button_1"), ("2 BUTTON", "settings:invalid_button_2")],
+        [(f"1 {status1}", "settings:invalid_button_toggle:1"), (f"2 {status2}", "settings:invalid_button_toggle:2"), (f"3 {status3}", "settings:invalid_button_toggle:3")],
+        [("1 BUTTON", "settings:invalid_button_1"), ("2 BUTTON", "settings:invalid_button_2"), ("3 BUTTON", "settings:invalid_button_3")],
         [("《 BACK", "settings:invalid")],
     ]))
     return query.message
@@ -829,7 +832,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         else:
             await patch(db, "start_message", {key: not enabled}, {"enabled": True, "text": DEFAULT_START_TEXT})
             await render_start_button(query, db)
-    elif action in ("start_button_1", "start_button_2"):
+    elif action in ("start_button_1", "start_button_2", "start_button_3"):
         index = action.rsplit("_", 1)[1]
         await state.set_state(SettingInput.waiting); await state.update_data(field=f"start_button_{index}_text", button_index=index, panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="start")
         if query.message: await tracked_answer(query.message, state, f"Send text for Start Button {index}.")
@@ -962,7 +965,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         else:
             await patch(db, "invalid_post", {key: not enabled}, {"enabled": False})
             await render_invalid_button(query, db)
-    elif action in ("invalid_button_1", "invalid_button_2"):
+    elif action in ("invalid_button_1", "invalid_button_2", "invalid_button_3"):
         index = action.rsplit("_", 1)[1]
         await state.set_state(SettingInput.waiting); await state.update_data(field=f"invalid_button_{index}_text", button_index=index, panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="invalid")
         if query.message: await tracked_answer(query.message, state, f"Send text for Invalid Button {index}.")
