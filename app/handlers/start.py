@@ -313,10 +313,14 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                         base_text: str, markup: InlineKeyboardMarkup, cfg: dict,
                         separate_message_id: int | None, animation_only: bool = False,
                         stop_event: asyncio.Event | None = None):
+    frames_enabled = cfg.get("frames_enabled", True)
+    prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
     frames = cfg.get("frames")
     if not isinstance(frames, list) or len(frames) != 3:
         frames = [".", "..", "..."]
-    prefix_value = str(cfg.get("prefix") or "Checking")
+    if not frames_enabled:
+        frames = [""]
+    prefix_value = str(cfg.get("prefix") or "Checking") if prefix_enabled else ""
     if prefix_value == "Checking..":
         prefix_value = "Checking"
     try:
@@ -402,18 +406,22 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
 async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: Message,
                                 base_text: str, markup: InlineKeyboardMarkup, cfg: dict,
                                 animation_only: bool = False):
-    if not cfg.get("enabled") or not cfg.get("frames_enabled", True):
+    if not cfg.get("enabled") or not (cfg.get("frames_enabled", True) or cfg.get("prefix_enabled", bool(cfg.get("prefix")))):
         return
     await _cancel_gate_animation(bot, user_id, payload)
     mode = cfg.get("mode", "force_join_poster")
     separate_id = None
     if mode == "new_message":
-        prefix_value = str(cfg.get("prefix") or "Checking")
+        prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
+        prefix_value = str(cfg.get("prefix") or "Checking") if prefix_enabled else ""
         if prefix_value == "Checking..":
             prefix_value = "Checking"
+        frames_enabled = cfg.get("frames_enabled", True)
         frames = cfg.get("frames")
         if not isinstance(frames, list) or len(frames) != 3:
             frames = [".", "..", "..."]
+        if not frames_enabled:
+            frames = [""]
         first = animation_frame_text(prefix_value, frames[0])
         try:
             animation_message = await bot.send_message(user_id, first, parse_mode="HTML")
