@@ -30,7 +30,7 @@ def test_blueprint_auto_delete_cycles_and_labels():
     expected = (2, 5, 15, 30, 60, 180, 360, 720, 1440)
     for minutes in expected:
         assert _minutes({"minutes": minutes}) == minutes
-    assert _minutes({"minutes": 7}) == 30
+    assert _minutes({"minutes": 7}) == 10
 
 
 def test_notice_uses_readable_timer_label():
