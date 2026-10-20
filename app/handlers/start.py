@@ -72,7 +72,6 @@ def animation_frame_text(prefix: str, frame: str) -> str:
 def normalize_animation_config(cfg: dict | None) -> dict:
     """Normalize legacy defaults and clamp the timer for both animation modes."""
     normalized = dict(cfg or {})
-    normalized.setdefault("prefix_enabled", True)
     legacy_default = not normalized.get("prefix") or normalized.get("prefix") == "Checking.."
     if legacy_default:
         normalized["prefix"] = "Checking"
@@ -85,7 +84,7 @@ def normalize_animation_config(cfg: dict | None) -> dict:
         speed = float(normalized.get("speed", 0.25))
     except (TypeError, ValueError):
         speed = 1.0
-    normalized["speed"] = min(1.0, max(0.25, speed))
+    normalized["speed"] = min(1.0, max(0.15, speed))
     if normalized.get("mode") not in ("force_join_poster", "new_message"):
         normalized["mode"] = "force_join_poster"
     return normalized
@@ -324,7 +323,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
         speed = float(cfg.get("speed", 0.25))
     except (TypeError, ValueError):
         speed = 1.0
-    speed = min(1.0, max(0.25, speed))
+    speed = min(1.0, max(0.15, speed))
     mode = cfg.get("mode", "force_join_poster")
     target_id = separate_message_id if mode == "new_message" else gate_message.message_id
     frame_index = 0  # The first frame is already visible.
@@ -350,7 +349,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             if stop_event and stop_event.is_set():
                 break
             frame_index = (frame_index + 1) % len(frames)
-            animated = animation_frame_text(prefix_value if cfg.get("prefix_enabled", True) else "", frames[frame_index])
+            animated = animation_frame_text(prefix_value, frames[frame_index])
             while True:
                 try:
                     if mode == "new_message":
@@ -415,7 +414,7 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
         frames = cfg.get("frames")
         if not isinstance(frames, list) or len(frames) != 3:
             frames = [".", "..", "..."]
-        first = animation_frame_text(prefix_value if cfg.get("prefix_enabled", True) else "", frames[0])
+        first = animation_frame_text(prefix_value, frames[0])
         try:
             animation_message = await bot.send_message(user_id, first, parse_mode="HTML")
             separate_id = animation_message.message_id
@@ -462,7 +461,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
             prefix_value = str(animation_cfg.get("prefix") or "Checking")
             if prefix_value == "Checking..":
                 prefix_value = "Checking"
-            first = animation_frame_text(prefix_value if cfg.get("prefix_enabled", True) else "", frames[0])
+            first = animation_frame_text(prefix_value, frames[0])
             try:
                 if cfg.get("poster_file_id"):
                     animation_post = await bot.send_animation(user.id, cfg["poster_file_id"], caption=first, parse_mode="HTML")
@@ -839,7 +838,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             prefix_value = str(animation_cfg.get("prefix") or "Checking")
             if prefix_value == "Checking..":
                 prefix_value = "Checking"
-            first = animation_frame_text(prefix_value if cfg.get("prefix_enabled", True) else "", frames[0])
+            first = animation_frame_text(prefix_value, frames[0])
             empty_markup = InlineKeyboardMarkup(inline_keyboard=[])
             try:
                 if force_cfg.get("poster_file_id"):
