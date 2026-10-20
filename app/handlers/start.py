@@ -954,8 +954,8 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 pass
         return
 
-    # Verification succeeded: stop animation immediately; never wait for its
-    # cycle or message cleanup before delivering the requested file or batch.
+    # Verification succeeded: stop the animation and remove the Force Join
+    # prompt before sending any requested file or batch item.
     separate_animation_id = await _cancel_gate_animation(
         bot, user_id, payload, delete_separate=False
     )
@@ -963,7 +963,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         try:
             await animation_post.delete()
         except TelegramAPIError:
-            pass
+            log.info("Could not remove Force Join verification animation")
     repo=FileRepository(database.db)
     if payload.startswith("file_"):record=await repo.get_file(payload[5:])
     elif payload.startswith("batch_"):record=await repo.get_batch(payload[6:])
@@ -979,7 +979,18 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
     if not await claim_delivery_request(database.db, request_key, user_id, payload):
         return
     await _mark_verified(database.db, user_id, channels)
-    # Preserve the verification post until at least one requested file is delivered.
+    # Delete the Force Join post first. Await this API call before beginning delivery,
+    # so the verification prompt cannot appear after the file in normal operation.
+    if old_post:
+        try:
+            await old_post.delete()
+        except TelegramAPIError:
+            log.warning("Could not remove Force Join post before delivery", exc_info=True)
+    if separate_animation_id:
+        try:
+            await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)
+        except TelegramAPIError:
+            pass
     success = False
     try:
         result=await deliver_payload(bot,database,settings,user_id,payload,record,request_key=request_key)
@@ -988,19 +999,6 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         elif payload.startswith("file_") and result[0] == 0:
             await bot.send_message(user_id,"This file is currently unavailable. The source message may have been deleted or become inaccessible.")
         success = result[0] > 0
-        if success:
-            if old_post:
-                try:
-                    await old_post.delete()
-                except TelegramAPIError:
-                    log.info("Could not remove Force Join post after successful delivery")
-            if separate_animation_id:
-                async def cleanup_finished_animation():
-                    try:
-                        await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)
-                    except TelegramAPIError:
-                        pass
-                asyncio.create_task(cleanup_finished_animation())
     except TelegramAPIError:
         log.exception("Delivery after Force Join failed")
         await bot.send_message(user_id,"File delivery failed. Contact the owner.")
