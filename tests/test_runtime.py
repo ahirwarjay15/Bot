@@ -6,6 +6,30 @@ import pytest
 import main
 
 
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        (None, "all"),
+        ("all", "all"),
+        ("polling", "polling"),
+        ("worker", "worker"),
+        ("WORKER", "worker"),
+    ],
+)
+def test_service_role_defaults_to_legacy_mode_and_accepts_known_roles(monkeypatch, configured, expected):
+    if configured is None:
+        monkeypatch.delenv("SERVICE_ROLE", raising=False)
+    else:
+        monkeypatch.setenv("SERVICE_ROLE", configured)
+    assert main.get_service_role() == expected
+
+
+def test_service_role_rejects_unknown_value(monkeypatch):
+    monkeypatch.setenv("SERVICE_ROLE", "both")
+    with pytest.raises(ValueError, match="Invalid SERVICE_ROLE"):
+        main.get_service_role()
+
+
 @pytest.mark.asyncio
 async def test_health_reports_starting_until_service_is_ready(monkeypatch):
     monkeypatch.setattr(main, "SERVICE_READY", False)
