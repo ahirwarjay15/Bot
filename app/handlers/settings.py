@@ -471,9 +471,9 @@ async def render_animation(query, db):
     if speed != cfg.get("speed"):
         await db.settings.update_one({"key": "animation"}, {"$set": {"speed": speed}}, upsert=True)
     await edit_page(query, f"ANIMATION\n\nAdd a custom animation for the verification process.\n\nPrefix: {prefix}\nFrames: {frames_text}\nFrames Status: {'ENABLED ✅' if frames_enabled else 'DISABLED ❌'}\nSpeed: {speed:.2f}s per frame\nMode: {mode_label}\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}", kb([
-        [("PREFIX", "settings:animation_prefix"), ("FRAMES", "settings:animation_frames")],
+        [("PREFIX", "settings:animation_prefix"), ("DISABLE" if frames_enabled else "ENABLE", "settings:animation_frames")],
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:animation_toggle"), ("SPEED", "settings:animation_speed")],
-        [("FRAMES OFF" if frames_enabled else "FRAMES ON", "settings:animation_frames_toggle"), ("MODE", "settings:animation_mode_toggle")],
+        [("MODE", "settings:animation_mode_toggle")],
         [("《 BACK", "settings:home")],
     ]))
 async def render_auto(query, db):
@@ -1046,23 +1046,23 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await state.set_state(SettingInput.waiting); await state.update_data(field="animation_prefix")
         if query.message: await tracked_answer(query.message, state, "Send new prefix text for the loop animation.")
     elif action == "animation_frames":
-        await state.set_state(SettingInput.waiting); await state.update_data(field="animation_frame_1", pending_frames=[])
-        if query.message: await tracked_answer(query.message, state, "Send the first frame for the loop animation.")
+        cfg = await db.settings.find_one({"key": "animation"}) or {}
+        if cfg.get("frames_enabled", True):
+            # Disable frame animation and remove the configured frames/prefix.
+            await db.settings.update_one(
+                {"key": "animation"},
+                {"$set": {"key": "animation", "frames_enabled": False, "prefix": ""},
+                 "$unset": {"frames": ""}},
+                upsert=True,
+            )
+            await render_animation(query, db)
+        else:
+            await state.set_state(SettingInput.waiting)
+            await state.update_data(field="animation_frame_1", pending_frames=[])
+            if query.message: await tracked_answer(query.message, state, "Send the first frame for the loop animation.")
     elif action == "animation_toggle":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
         await patch(db, "animation", {"enabled": not cfg.get("enabled", False)}, {"prefix": "Checking", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
-        await render_animation(query, db)
-    elif action == "animation_frames_toggle":
-        cfg = await db.settings.find_one({"key": "animation"}) or {}
-        frames_enabled = cfg.get("frames_enabled", True)
-        values = {"frames_enabled": not frames_enabled}
-        if not frames_enabled:
-            # Enabling restores a usable default only when the saved frames are invalid.
-            if not isinstance(cfg.get("frames"), list) or len(cfg.get("frames", [])) != 3:
-                values["frames"] = [".", "..", "..."]
-            if not cfg.get("prefix"):
-                values["prefix"] = "Checking"
-        await patch(db, "animation", values, {"enabled": False, "prefix": "Checking", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster", "frames_enabled": True})
         await render_animation(query, db)
     elif action == "animation_speed":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
@@ -1500,7 +1500,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             prompt = "Now send the middle frame." if len(frames) == 1 else "Send the last frame."
             await tracked_answer(message, state, prompt)
             return
-        await patch(db, "animation", {"frames": frames}, {"enabled": False, "prefix": "Checking", "speed": 0.25, "mode": "force_join_poster"})
+        await patch(db, "animation", {"frames": frames, "frames_enabled": True}, {"enabled": False, "prefix": "Checking", "speed": 0.25, "mode": "force_join_poster", "frames_enabled": True})
         await clear_state_preserving_prompts(state)
         await tracked_answer(message, state, "✨ Animation frames updated successfully.")
         return
