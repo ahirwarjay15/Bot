@@ -148,10 +148,6 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
         if not doc or doc.get("status") == "done":
             return (len((doc or {}).get("delivered_message_ids", [])), int((doc or {}).get("failed_count", 0)))
         items = doc.get("items", [])
-        # Cache this shared configuration for the whole batch instead of making
-        # one MongoDB round trip for every item that needs custom buttons.
-        custom_buttons_loaded = False
-        custom_buttons = []
         while int(doc.get("next_index", 0)) < len(items):
             index = int(doc.get("next_index", 0))
             state = (doc.get("item_states") or [{} for _ in items])[index]
@@ -184,10 +180,8 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                     "original_has_buttons", bool(markup_data)
                 )
                 if not has_original_buttons and not markup_data:
-                    if not custom_buttons_loaded:
-                        custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
-                        custom_buttons = custom_cfg.get("buttons", [])
-                        custom_buttons_loaded = True
+                    custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
+                    custom_buttons = custom_cfg.get("buttons", [])
                     valid_buttons = [
                         InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
                         for button in custom_buttons[:2]
