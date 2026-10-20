@@ -402,7 +402,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
 async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: Message,
                                 base_text: str, markup: InlineKeyboardMarkup, cfg: dict,
                                 animation_only: bool = False):
-    if not cfg.get("enabled"):
+    if not cfg.get("enabled") or not cfg.get("frames_enabled", True):
         return
     await _cancel_gate_animation(bot, user_id, payload)
     mode = cfg.get("mode", "force_join_poster")
