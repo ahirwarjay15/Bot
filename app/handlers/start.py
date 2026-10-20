@@ -85,7 +85,7 @@ def normalize_animation_config(cfg: dict | None) -> dict:
         speed = float(normalized.get("speed", 0.25))
     except (TypeError, ValueError):
         speed = 1.0
-    normalized["speed"] = min(1.0, max(0.15, speed))
+    normalized["speed"] = min(1.0, max(0.25, speed))
     if normalized.get("mode") not in ("force_join_poster", "new_message"):
         normalized["mode"] = "force_join_poster"
     return normalized
@@ -839,7 +839,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             prefix_value = str(animation_cfg.get("prefix") or "Checking")
             if prefix_value == "Checking..":
                 prefix_value = "Checking"
-            first = animation_frame_text(prefix_value, frames[0])
+            first = animation_frame_text(prefix_value if cfg.get("prefix_enabled", True) else "", frames[0])
             empty_markup = InlineKeyboardMarkup(inline_keyboard=[])
             try:
                 if force_cfg.get("poster_file_id"):
