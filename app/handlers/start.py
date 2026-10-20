@@ -72,7 +72,7 @@ def animation_frame_text(prefix: str, frame: str) -> str:
 def normalize_animation_config(cfg: dict | None) -> dict:
     """Normalize legacy defaults and clamp the timer for both animation modes."""
     normalized = dict(cfg or {})
-    legacy_default = not normalized.get("prefix") or normalized.get("prefix") == "Checking.."
+    legacy_default = "prefix_enabled" not in normalized and (not normalized.get("prefix") or normalized.get("prefix") == "Checking..")
     if legacy_default:
         normalized["prefix"] = "Checking"
         normalized["frames"] = [".", "..", "..."]
