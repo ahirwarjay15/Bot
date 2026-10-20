@@ -462,11 +462,11 @@ def build_animation_page(cfg):
         speed = 1.0
     speed = min(1.0, max(0.25, speed))
     text = (
-        f"ANIMATION\\n\\nAdd a custom animation for the verification process.\\n\\n"
-        f"Prefix: {prefix}\\nFrames: {frames_text}\\n"
-        f"Prefix Status: {'ENABLED ✅' if prefix_enabled else 'DISABLED ❌'}\\n"
-        f"Frames Status: {'ENABLED ✅' if frames_enabled else 'DISABLED ❌'}\\n"
-        f"Speed: {speed:.2f}s per frame\\nMode: {mode_label}\\n"
+        f"ANIMATION\n\nAdd a custom animation for the verification process.\n\n"
+        f"Prefix: {prefix}\nFrames: {frames_text}\n"
+        f"Prefix Status: {'ENABLED ✅' if prefix_enabled else 'DISABLED ❌'}\n"
+        f"Frames Status: {'ENABLED ✅' if frames_enabled else 'DISABLED ❌'}\n"
+        f"Speed: {speed:.2f}s per frame\nMode: {mode_label}\n"
         f"Status: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}"
     )
     markup = kb([
