@@ -455,11 +455,12 @@ async def render_animation(query, db):
             {"$set": {"prefix": "Checking", "frames": [".", "..", "..."], "speed": 0.25}},
             upsert=True,
         )
+    frames_enabled = cfg.get("frames_enabled", True)
     frames = cfg.get("frames")
     if not isinstance(frames, list) or len(frames) != 3:
         frames = [".", "..", "..."]
-    frames_text = " | ".join(str(frame) for frame in frames)
-    prefix = str(cfg.get("prefix") or "Checking")
+    frames_text = " | ".join(str(frame) for frame in frames) if frames_enabled else "OFF"
+    prefix = str(cfg.get("prefix") or "Checking") if frames_enabled else "OFF"
     mode = cfg.get("mode", "force_join_poster")
     mode_label = "NEW MESSAGE" if mode == "new_message" else "FORCE JOIN POSTER"
     try:
@@ -469,10 +470,10 @@ async def render_animation(query, db):
     speed = min(1.0, max(0.25, speed))
     if speed != cfg.get("speed"):
         await db.settings.update_one({"key": "animation"}, {"$set": {"speed": speed}}, upsert=True)
-    await edit_page(query, f"ANIMATION\n\nAdd a custom animation for the verification process.\n\nPrefix: {prefix}\nFrames: {frames_text}\nSpeed: {speed:.2f}s per frame\nMode: {mode_label}\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}", kb([
+    await edit_page(query, f"ANIMATION\n\nAdd a custom animation for the verification process.\n\nPrefix: {prefix}\nFrames: {frames_text}\nFrames Status: {'ENABLED ✅' if frames_enabled else 'DISABLED ❌'}\nSpeed: {speed:.2f}s per frame\nMode: {mode_label}\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}", kb([
         [("PREFIX", "settings:animation_prefix"), ("FRAMES", "settings:animation_frames")],
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:animation_toggle"), ("SPEED", "settings:animation_speed")],
-        [("MODE", "settings:animation_mode_toggle")],
+        [("FRAMES OFF" if frames_enabled else "FRAMES ON", "settings:animation_frames_toggle"), ("MODE", "settings:animation_mode_toggle")],
         [("《 BACK", "settings:home")],
     ]))
 async def render_auto(query, db):
@@ -1050,6 +1051,18 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "animation_toggle":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
         await patch(db, "animation", {"enabled": not cfg.get("enabled", False)}, {"prefix": "Checking", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
+        await render_animation(query, db)
+    elif action == "animation_frames_toggle":
+        cfg = await db.settings.find_one({"key": "animation"}) or {}
+        frames_enabled = cfg.get("frames_enabled", True)
+        values = {"frames_enabled": not frames_enabled}
+        if not frames_enabled:
+            # Enabling restores a usable default only when the saved frames are invalid.
+            if not isinstance(cfg.get("frames"), list) or len(cfg.get("frames", [])) != 3:
+                values["frames"] = [".", "..", "..."]
+            if not cfg.get("prefix"):
+                values["prefix"] = "Checking"
+        await patch(db, "animation", values, {"enabled": False, "prefix": "Checking", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster", "frames_enabled": True})
         await render_animation(query, db)
     elif action == "animation_speed":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
