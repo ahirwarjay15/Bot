@@ -463,10 +463,14 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
         if animation_mode == "new_message":
             await _start_gate_animation(bot, user.id, payload, message, "", InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg)
         else:
+            frames_enabled = animation_cfg.get("frames_enabled", True)
             frames = animation_cfg.get("frames")
             if not isinstance(frames, list) or len(frames) != 3:
                 frames = [".", "..", "..."]
-            prefix_value = str(animation_cfg.get("prefix") or "Checking")
+            if not frames_enabled:
+                frames = [""]
+            prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
+            prefix_value = str(animation_cfg.get("prefix") or "Checking") if prefix_enabled else ""
             if prefix_value == "Checking..":
                 prefix_value = "Checking"
             first = animation_frame_text(prefix_value, frames[0])
@@ -840,10 +844,14 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg,
             )
         else:
+            frames_enabled = animation_cfg.get("frames_enabled", True)
             frames = animation_cfg.get("frames")
             if not isinstance(frames, list) or len(frames) != 3:
                 frames = [".", "..", "..."]
-            prefix_value = str(animation_cfg.get("prefix") or "Checking")
+            if not frames_enabled:
+                frames = [""]
+            prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
+            prefix_value = str(animation_cfg.get("prefix") or "Checking") if prefix_enabled else ""
             if prefix_value == "Checking..":
                 prefix_value = "Checking"
             first = animation_frame_text(prefix_value, frames[0])
