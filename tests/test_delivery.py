@@ -52,14 +52,13 @@ async def test_single_file_uses_durable_delivery_queue(monkeypatch):
     monkeypatch.setattr(delivery, "deliver_batch", fake_deliver_batch)
     result = await delivery.deliver_reference(
         bot=None, db=None, settings=None, user_id=42,
-        file_doc={"source_chat_id": -100123, "source_message_id": 77, "file_name": "x.mp4"},
+        file_doc={"source_chat_id": -100123, "source_message_id": 77},
         deeplink="https://t.me/example?start=file_abc", request_key="start:42:10",
     )
     assert result == (1, 0)
     assert captured["request_key"] == "start:42:10"
     assert captured["batch"]["items"] == [{
         "source_chat_id": -100123, "source_message_id": 77,
-        "file_name": "x.mp4", "reply_markup": None,
     }]
 
 
@@ -69,3 +68,24 @@ def test_after_delete_replacement_uses_html_parse_mode():
     source = Path("app/services/delivery.py").read_text()
     assert 'text=text, reply_markup=markup, parse_mode="HTML"' in source
     assert 'bot.send_message(task["user_id"], text, reply_markup=markup, parse_mode="HTML")' in source
+
+
+@pytest.mark.asyncio
+async def test_single_file_keeps_original_keyboard_json(monkeypatch):
+    captured = {}
+    keyboard = {"inline_keyboard": [
+        [{"text": "Open", "url": "https://example.org"}],
+        [{"text": "More", "callback_data": "more:1"}],
+    ]}
+
+    async def fake_deliver_batch(bot, db, *, user_id, batch, deeplink, request_key=None):
+        captured["batch"] = batch
+        return (1, 0)
+
+    monkeypatch.setattr(delivery, "deliver_batch", fake_deliver_batch)
+    await delivery.deliver_reference(
+        bot=None, db=None, settings=None, user_id=42,
+        file_doc={"source_chat_id": -100123, "source_message_id": 77, "reply_markup": keyboard},
+        deeplink="https://t.me/example?start=file_abc",
+    )
+    assert captured["batch"]["items"][0]["reply_markup"] == keyboard
