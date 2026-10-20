@@ -146,6 +146,14 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
         if not doc or doc.get("status") == "done":
             return (len((doc or {}).get("delivered_message_ids", [])), int((doc or {}).get("failed_count", 0)))
         items = doc.get("items", [])
+        # Resolve the fallback keyboard once per batch instead of one DB read per file.
+        custom_buttons = []
+        if any(
+            not item.get("reply_markup") and not item.get("original_has_buttons")
+            for item in items
+        ):
+            custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
+            custom_buttons = custom_cfg.get("buttons", [])
         while int(doc.get("next_index", 0)) < len(items):
             index = int(doc.get("next_index", 0))
             state = (doc.get("item_states") or [{} for _ in items])[index]
@@ -178,8 +186,6 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                     "original_has_buttons", bool(markup_data)
                 )
                 if not has_original_buttons and not markup_data:
-                    custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
-                    custom_buttons = custom_cfg.get("buttons", [])
                     valid_buttons = [
                         InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
                         for button in custom_buttons[:2]
