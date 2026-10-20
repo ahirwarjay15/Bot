@@ -23,6 +23,18 @@ from app.services.delivery import run_task_worker, run_batch_delivery_worker
 
 SERVICE_READY = False
 log = logging.getLogger(__name__)
+VALID_SERVICE_ROLES = {"all", "polling", "worker"}
+
+
+def get_service_role() -> str:
+    """Select a process role; the default preserves the original single-service behavior."""
+    role = os.getenv("SERVICE_ROLE", "all").strip().lower()
+    if role not in VALID_SERVICE_ROLES:
+        raise ValueError(
+            f"Invalid SERVICE_ROLE={role!r}; expected one of: "
+            + ", ".join(sorted(VALID_SERVICE_ROLES))
+        )
+    return role
 
 
 async def health(_request):
@@ -86,8 +98,10 @@ async def main():
     database = None
     tasks = []
     try:
+        role = get_service_role()
         settings = get_settings()
         logging.getLogger().setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+        log.info("Starting Titania with SERVICE_ROLE=%s", role)
         # Do not set a global parse mode: custom messages may contain arbitrary user text.
         bot = Bot(
             token=settings.bot_token.get_secret_value(),
@@ -96,33 +110,42 @@ async def main():
         database = Database(settings)
         await connect_database_with_retry(database)
 
-        dp = Dispatcher(storage=MemoryStorage())
-        dp["settings"] = settings
-        dp["database"] = database
-        # Keep the catch-all invalid-post handler last so other handlers run first.
-        for router in (
-            start_router, file_router, batch_router, admin_router,
-            settings_router, broadcast_router, shortener_router, misc_router,
-        ):
-            dp.include_router(router)
+        if role in {"all", "polling"}:
+            dp = Dispatcher(storage=MemoryStorage())
+            dp["settings"] = settings
+            dp["database"] = database
+            # Keep the catch-all invalid-post handler last so other handlers run first.
+            for router in (
+                start_router, file_router, batch_router, admin_router,
+                settings_router, broadcast_router, shortener_router, misc_router,
+            ):
+                dp.include_router(router)
+            # Only the polling process may manage Telegram's webhook/polling state.
+            await bot.delete_webhook(drop_pending_updates=False)
+        else:
+            dp = None
 
-        await bot.delete_webhook(drop_pending_updates=False)
-        workers = (
-            (run_task_worker, (bot, database.db), "delivery-task-worker"),
-            (run_batch_session_worker, (bot, database.db), "batch-session-worker"),
-            (run_batch_delivery_worker, (bot, database.db), "batch-delivery-worker"),
-            (run_broadcast_worker, (bot, database.db), "broadcast-worker"),
-            (run_pending_join_request_cleanup_worker, (database.db,), "pending-join-request-cleanup-worker"),
-        )
-        for worker, args, name in workers:
-            tasks.append(asyncio.create_task(
-                supervise_worker(worker, *args, name=name),
-                name=name,
-            ))
+        if role in {"all", "worker"}:
+            workers = (
+                (run_task_worker, (bot, database.db), "delivery-task-worker"),
+                (run_batch_session_worker, (bot, database.db), "batch-session-worker"),
+                (run_batch_delivery_worker, (bot, database.db), "batch-delivery-worker"),
+                (run_broadcast_worker, (bot, database.db), "broadcast-worker"),
+                (run_pending_join_request_cleanup_worker, (database.db,), "pending-join-request-cleanup-worker"),
+            )
+            for worker, args, name in workers:
+                tasks.append(asyncio.create_task(
+                    supervise_worker(worker, *args, name=name),
+                    name=name,
+                ))
 
         SERVICE_READY = True
-        log.info("Titania is ready; polling started")
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        log.info("Titania is ready; service role=%s", role)
+        if dp is not None:
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        else:
+            # Worker-only instances must stay alive without starting a second poller.
+            await asyncio.gather(*tasks)
     finally:
         SERVICE_READY = False
         for task in tasks:
