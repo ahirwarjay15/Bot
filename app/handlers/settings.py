@@ -1574,7 +1574,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             frame_values["prefix_enabled"] = False
         panel_chat_id = data.get("animation_panel_chat_id")
         panel_message_id = data.get("animation_panel_message_id")
-        await patch(db, "animation", frame_values, {"enabled": False, "prefix": "Checking", "speed": 0.25, "mode": "force_join_poster", "frames_enabled": True})
+        await patch(db, "animation", frame_values, {"enabled": False, "prefix": "Checking", "speed": 0.25, "mode": "force_join_poster"})
         await clear_state_preserving_prompts(state)
         await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
         await tracked_answer(message, state, "✨ Animation frames updated successfully.")
