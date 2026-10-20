@@ -1,4 +1,5 @@
 """MongoDB persistence for file references, users, batches, and never-reused codes."""
+import asyncio
 from datetime import datetime, timezone
 from secrets import choice
 from string import ascii_letters, digits
@@ -20,12 +21,14 @@ class FileRepository:
             raise ValueError("Deeplink codes must be 10, 15, or 20 characters")
         for _ in range(100):
             code = "".join(choice(_CODE_ALPHABET) for _ in range(length))
-            # Prevent collisions with links created before the permanent registry existed.
-            if await self.db.files.find_one({"file_key": code}, {"_id": 1}):
-                continue
-            if await self.db.batches.find_one({"batch_id": code}, {"_id": 1}):
-                continue
-            if await self.db.batch_sessions.find_one({"batch_id": code}, {"_id": 1}):
+            # Check legacy records concurrently; this avoids three serial DB round trips
+            # on every new deeplink while preserving the never-reuse guarantee.
+            legacy_matches = await asyncio.gather(
+                self.db.files.find_one({"file_key": code}, {"_id": 1}),
+                self.db.batches.find_one({"batch_id": code}, {"_id": 1}),
+                self.db.batch_sessions.find_one({"batch_id": code}, {"_id": 1}),
+            )
+            if any(legacy_matches):
                 continue
             try:
                 await self.db.deeplink_codes.insert_one({
