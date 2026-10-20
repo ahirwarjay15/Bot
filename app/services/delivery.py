@@ -1,6 +1,7 @@
 """Delivery services, durable batch progress, and expiry worker."""
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 
@@ -143,6 +144,7 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
 
 async def _process_batch_delivery(bot: Bot, db, request_key: str):
     """Resume a persisted batch at the next not-yet-attempted item."""
+    delivery_started = time.perf_counter()
     try:
         doc = await db.batch_deliveries.find_one({"request_key": request_key})
         if not doc or doc.get("status") == "done":
@@ -198,10 +200,17 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                     except (ValueError, TypeError):
                         log.warning("Invalid inline buttons for source message %s",
                                     item["source_message_id"], exc_info=True)
-                sent = await bot.copy_message(
-                    chat_id=doc["user_id"], from_chat_id=item["source_chat_id"],
-                    message_id=item["source_message_id"], reply_markup=markup,
-                )
+                copy_started = time.perf_counter()
+                try:
+                    sent = await bot.copy_message(
+                        chat_id=doc["user_id"], from_chat_id=item["source_chat_id"],
+                        message_id=item["source_message_id"], reply_markup=markup,
+                    )
+                finally:
+                    log.info(
+                        "Delivery stage=telegram_copy request=%s item=%s duration_ms=%.1f",
+                        request_key, index, (time.perf_counter() - copy_started) * 1000,
+                    )
                 deadline = doc.get("deadline")
                 if doc.get("auto_delete") and deadline is None:
                     deadline = _now() + timedelta(minutes=int(doc["minutes"]))
@@ -290,6 +299,11 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
         await db.batch_deliveries.update_one(
             {"request_key": request_key, "status": "processing"},
             {"$set": {"status": "done", "finished_at": _now()}},
+        )
+        log.info(
+            "Delivery stage=batch_complete request=%s user=%s item_count=%s delivered=%s failed=%s duration_ms=%.1f",
+            request_key, doc.get("user_id"), len(items), len(delivered_ids),
+            int(doc.get("failed_count", 0)), (time.perf_counter() - delivery_started) * 1000,
         )
         await db.delivery_requests.update_one(
             {"request_key": request_key, "status": "processing"},
