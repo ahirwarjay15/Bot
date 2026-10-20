@@ -324,7 +324,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
         speed = float(cfg.get("speed", 0.25))
     except (TypeError, ValueError):
         speed = 1.0
-    speed = min(1.0, max(0.15, speed))
+    speed = min(1.0, max(0.25, speed))
     mode = cfg.get("mode", "force_join_poster")
     target_id = separate_message_id if mode == "new_message" else gate_message.message_id
     frame_index = 0  # The first frame is already visible.
