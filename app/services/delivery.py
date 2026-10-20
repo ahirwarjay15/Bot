@@ -132,9 +132,7 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
     item = {
         "source_chat_id": file_doc["source_chat_id"],
         "source_message_id": file_doc["source_message_id"],
-        "file_name": file_doc.get("file_name"),
-        "reply_markup": file_doc.get("reply_markup"),
-        **({"original_has_buttons": True} if file_doc.get("original_has_buttons") else {}),
+        **({"reply_markup": file_doc["reply_markup"]} if file_doc.get("reply_markup") else {}),
     }
     return await deliver_batch(
         bot, db, user_id=user_id, batch={"batch_id": None, "items": [item]},
