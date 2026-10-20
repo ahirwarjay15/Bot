@@ -469,8 +469,9 @@ async def render_animation(query, db):
     speed = min(1.0, max(0.25, speed))
     if speed != cfg.get("speed"):
         await db.settings.update_one({"key": "animation"}, {"$set": {"speed": speed}}, upsert=True)
-    await edit_page(query, f"ANIMATION\n\nAdd a custom animation for the verification process.\n\nPrefix: {prefix}\nFrames: {frames_text}\nSpeed: {speed:.2f}s per frame\nMode: {mode_label}\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}", kb([
-        [("PREFIX", "settings:animation_prefix"), ("FRAMES", "settings:animation_frames")],
+    await edit_page(query, f"ANIMATION\n\nAdd a custom animation for the verification process.\n\nPrefix: {prefix} ({'ON ✅' if cfg.get('prefix_enabled', True) else 'OFF ❌'})\nFrames: {frames_text}\nSpeed: {speed:.2f}s per frame\nMode: {mode_label}\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}", kb([
+        [("EDIT PREFIX", "settings:animation_prefix"), ("PREFIX " + ("ON ✅" if cfg.get("prefix_enabled", True) else "OFF ❌"), "settings:animation_prefix_toggle")],
+        [("FRAMES", "settings:animation_frames")],
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:animation_toggle"), ("SPEED", "settings:animation_speed")],
         [("MODE", "settings:animation_mode_toggle")],
         [("《 BACK", "settings:home")],
@@ -1047,6 +1048,10 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "animation_frames":
         await state.set_state(SettingInput.waiting); await state.update_data(field="animation_frame_1", pending_frames=[])
         if query.message: await tracked_answer(query.message, state, "Send the first frame for the loop animation.")
+    elif action == "animation_prefix_toggle":
+        cfg = await db.settings.find_one({"key": "animation"}) or {}
+        await patch(db, "animation", {"prefix_enabled": not cfg.get("prefix_enabled", True)}, {"enabled": False, "prefix": "Checking", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
+        await render_animation(query, db)
     elif action == "animation_toggle":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
         await patch(db, "animation", {"enabled": not cfg.get("enabled", False)}, {"prefix": "Checking", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
@@ -1471,7 +1476,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await clear_state_preserving_prompts(state)
         return
     if field == "animation_prefix":
-        await patch(db, "animation", {"prefix": value}, {"enabled": False, "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
+        await patch(db, "animation", {"prefix": value}, {"enabled": False, "prefix_enabled": True, "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
         await clear_state_preserving_prompts(state)
         await tracked_answer(message, state, "✨ Animation prefix updated successfully.")
         return
