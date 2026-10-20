@@ -104,7 +104,8 @@ async def main():
             token=settings.bot_token.get_secret_value(),
             default=DefaultBotProperties(link_preview_is_disabled=True),
         )
-        database = Database(settings)
+        # A polling-only process must not reset jobs being processed by the worker service.
+        database = Database(settings, recover_interrupted_jobs=(role != "polling"))
         await connect_database_with_retry(database)
 
         if role in {"all", "polling"}:
