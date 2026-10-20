@@ -72,6 +72,7 @@ def animation_frame_text(prefix: str, frame: str) -> str:
 def normalize_animation_config(cfg: dict | None) -> dict:
     """Normalize legacy defaults and clamp the timer for both animation modes."""
     normalized = dict(cfg or {})
+    normalized.setdefault("prefix_enabled", True)
     legacy_default = not normalized.get("prefix") or normalized.get("prefix") == "Checking.."
     if legacy_default:
         normalized["prefix"] = "Checking"
@@ -349,7 +350,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             if stop_event and stop_event.is_set():
                 break
             frame_index = (frame_index + 1) % len(frames)
-            animated = animation_frame_text(prefix_value, frames[frame_index])
+            animated = animation_frame_text(prefix_value if cfg.get("prefix_enabled", True) else "", frames[frame_index])
             while True:
                 try:
                     if mode == "new_message":
@@ -414,7 +415,7 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
         frames = cfg.get("frames")
         if not isinstance(frames, list) or len(frames) != 3:
             frames = [".", "..", "..."]
-        first = animation_frame_text(prefix_value, frames[0])
+        first = animation_frame_text(prefix_value if cfg.get("prefix_enabled", True) else "", frames[0])
         try:
             animation_message = await bot.send_message(user_id, first, parse_mode="HTML")
             separate_id = animation_message.message_id
