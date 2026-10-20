@@ -462,7 +462,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
             prefix_value = str(animation_cfg.get("prefix") or "Checking")
             if prefix_value == "Checking..":
                 prefix_value = "Checking"
-            first = animation_frame_text(prefix_value, frames[0])
+            first = animation_frame_text(prefix_value if cfg.get("prefix_enabled", True) else "", frames[0])
             try:
                 if cfg.get("poster_file_id"):
                     animation_post = await bot.send_animation(user.id, cfg["poster_file_id"], caption=first, parse_mode="HTML")
