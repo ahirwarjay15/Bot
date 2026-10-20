@@ -38,8 +38,8 @@ def test_animation_page_shows_enabled_status_in_text_and_buttons():
 
     assert "Prefix Status: ENABLED ✅" in text
     assert "Frames Status: ENABLED ✅" in text
-    assert markup.inline_keyboard[0][0].text == "PREFIX 🟢"
-    assert markup.inline_keyboard[0][1].text == "FRAMES 🟢"
+    assert markup.inline_keyboard[0][0].text == "ᴘʀᴇꜰɪx 🟢"
+    assert markup.inline_keyboard[0][1].text == "ꜰʀᴀᴍᴇꜱ 🟢"
 
 
 def test_animation_page_shows_disabled_status_in_text_and_buttons():
@@ -54,5 +54,5 @@ def test_animation_page_shows_disabled_status_in_text_and_buttons():
 
     assert "Prefix Status: DISABLED ❌" in text
     assert "Frames Status: DISABLED ❌" in text
-    assert markup.inline_keyboard[0][0].text == "PREFIX 🔴"
-    assert markup.inline_keyboard[0][1].text == "FRAMES 🔴"
+    assert markup.inline_keyboard[0][0].text == "ᴘʀᴇꜰɪx 🔴"
+    assert markup.inline_keyboard[0][1].text == "ꜰʀᴀᴍᴇꜱ 🔴"
