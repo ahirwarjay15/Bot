@@ -54,8 +54,15 @@ async def remove_legacy_external_force_join_links(db) -> bool:
 
 
 class Database:
-    def __init__(self, settings: Settings, *, recover_interrupted_jobs: bool = True):
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        initialize_schema: bool = True,
+        recover_interrupted_jobs: bool = True,
+    ):
         self.settings = settings
+        self.initialize_schema = initialize_schema
         self.recover_interrupted_jobs = recover_interrupted_jobs
         self.client = None
         self.db = None
@@ -71,11 +78,14 @@ class Database:
         try:
             await self.client.admin.command("ping")
             self.db = self.client[self.settings.mongodb_db_name]
+            # Polling-only replicas use the existing schema. Only the worker role
+            # performs index changes and one-time migrations, avoiding startup races.
+            if not self.initialize_schema:
+                logger.info("MongoDB ready; schema initialization is owned by the worker service")
+                return
+
             await self.db.users.create_index([("user_id", ASCENDING)], unique=True)
             await self.db.files.create_index([("file_key", ASCENDING)], unique=True)
-            # Most settings are singleton documents keyed by "key", but Force Join
-            # stores one document per channel using the same key. The old unique
-            # key-only index silently prevented a second channel from being added.
             settings_indexes = await self.db.settings.index_information()
             await self.db.settings.create_index(
                 [("key", ASCENDING), ("channel", ASCENDING)],
@@ -108,15 +118,9 @@ class Database:
             await self.db.batch_deliveries.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
             await self.db.batch_sessions.create_index([("status", ASCENDING), ("last_activity_ts", ASCENDING)])
             await self.db.users.create_index([("blocked", ASCENDING)])
-            # Only the process responsible for workers may recover their interrupted jobs.
-            # A polling-only process must not reset jobs that a separate worker is handling.
             if self.recover_interrupted_jobs:
-                await self.db.tasks.update_many(
-                    {"status": "processing"}, {"$set": {"status": "pending"}}
-                )
-                await self.db.batch_deliveries.update_many(
-                    {"status": "processing"}, {"$set": {"status": "pending"}}
-                )
+                await self.db.tasks.update_many({"status": "processing"}, {"$set": {"status": "pending"}})
+                await self.db.batch_deliveries.update_many({"status": "processing"}, {"$set": {"status": "pending"}})
                 logger.info("MongoDB ready; interrupted delete tasks and batch deliveries recovered")
             else:
                 logger.info("MongoDB ready; worker-owned job recovery skipped for this process role")
