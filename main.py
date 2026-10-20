@@ -86,8 +86,6 @@ async def supervise_worker(worker, *args, name: str, restart_delay: float = 5.0)
 
 async def main():
     global SERVICE_READY
-    # Configure a minimal logger before configuration validation so startup
-    # failures are visible even when environment variables are missing.
     logging.basicConfig(
         level=os.getenv("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -102,7 +100,6 @@ async def main():
         settings = get_settings()
         logging.getLogger().setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
         log.info("Starting Titania with SERVICE_ROLE=%s", role)
-        # Do not set a global parse mode: custom messages may contain arbitrary user text.
         bot = Bot(
             token=settings.bot_token.get_secret_value(),
             default=DefaultBotProperties(link_preview_is_disabled=True),
@@ -115,11 +112,7 @@ async def main():
             dp["settings"] = settings
             dp["database"] = database
             # Keep the catch-all invalid-post handler last so other handlers run first.
-            for router in (
-                start_router, file_router, batch_router, admin_router,
-                settings_router, broadcast_router, shortener_router, misc_router,
-            ):
-                dp.include_router(router)
+            for r in (start_router, file_router, batch_router, admin_router, settings_router, broadcast_router, shortener_router, misc_router):dp.include_router(r)
             # Only the polling process may manage Telegram's webhook/polling state.
             await bot.delete_webhook(drop_pending_updates=False)
         else:
@@ -144,7 +137,6 @@ async def main():
         if dp is not None:
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
         else:
-            # Worker-only instances must stay alive without starting a second poller.
             await asyncio.gather(*tasks)
     finally:
         SERVICE_READY = False
