@@ -1,15 +1,15 @@
 from app.services.delivery import _minutes, _notice, DEFAULT_NOTICE, format_notice
 
 def test_auto_delete_timer_accepts_blueprint_cycle():
-    for minutes in (2, 5, 15, 30, 60, 180, 360, 720, 1440):
+    for minutes in (2, 5, 10, 15, 30, 60, 180, 360, 720, 1440):
         assert _minutes({"minutes": minutes}) == minutes
 
 def test_invalid_auto_delete_timer_falls_back_to_default():
-    assert _minutes({"minutes": 7}) == 30
-    assert _minutes({}) == 30
+    assert _minutes({"minutes": 7}) == 10
+    assert _minutes({}) == 10
 
 def test_auto_delete_notice_interpolates_timer():
-    assert _notice({"notice": "Deleted in {auto_delete_time}", "minutes": 30}, 30) == "Deleted in 30 minutes"
+    assert _notice({"notice": "Deleted in {auto_delete_time}", "minutes": 30}, 30) == "Deleted in 30 ᴍɪɴᴜᴛᴇs"
     assert _notice({"notice": DEFAULT_NOTICE}, 60) == "Your files will be automatically deleted after 1 hour."
 
 def test_auto_delete_notice_preserves_bold_entity_and_adjusts_length():
@@ -19,7 +19,7 @@ def test_auto_delete_notice_preserves_bold_entity_and_adjusts_length():
         "notice_entities": [{"type": "bold", "offset": 0, "length": len(source)}],
     }
     text, entities, custom = format_notice(cfg, 30)
-    assert text == "Bold 30 minutes"
+    assert text == "Bold 30 ᴍɪɴᴜᴛᴇs"
     assert custom is True
     assert entities[0].offset == 0
     assert entities[0].length == len(text)
@@ -32,9 +32,9 @@ def test_auto_delete_notice_shifts_entities_after_timer_placeholder():
         "notice_entities": [{"type": "bold", "offset": len(marker) + 1, "length": 4}],
     }
     text, entities, custom = format_notice(cfg, 30)
-    assert text == "30 minutes bold"
+    assert text == "30 ᴍɪɴᴜᴛᴇs bold"
     assert custom is True
-    assert entities[0].offset == len("30 minutes") + 1
+    assert entities[0].offset == len("30 ᴍɪɴᴜᴛᴇs") + 1
 
 
 import pytest
