@@ -75,7 +75,12 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     legacy_default = "prefix_enabled" not in normalized and (not normalized.get("prefix") or normalized.get("prefix") == "Checking..")
     if legacy_default:
         normalized["prefix"] = "Checking"
-        normalized["frames"] = [".", "..", "..."]
+        # Older configs may still have the legacy prefix but already contain
+        # custom frames. Only seed defaults when no valid three-frame sequence
+        # exists; otherwise every runtime load silently discards the user's frames.
+        frames = normalized.get("frames")
+        if not isinstance(frames, list) or len(frames) != 3:
+            normalized["frames"] = [".", "..", "..."]
         normalized["speed"] = 0.15
     frames = normalized.get("frames")
     if not isinstance(frames, list) or len(frames) != 3:
