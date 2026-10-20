@@ -43,10 +43,7 @@ def is_batch_file(message: Message) -> bool:
 
 def ordered_batch_items(items: list[dict]) -> list[dict]:
     """Keep the exact order in which messages appear in the Database channel."""
-    return sorted(items, key=lambda item: (
-        int(item.get("source_message_id", 0)),
-        int(item.get("original_message_id", 0)),
-    ))
+    return sorted(items, key=lambda item: int(item.get("source_message_id", 0)))
 
 
 def _database_channel_origin(message: Message, source_channel_id: int | str):
@@ -228,14 +225,9 @@ async def _collect_message(message: Message, settings: Settings, database, uid: 
         # Reuse the original Database-channel post. /batch never copies external files.
         "source_chat_id": source_chat_id,
         "source_message_id": source_message_id,
-        "file_name": message.document.file_name if message.document else None,
-        "source_message_date": message.date.isoformat() if message.date else None,
-        "original_message_id": message.message_id,
-        "reply_markup": (
-            message.reply_markup.model_dump(mode="json", exclude_none=True)
-            if message.reply_markup else None
-        ),
-        **({"original_has_buttons": True} if message.reply_markup and message.reply_markup.inline_keyboard else {}),
+        **({
+            "reply_markup": message.reply_markup.model_dump(mode="json", exclude_none=True)
+        } if message.reply_markup else {}),
     }
     # Conditional update prevents adding to a session cancelled or expired concurrently.
     result = await database.db.batch_sessions.update_one(
@@ -309,7 +301,7 @@ async def actions(query: CallbackQuery, state: FSMContext, settings: Settings, d
             await query.message.answer("This batch is already being generated.")
         return
     try:
-        batch = await FileRepository(database.db).save_batch(items, uid, batch_id=session.get('batch_id'))
+        batch = await FileRepository(database.db).save_batch(items, batch_id=session.get('batch_id'))
         me = await query.bot.get_me()
         link = f"https://t.me/{me.username}?start=batch_{batch['batch_id']}"
         await database.db.batch_sessions.update_one(
@@ -365,7 +357,7 @@ async def run_batch_session_worker(bot, db, poll_seconds: int = 2):
                 continue
             try:
                 items = ordered_batch_items(full_session.get("items", []))
-                batch = await FileRepository(db).save_batch(items, full_session["admin_id"], batch_id=full_session.get("batch_id"))
+                batch = await FileRepository(db).save_batch(items, batch_id=full_session.get("batch_id"))
                 me = await bot.get_me()
                 link = f"https://t.me/{me.username}?start=batch_{batch['batch_id']}"
                 await db.batch_sessions.update_one(

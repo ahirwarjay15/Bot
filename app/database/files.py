@@ -1,4 +1,5 @@
 """MongoDB persistence for file references, users, batches, and never-reused codes."""
+import asyncio
 from datetime import datetime, timezone
 from secrets import choice
 from string import ascii_letters, digits
@@ -20,12 +21,14 @@ class FileRepository:
             raise ValueError("Deeplink codes must be 10, 15, or 20 characters")
         for _ in range(100):
             code = "".join(choice(_CODE_ALPHABET) for _ in range(length))
-            # Prevent collisions with links created before the permanent registry existed.
-            if await self.db.files.find_one({"file_key": code}, {"_id": 1}):
-                continue
-            if await self.db.batches.find_one({"batch_id": code}, {"_id": 1}):
-                continue
-            if await self.db.batch_sessions.find_one({"batch_id": code}, {"_id": 1}):
+            # Check legacy records concurrently; this avoids three serial DB round trips
+            # on every new deeplink while preserving the never-reuse guarantee.
+            legacy_matches = await asyncio.gather(
+                self.db.files.find_one({"file_key": code}, {"_id": 1}),
+                self.db.batches.find_one({"batch_id": code}, {"_id": 1}),
+                self.db.batch_sessions.find_one({"batch_id": code}, {"_id": 1}),
+            )
+            if any(legacy_matches):
                 continue
             try:
                 await self.db.deeplink_codes.insert_one({
@@ -39,18 +42,17 @@ class FileRepository:
         raise RuntimeError("Could not allocate a never-used deeplink code")
 
     async def save_file(
-        self, *, source_chat_id: int, source_message_id: int, created_by: int,
-        file_name: str | None = None, reply_markup: dict | None = None,
-        original_has_buttons: bool = False,
+        self, *, source_chat_id: int, source_message_id: int,
+        reply_markup: dict | None = None,
     ) -> dict:
         for _ in range(8):
             key = await self.reserve_code(20, "file")
             doc = {
-                "file_key": key, "source_chat_id": source_chat_id,
-                "source_message_id": source_message_id, "created_by": created_by,
-                "file_name": file_name, "reply_markup": reply_markup,
-                "original_has_buttons": original_has_buttons,
-                "created_at": _now(), "kind": "file",
+                "file_key": key,
+                "source_chat_id": source_chat_id,
+                "source_message_id": source_message_id,
+                **({"reply_markup": reply_markup} if reply_markup else {}),
+                "kind": "file",
             }
             try:
                 await self.db.files.insert_one(doc)
@@ -64,26 +66,24 @@ class FileRepository:
         return await self.db.files.find_one({"file_key": key, "kind": "file"})
 
     async def save_batch(
-        self, items: list[dict], created_by: int, batch_id: str | None = None
+        self, items: list[dict], batch_id: str | None = None
     ) -> dict:
         if len(items) < 2 or len(items) > 100:
             raise ValueError("A batch must contain 2 to 100 files")
         if batch_id:
             doc = {
-                "batch_id": batch_id, "items": items, "created_by": created_by,
-                "updated_at": _now(), "kind": "batch",
+                "batch_id": batch_id, "items": items, "kind": "batch",
             }
             await self.db.batches.update_one(
                 {"batch_id": batch_id, "kind": "batch"},
-                {"$set": doc, "$setOnInsert": {"created_at": _now()}},
+                {"$set": doc},
                 upsert=True,
             )
             return await self.db.batches.find_one({"batch_id": batch_id, "kind": "batch"})
         for _ in range(8):
             key = await self.reserve_code(20, "batch")
             doc = {
-                "batch_id": key, "items": items, "created_by": created_by,
-                "created_at": _now(), "kind": "batch",
+                "batch_id": key, "items": items, "kind": "batch",
             }
             try:
                 await self.db.batches.insert_one(doc)

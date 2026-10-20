@@ -336,11 +336,11 @@ def test_batch_requires_two_files_and_preserves_message_order():
         voice=None, video_note=None, sticker=None,
     )) is True
     items = [
-        {"original_message_id": 12, "source_message_id": 102},
-        {"original_message_id": 10, "source_message_id": 100},
-        {"original_message_id": 11, "source_message_id": 101},
+        {"source_message_id": 102},
+        {"source_message_id": 100},
+        {"source_message_id": 101},
     ]
-    assert [item["original_message_id"] for item in ordered_batch_items(items)] == [10, 11, 12]
+    assert [item["source_message_id"] for item in ordered_batch_items(items)] == [100, 101, 102]
 
 
 def test_batch_repository_rejects_single_file_batch():
@@ -538,11 +538,11 @@ def test_animation_legacy_defaults_are_migrated_and_frames_are_bold():
         "mode": "new_message",
     })
     assert cfg["prefix"] == "Checking"
-    assert cfg["frames"] == [".", "..", "..."]
+    assert cfg["frames"] == ["OLD", "VALUES", "HERE"]
     assert cfg["speed"] == 0.15
     assert cfg["mode"] == "new_message"
     assert cfg["enabled"] is True
-    assert animation_frame_text(cfg["prefix"], cfg["frames"][0]) == "Checking<b>.</b>"
+    assert animation_frame_text(cfg["prefix"], cfg["frames"][0]) == "Checking<b>OLD</b>"
 
 
 def test_animation_speed_is_clamped_for_both_modes_without_overriding_custom_speed():
@@ -880,9 +880,9 @@ def test_batch_order_uses_database_channel_message_order():
     from app.handlers.batch import ordered_batch_items
 
     items = [
-        {"source_message_id": 303, "original_message_id": 10},
-        {"source_message_id": 301, "original_message_id": 12},
-        {"source_message_id": 302, "original_message_id": 11},
+        {"source_message_id": 303},
+        {"source_message_id": 301},
+        {"source_message_id": 302},
     ]
     assert [item["source_message_id"] for item in ordered_batch_items(items)] == [301, 302, 303]
 

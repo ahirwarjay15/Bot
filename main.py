@@ -20,6 +20,7 @@ from app.handlers.broadcast import router as broadcast_router, run_broadcast_wor
 from app.handlers.shortener import router as shortener_router
 from app.handlers.misc import router as misc_router
 from app.services.delivery import run_task_worker, run_batch_delivery_worker
+from app.services.polling_lease import run_polling_with_lease
 
 SERVICE_READY = False
 log = logging.getLogger(__name__)
@@ -114,8 +115,6 @@ async def main():
             dp["database"] = database
             # Keep the catch-all invalid-post handler last so other handlers run first.
             for r in (start_router, file_router, batch_router, admin_router, settings_router, broadcast_router, shortener_router, misc_router):dp.include_router(r)
-            # Only the polling process may manage Telegram's webhook/polling state.
-            await bot.delete_webhook(drop_pending_updates=False)
         else:
             dp = None
 
@@ -136,7 +135,7 @@ async def main():
         SERVICE_READY = True
         log.info("Titania is ready; service role=%s", role)
         if dp is not None:
-            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+            await run_polling_with_lease(dp, bot, database.db)
         else:
             await asyncio.gather(*tasks)
     finally:
