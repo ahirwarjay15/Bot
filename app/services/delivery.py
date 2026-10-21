@@ -1,6 +1,7 @@
 """Delivery services, durable batch progress, and expiry worker."""
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 
@@ -141,8 +142,14 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
 
 async def _process_batch_delivery(bot: Bot, db, request_key: str):
     """Resume a persisted batch at the next not-yet-attempted item."""
+    process_started = time.perf_counter()
+    mongo_seconds = 0.0
+    telegram_seconds = 0.0
+    item_count = 0
     try:
+        mongo_started = time.perf_counter()
         doc = await db.batch_deliveries.find_one({"request_key": request_key})
+        mongo_seconds += time.perf_counter() - mongo_started
         if not doc or doc.get("status") == "done":
             return (len((doc or {}).get("delivered_message_ids", [])), int((doc or {}).get("failed_count", 0)))
         items = doc.get("items", [])
@@ -202,10 +209,13 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                     except (ValueError, TypeError):
                         log.warning("Invalid inline buttons for source message %s",
                                     item["source_message_id"], exc_info=True)
+                telegram_started = time.perf_counter()
                 sent = await bot.copy_message(
                     chat_id=doc["user_id"], from_chat_id=item["source_chat_id"],
                     message_id=item["source_message_id"], reply_markup=markup,
                 )
+                telegram_seconds += time.perf_counter() - telegram_started
+                item_count += 1
                 deadline = doc.get("deadline")
                 if doc.get("auto_delete") and deadline is None:
                     deadline = _now() + timedelta(minutes=int(doc["minutes"]))
@@ -217,10 +227,12 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                 }
                 if deadline is not None:
                     fields["deadline"] = deadline
+                mongo_started = time.perf_counter()
                 await db.batch_deliveries.update_one(
                     {"request_key": request_key, "status": "processing", "next_index": index},
                     {"$set": fields, "$push": {"delivered_message_ids": sent.message_id}},
                 )
+                mongo_seconds += time.perf_counter() - mongo_started
             except TelegramAPIError as exc:
                 await db.batch_deliveries.update_one(
                     {"request_key": request_key, "status": "processing", "next_index": index},
@@ -300,6 +312,13 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
             {"$set": {"status": "done", "updated_at": _now(), "recovered_or_completed_at": _now()}},
         )
         final = await db.batch_deliveries.find_one({"request_key": request_key})
+        elapsed = time.perf_counter() - process_started
+        log.info(
+            "Delivery timing request_key=%s items=%d elapsed_ms=%.1f mongo_measured_ms=%.1f "
+            "telegram_copy_ms=%.1f other_ms=%.1f",
+            request_key, item_count, elapsed * 1000, mongo_seconds * 1000,
+            telegram_seconds * 1000, max(0.0, elapsed - mongo_seconds - telegram_seconds) * 1000,
+        )
         return (len(final.get("delivered_message_ids", [])), int(final.get("failed_count", 0)))
     except Exception:
         log.exception("Batch delivery processing interrupted; persisted progress will be resumed")
