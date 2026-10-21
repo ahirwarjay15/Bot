@@ -80,9 +80,21 @@ async def effective_force_join_channels(database, settings) -> list[str]:
             channels.append(channel)
     return channels
 
+def normalize_animation_prefix(value: str | None) -> str:
+    """Remove markup syntax from a user-supplied prefix before rendering it as plain text."""
+    import re
+
+    text = html.unescape(str(value or ""))
+    # Remove Markdown code fences/backticks and common formatting markers.
+    text = text.replace("```", "").replace("`", "")
+    text = re.sub(r"</?(?:b|strong|i|em|u|s|strike|del|code|pre|blockquote|tg-spoiler)(?:\\s[^>]*)?>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\w)[*_~]{1,3}|[*_~]{1,3}(?!\\w)", "", text)
+    return " ".join(text.split()).strip()
+
+
 def animation_frame_text(prefix: str, frame: str) -> str:
-    """Render a normal-weight prefix followed by one bold frame."""
-    return f"{html.escape(str(prefix))}<b>{html.escape(str(frame))}</b>"
+    """Render a clean plain-text prefix followed by one bold frame."""
+    return f"{html.escape(normalize_animation_prefix(prefix))}<b>{html.escape(str(frame))}</b>"
 
 
 def normalize_animation_config(cfg: dict | None) -> dict:
