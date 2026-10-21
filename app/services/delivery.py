@@ -132,6 +132,7 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
     item = {
         "source_chat_id": file_doc["source_chat_id"],
         "source_message_id": file_doc["source_message_id"],
+        **({"reply_markup": file_doc["reply_markup"]} if file_doc.get("reply_markup") else {}),
     }
     return await deliver_batch(
         bot, db, user_id=user_id, batch={"batch_id": None, "items": [item]},
@@ -145,6 +146,14 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
         if not doc or doc.get("status") == "done":
             return (len((doc or {}).get("delivered_message_ids", [])), int((doc or {}).get("failed_count", 0)))
         items = doc.get("items", [])
+        # Resolve the fallback keyboard once per batch instead of one DB read per file.
+        custom_buttons = []
+        if any(
+            not item.get("reply_markup") and not item.get("original_has_buttons")
+            for item in items
+        ):
+            custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
+            custom_buttons = custom_cfg.get("buttons", [])
         while int(doc.get("next_index", 0)) < len(items):
             index = int(doc.get("next_index", 0))
             state = (doc.get("item_states") or [{} for _ in items])[index]
@@ -170,9 +179,32 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                 continue
             item = items[index]
             try:
+                # Prepare the keyboard before copying so the file and its buttons
+                # arrive in one Telegram API request (instead of copy + edit).
+                markup_data = item.get("reply_markup")
+                has_original_buttons = item.get(
+                    "original_has_buttons", bool(markup_data)
+                )
+                if not has_original_buttons and not markup_data:
+                    valid_buttons = [
+                        InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
+                        for button in custom_buttons[:2]
+                        if button.get("text") and button.get("url")
+                    ]
+                    if valid_buttons:
+                        markup_data = InlineKeyboardMarkup(inline_keyboard=[valid_buttons]).model_dump(
+                            mode="json", exclude_none=True
+                        )
+                markup = None
+                if markup_data:
+                    try:
+                        markup = InlineKeyboardMarkup.model_validate(markup_data)
+                    except (ValueError, TypeError):
+                        log.warning("Invalid inline buttons for source message %s",
+                                    item["source_message_id"], exc_info=True)
                 sent = await bot.copy_message(
                     chat_id=doc["user_id"], from_chat_id=item["source_chat_id"],
-                    message_id=item["source_message_id"],
+                    message_id=item["source_message_id"], reply_markup=markup,
                 )
                 deadline = doc.get("deadline")
                 if doc.get("auto_delete") and deadline is None:
