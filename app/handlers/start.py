@@ -18,6 +18,22 @@ from app.services.permissions import is_owner_or_moderator
 from app.services.text_format import normalize_telegram_text
 router=Router(name="start");log=logging.getLogger(__name__)
 
+def ensure_default_quote_format(raw_text, kind):
+    """Repair legacy persisted defaults so old MongoDB values render the intended Telegram quotes."""
+    text = str(raw_text or "")
+    if kind == "start" and "<blockquote>" not in text:
+        hello = "<b><i>✨ ʜᴇʟʟᴏ {mention}</i></b>"
+        body = "ɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>."
+        if text.startswith(hello + "\\n\\n" + body):
+            text = text.replace(hello, "<blockquote>" + hello + "</blockquote>", 1)
+    elif kind == "force_join" and "<blockquote>" not in text:
+        first = "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!"
+        second = "ᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ."
+        if text == first + "\\n\\n" + second:
+            text = "<blockquote>" + first + "</blockquote>\\n\\n<blockquote>" + second + "</blockquote>"
+    return text
+
+
 def render_common_variables(raw_text, user, bot):
     """Render shared message variables as Telegram HTML without nesting links."""
     text = str(raw_text or "")
@@ -512,7 +528,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
             join_buttons.append(button)
     rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
     rows.append([InlineKeyboardButton(text=cfg.get("verify_text") or "♻️ ʀᴇᴛʀʏ",callback_data=f"forcejoin:check:{payload}")])
-    raw_text = cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\n\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ."
+    raw_text = ensure_default_quote_format(cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\n\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ."
     me = await bot.get_me()
     rendered = render_common_variables(raw_text, user, me).replace("{remaining_count}", str(len(missing)))
     markup = InlineKeyboardMarkup(inline_keyboard=rows)
@@ -631,7 +647,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         if cfg.get("about_enabled", True):
             rows.append([InlineKeyboardButton(text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="start:about")])
         markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
-        raw_text = normalize_telegram_text(cfg.get("text") or "<b><i>✨ ʜᴇʟʟᴏ {mention}</i></b>\n\nɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!")
+        raw_text = normalize_telegram_text(ensure_default_quote_format(cfg.get("text") or "<b><i>✨ ʜᴇʟʟᴏ {mention}</i></b>\n\nɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!", "start"))
         me = await message.bot.get_me()
         text = render_common_variables(raw_text, user, me)
         if cfg.get("poster_file_id"):
@@ -900,7 +916,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
         rows.append([InlineKeyboardButton(text=force_cfg.get("verify_text") or "♻️ ʀᴇᴛʀʏ", callback_data=f"forcejoin:check:{payload}")])
         me = await bot.get_me()
-        raw_text = str(force_cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\n\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.")
+        raw_text = ensure_default_quote_format(force_cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\n\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.")
         rendered = render_common_variables(normalize_telegram_text(raw_text), query.from_user, me).replace("{remaining_count}", str(len(missing)))
         markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
