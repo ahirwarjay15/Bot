@@ -1,4 +1,5 @@
 """Blueprint-aligned inline settings pages with persistent MongoDB values."""
+import html
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from aiogram import Router, F
@@ -453,7 +454,7 @@ def build_animation_page(cfg):
     if not isinstance(frames, list) or len(frames) != 3:
         frames = [".", "..", "..."]
     frames_text = " | ".join(str(frame) for frame in frames) if frames_enabled else "OFF"
-    prefix = str(cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else "OFF"
+    prefix = html.escape(normalize_animation_prefix(cfg.get("prefix") or "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...")) if prefix_enabled else "OFF"
     mode = cfg.get("mode", "force_join_poster")
     mode_label = "NEW MESSAGE" if mode == "new_message" else "FORCE JOIN POSTER"
     try:
@@ -487,7 +488,7 @@ async def render_animation(query, db):
     legacy_default = "frames_enabled" not in cfg and (not cfg.get("prefix") or cfg.get("prefix") == "Checking..")
     if legacy_default:
         frames = cfg.get("frames")
-        updates = {"prefix": "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```", "speed": 0.25}
+        updates = {"prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "speed": 0.25}
         if not isinstance(frames, list) or len(frames) != 3:
             updates["frames"] = [".", "..", "..."]
         cfg.update(updates)
@@ -1126,19 +1127,19 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             if query.message: await tracked_answer(query.message, state, "Send the first frame for the loop animation.")
     elif action == "animation_toggle":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
-        await patch(db, "animation", {"enabled": not cfg.get("enabled", False)}, {"prefix": "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
+        await patch(db, "animation", {"enabled": not cfg.get("enabled", False)}, {"prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
         await render_animation(query, db)
     elif action == "animation_speed":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
         speed = float(cfg.get("speed", 1.0))
         speed = min(1.0, max(0.25, speed))
         next_speed = round(0.25 + ((round((speed - 0.25) / 0.05) + 1) % 16) * 0.05, 2)
-        await patch(db, "animation", {"speed": next_speed}, {"enabled": False, "prefix": "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```", "frames": [".", "..", "..."], "mode": "force_join_poster"})
+        await patch(db, "animation", {"speed": next_speed}, {"enabled": False, "prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "frames": [".", "..", "..."], "mode": "force_join_poster"})
         await render_animation(query, db)
     elif action == "animation_mode_toggle":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
         current = cfg.get("mode", "force_join_poster")
-        await patch(db, "animation", {"mode": "new_message" if current != "new_message" else "force_join_poster"}, {"enabled": False, "prefix": "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```", "frames": [".", "..", "..."], "speed": 0.25})
+        await patch(db, "animation", {"mode": "new_message" if current != "new_message" else "force_join_poster"}, {"enabled": False, "prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "frames": [".", "..", "..."], "speed": 0.25})
         await render_animation(query, db)
     elif action == "animation_mode":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
@@ -1148,7 +1149,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         ]))
     elif action in ("animation_mode_new", "animation_mode_poster"):
         mode = _animation_mode_for_action(action)
-        await patch(db, "animation", {"mode": mode}, {"enabled": False, "prefix": "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```", "frames": [".", "..", "..."], "speed": 0.25})
+        await patch(db, "animation", {"mode": mode}, {"enabled": False, "prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "frames": [".", "..", "..."], "speed": 0.25})
         await render_animation(query, db)
     elif action == "shortener": await render_shortener(query, db)
     elif action == "shortener_add":
@@ -1570,11 +1571,11 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         animation_cfg = await db.settings.find_one({"key": "animation"}) or {}
         frame_values = {"frames": frames, "frames_enabled": True}
         if not animation_cfg.get("prefix"):
-            frame_values["prefix"] = "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```"
+            frame_values["prefix"] = "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ..."
             frame_values["prefix_enabled"] = False
         panel_chat_id = data.get("animation_panel_chat_id")
         panel_message_id = data.get("animation_panel_message_id")
-        await patch(db, "animation", frame_values, {"enabled": False, "prefix": "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```", "speed": 0.25, "mode": "force_join_poster"})
+        await patch(db, "animation", frame_values, {"enabled": False, "prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "speed": 0.25, "mode": "force_join_poster"})
         await clear_state_preserving_prompts(state)
         await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
         await tracked_answer(message, state, "✨ Animation frames updated successfully.")
