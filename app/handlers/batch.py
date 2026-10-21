@@ -10,6 +10,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CopyTextButton
+from aiogram.dispatcher.event.bases import SkipHandler
 
 from app.config import Settings
 from app.database.files import FileRepository
@@ -107,7 +108,7 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
     if not message.from_user:
         return
     if message.text and message.text.startswith("/"):
-        return
+        raise SkipHandler
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
         await message.answer("Please forward the first Database Channel post with its forward tag, or send its message link.")
