@@ -57,11 +57,11 @@ def unicode_buttons(value: str) -> str:
     return "".join(ch.translate(table) if ch.isascii() and ch.isalpha() else ch for ch in str(value))
 AUTO_DELETE_MINUTES = (2, 5, 10, 15, 30, 60, 180, 360, 720, 1440)
 DEFAULT_NOTICE = "<b>⚠️ Cᴏᴘʏʀɪɢʜᴛ Nᴏᴛɪᴄᴇ..</b>\n<blockquote>Yᴏᴜʀ ғɪʟᴇs ᴡɪʟʟ ʙᴇ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪɴ {auto_delete_time}.</blockquote>\n<blockquote>ᴘʟᴇᴀsᴇ ғᴏʀᴡᴀʀᴅ ᴏʀ sᴀᴠᴇ ʏᴏᴜʀ ғɪʟᴇs sᴏᴍᴇᴡʜᴇʀᴇ sᴀғᴇ sᴏ ʏᴏᴜ ᴄᴀɴ ᴀᴄᴄᴇss ᴛʜᴇᴍ ᴀɴʏᴛɪᴍᴇ!</blockquote>"
-DEFAULT_START_TEXT = "<b>Hey {user_mention}✨</b>\n\n<i>Welcome to the fastest and most secure file store bot!</i>"
+DEFAULT_START_TEXT = "<b><i>✨ ʜᴇʟʟᴏ {mention}</i></b>\n\n📂 ɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
 DEFAULT_AFTER_TEXT = "Yᴏᴜʀ Vɪᴅᴇᴏ / Fɪʟᴇ Iꜱ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ Dᴇʟᴇᴛᴇᴅ ✅"
 DEFAULT_AFTER_BUTTON = "Gᴇᴛ ʏᴏᴜʀ ꜰɪʟᴇꜱ ᴀɢᴀɪɴ"
 DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
-DEFAULT_FORCE_JOIN_MESSAGE = "Hey {mention}\nPlease Join My {remaining_count} Channel's To Use Me!"
+DEFAULT_FORCE_JOIN_MESSAGE = "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\n\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ."
 
 
 def formatted_input_text(message, fallback):
