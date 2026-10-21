@@ -325,7 +325,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
         frames = [".", "..", "..."]
     if not frames_enabled:
         frames = [""]
-    prefix_value = str(cfg.get("prefix") or "Checking") if prefix_enabled else ""
+    prefix_value = str(cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
     if prefix_value == "Checking..":
         prefix_value = "Checking"
     try:
@@ -418,7 +418,7 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
     separate_id = None
     if mode == "new_message":
         prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
-        prefix_value = str(cfg.get("prefix") or "Checking") if prefix_enabled else ""
+        prefix_value = str(cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
         if prefix_value == "Checking..":
             prefix_value = "Checking"
         frames_enabled = cfg.get("frames_enabled", True)
@@ -475,7 +475,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
             if not frames_enabled:
                 frames = [""]
             prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
-            prefix_value = str(animation_cfg.get("prefix") or "Checking") if prefix_enabled else ""
+            prefix_value = str(animation_cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
             if prefix_value == "Checking..":
                 prefix_value = "Checking"
             first = animation_frame_text(prefix_value, frames[0])
@@ -856,7 +856,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             if not frames_enabled:
                 frames = [""]
             prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
-            prefix_value = str(animation_cfg.get("prefix") or "Checking") if prefix_enabled else ""
+            prefix_value = str(animation_cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
             if prefix_value == "Checking..":
                 prefix_value = "Checking"
             first = animation_frame_text(prefix_value, frames[0])
@@ -901,7 +901,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         rows.append([InlineKeyboardButton(text=force_cfg.get("verify_text") or "ɪ ᴊᴏɪɴᴇᴅ — ᴄʜᴇᴄᴋ ᴀɢᴀɪɴ", callback_data=f"forcejoin:check:{payload}")])
         me = await bot.get_me()
         raw_text = str(force_cfg.get("message") or "Hey {mention}\nPlease Join My {remaining_count} Channel's To Use Me!")
-        rendered = render_common_variables(raw_text, query.from_user, me).replace("{remaining_count}", str(len(missing)))
+        rendered = render_common_variables(normalize_telegram_text(raw_text), query.from_user, me).replace("{remaining_count}", str(len(missing)))
         markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
         # Stop the animation, then edit its poster in place with the current
