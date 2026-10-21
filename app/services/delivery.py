@@ -170,10 +170,7 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                 continue
             item = items[index]
             try:
-                # copy_message does not reliably carry the source inline keyboard.
-                # Forward the stored channel message so Telegram keeps its original
-                # inline keyboard attached without serializing it into MongoDB.
-                sent = await bot.forward_message(
+                sent = await bot.copy_message(
                     chat_id=doc["user_id"], from_chat_id=item["source_chat_id"],
                     message_id=item["source_message_id"],
                 )
