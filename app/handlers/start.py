@@ -353,7 +353,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
         frames = [".", "..", "..."]
     if not frames_enabled:
         frames = [""]
-    prefix_value = str(cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
+    prefix_value = normalize_animation_prefix(cfg.get("prefix") or "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...") if prefix_enabled else ""
     if prefix_value == "Checking..":
         prefix_value = "Checking"
     try:
