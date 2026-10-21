@@ -108,7 +108,11 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])
-        await message.answer(link, reply_markup=keyboard)
+        link_message = await message.answer(link, reply_markup=keyboard)
+        # Reply with the original text/caption transiently; never duplicate it in MongoDB.
+        original_text = (message.caption or message.text or "").strip()
+        if original_text:
+            await message.answer(original_text, reply_to_message_id=link_message.message_id)
         # Remove the collection prompt only after the deeplink has been delivered.
         prompt_message_id = state_data.get("prompt_message_id")
         prompt_chat_id = state_data.get("prompt_chat_id")
