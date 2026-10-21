@@ -50,6 +50,7 @@ class FileRepository:
                 "file_key": key,
                 "source_chat_id": source_chat_id,
                 "source_message_id": source_message_id,
+                "kind": "file",
             }
             try:
                 await self.db.files.insert_one(doc)
@@ -60,12 +61,7 @@ class FileRepository:
         raise RuntimeError("Could not allocate a unique file key")
 
     async def get_file(self, key: str) -> dict | None:
-        # New file records contain only the deeplink code and source IDs.
-        # Accept legacy records with kind="file" during the transition.
-        return await self.db.files.find_one({
-            "file_key": key,
-            "$or": [{"kind": "file"}, {"kind": {"$exists": False}}],
-        })
+        return await self.db.files.find_one({"file_key": key, "kind": "file"})
 
     async def save_batch(
         self, items: list[dict], batch_id: str | None = None
