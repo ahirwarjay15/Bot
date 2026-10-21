@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.database.connection import Database
 from app.handlers.start import router as start_router, run_pending_join_request_cleanup_worker
 from app.handlers.file import router as file_router
-from app.handlers.batch import router as batch_router, run_batch_session_worker
+from app.handlers.batch import router as batch_router
 from app.handlers.admin import router as admin_router
 from app.handlers.settings import router as settings_router
 from app.handlers.broadcast import router as broadcast_router, run_broadcast_worker
@@ -121,7 +121,6 @@ async def main():
         if role in {"all", "worker"}:
             workers = (
                 (run_task_worker, (bot, database.db), "delivery-task-worker"),
-                (run_batch_session_worker, (bot, database.db), "batch-session-worker"),
                 (run_batch_delivery_worker, (bot, database.db), "batch-delivery-worker"),
                 (run_broadcast_worker, (bot, database.db), "broadcast-worker"),
                 (run_pending_join_request_cleanup_worker, (database.db,), "pending-join-request-cleanup-worker"),
