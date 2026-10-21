@@ -12,7 +12,7 @@ from app.config import Settings
 from app.services.permissions import is_owner_or_moderator
 from app.services.text_format import normalize_telegram_text
 from app.services.links import shorten_url
-from app.handlers.start import effective_force_join_channels
+from app.handlers.start import effective_force_join_channels, normalize_animation_prefix
 
 router = Router(name="settings")
 
@@ -1550,7 +1550,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     if field == "animation_prefix":
         panel_chat_id = data.get("animation_panel_chat_id")
         panel_message_id = data.get("animation_panel_message_id")
-        await patch(db, "animation", {"prefix": value, "prefix_enabled": True}, {"enabled": False, "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
+        await patch(db, "animation", {"prefix": normalize_animation_prefix(value), "prefix_enabled": True}, {"enabled": False, "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
         await clear_state_preserving_prompts(state)
         await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
         await tracked_answer(message, state, "✨ Animation prefix enabled and saved successfully.")
