@@ -916,7 +916,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
         rows.append([InlineKeyboardButton(text=force_cfg.get("verify_text") or "♻️ ʀᴇᴛʀʏ", callback_data=f"forcejoin:check:{payload}")])
         me = await bot.get_me()
-        raw_text = ensure_default_quote_format(force_cfg.get("message", "force_join") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\n\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.")
+        raw_text = ensure_default_quote_format(force_cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\\n\\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.", "force_join")
         rendered = render_common_variables(normalize_telegram_text(raw_text), query.from_user, me).replace("{remaining_count}", str(len(missing)))
         markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
