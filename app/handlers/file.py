@@ -89,21 +89,19 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
                 chat_id=settings.source_channel_id,
                 from_chat_id=message.chat.id,
                 message_id=message.message_id,
-                # Keep the keyboard on the stored Telegram message, not in MongoDB.
-                reply_markup=(
-                    message.reply_markup
-                    if isinstance(message.reply_markup, InlineKeyboardMarkup)
-                    else None
-                ),
             )
             source_chat_id = settings.source_channel_id
             source_message_id = copied.message_id
 
-        # MongoDB stores only the deeplink code and source chat/message IDs.
-        # The keyboard, if any, is attached to the stored Telegram channel message.
+        # Store the complete keyboard JSON, without filename/user/timestamp metadata.
+        markup_data = (
+            message.reply_markup.model_dump(mode="json", exclude_none=True)
+            if message.reply_markup else None
+        )
         record = await FileRepository(database.db).save_file(
             source_chat_id=source_chat_id,
             source_message_id=source_message_id,
+            reply_markup=markup_data,
         )
         me = await message.bot.get_me()
         link = f"https://t.me/{me.username}?start=file_{record['file_key']}"
