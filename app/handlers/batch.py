@@ -141,6 +141,9 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     if count < 2:
         await message.answer("Please choose at least two messages. Send the last post again.")
         return
+    if count > 100:
+        await message.answer("This batch contains more than the supported 100 messages. Please choose a smaller range.")
+        return
     # The existing repository and delivery pipeline store only source IDs, not copied media.
     items = [{"source_chat_id": source_chat_id, "source_message_id": mid}
              for mid in range(first_id, last_id + 1)]
