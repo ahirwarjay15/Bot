@@ -126,7 +126,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     if not message.from_user:
         return
     if message.text and message.text.startswith("/"):
-        return
+        raise SkipHandler
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
         await message.answer("Please forward the last Database Channel post with its forward tag, or send its message link.")
