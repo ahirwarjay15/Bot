@@ -1,4 +1,4 @@
-# Titania
+# Telegram File Bot
 
 Async Telegram file and batch-delivery bot built with Python 3.12, aiogram 3 and MongoDB Atlas via PyMongo Async.
 
@@ -19,7 +19,7 @@ Set these environment variables in your hosting provider or a private `.env` fil
 - `BOT_TOKEN`: token for this bot instance.
 - `OWNER_ID`: numeric Telegram owner ID.
 - `MONGODB_URI`: MongoDB connection string.
-- `MONGODB_DB_NAME`: database name; defaults to `file_bot` for backward compatibility. Set it explicitly (for example, `titania`) if you want the MongoDB database name to match this repository.
+- `MONGODB_DB_NAME`: required database name for this bot instance. Choose a dedicated name (for example, `my_file_bot`) to keep this bot's data isolated. The code has no implicit database-name default.
 - `SOURCE_CHANNEL_ID`: private source channel ID (legacy `DB_CHANNEL_ID` is also accepted).
 - `DEEPLINK_CHANNEL`: optional numeric Telegram channel ID where generated deeplinks and their original formatted captions are mirrored; the bot must have permission to post there.
 - `FORCE_JOIN_CHANNELS`: optional comma-separated usernames or channel IDs.
@@ -38,7 +38,7 @@ cp .env.example .env
 python main.py
 ```
 
-Run the regression suite with `pytest -q`.
+Run the automated test suite with `pytest -q`.
 
 ## Docker
 
