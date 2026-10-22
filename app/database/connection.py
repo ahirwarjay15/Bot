@@ -107,7 +107,10 @@ class Database:
             await self.db.batches.create_index([("batch_id", ASCENDING)], unique=True, sparse=True)
             await self.db.deeplink_codes.create_index([("code", ASCENDING)], unique=True)
             await self.db.force_join_links.create_index([("user_id", ASCENDING), ("chat_id", ASCENDING)], unique=True, name="user_chat_unique")
-            await self.db.force_join_links.create_index([("expires_at", ASCENDING)], expireAfterSeconds=0, name="temporary_link_ttl")
+            force_join_indexes = await self.db.force_join_links.index_information()
+            if "temporary_link_ttl" in force_join_indexes:
+                await self.db.force_join_links.drop_index("temporary_link_ttl")
+            await self.db.force_join_links.create_index([("cleanup_at", ASCENDING)], expireAfterSeconds=0, name="temporary_link_cleanup_ttl")
             await self.db.force_join_links.create_index([("invite_link", ASCENDING)], unique=True, name="invite_link_unique")
             await remove_legacy_external_force_join_links(self.db)
             await backfill_deeplink_codes(self.db)
