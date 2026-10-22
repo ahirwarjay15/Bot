@@ -231,13 +231,8 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     await db.settings.update_one({"key": "force_join_channel", "channel": channel}, {"$set": {
         "key": "force_join_channel", "channel": channel, "channel_title": chat.title or str(chat_id),
         "chat_type": chat.type, "mode": mode}}, upsert=True)
-    # Every Force Join page view gets a fresh link. Revoke and remove any older
-    # link for this user/chat before creating the replacement.
-    old_records = [r async for r in db.force_join_links.find(
-        {"user_id": int(user_id), "chat_id": chat_id}
-    )]
-    for old in old_records:
-        await _revoke_tracked_force_join_link(bot, db, old)
+    # Never revoke old links in the interactive Force Join path. Create a fresh
+    # link now; expiry/join cleanup workers revoke older links asynchronously.
     try:
         invite = await bot.create_chat_invite_link(chat_id=chat_id, expire_date=int(now.timestamp()) + 300,
             creates_join_request=(mode == "join_request"), name="Force Join")
@@ -249,16 +244,16 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
         "mode": mode, "created_at": created, "refresh_at": created + timedelta(seconds=240),
         "expires_at": created + timedelta(seconds=300), "cleanup_at": created + timedelta(seconds=360)}
     try:
-        await db.force_join_links.replace_one({"user_id": int(user_id), "chat_id": chat_id}, record, upsert=True)
+        await db.force_join_links.insert_one(record)
     except Exception:
+        # If the short-lived link cannot be tracked for cleanup, revoke it rather
+        # than leave an unmanaged invite active.
         try:
             await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
         except TelegramAPIError:
-            log.warning("Could not revoke concurrent duplicate invite", exc_info=True)
-        winner = await db.force_join_links.find_one({"user_id": int(user_id), "chat_id": chat_id})
-        if winner and winner.get("expires_at") and winner["expires_at"] > datetime.now(timezone.utc):
-            return winner.get("invite_link")
-        raise
+            log.warning("Could not revoke untracked temporary invite", exc_info=True)
+        log.exception("Could not persist temporary Force Join link")
+        return None
     return invite.invite_link
 
 
@@ -327,11 +322,12 @@ _forcejoin_locks: dict[tuple[int, str], asyncio.Lock] = {}
 async def _cancel_gate_animation(bot, user_id: int, payload: str,
                                  delete_separate: bool = True) -> int | None:
     key = (user_id, payload)
-    entry = _gate_animation_tasks.pop(key, None)
-    stop_event = _gate_animation_stop_events.pop(key, None)
+    entry = _gate_animation_tasks.get(key)
+    stop_event = _gate_animation_stop_events.get(key)
     if stop_event:
         stop_event.set()
     if not entry:
+        _gate_animation_stop_events.pop(key, None)
         return None
     task, separate_message_id = entry
     # Wake the animation immediately if it is sleeping. If a Telegram edit is
@@ -344,6 +340,11 @@ async def _cancel_gate_animation(bot, user_id: int, payload: str,
             pass
         except Exception:
             log.debug("Force Join animation task ended during shutdown", exc_info=True)
+    latest = _gate_animation_tasks.get(key)
+    if latest and latest[0] is task:
+        separate_message_id = latest[1]
+        _gate_animation_tasks.pop(key, None)
+    _gate_animation_stop_events.pop(key, None)
     if separate_message_id and delete_separate:
         async def cleanup_animation_message():
             try:
@@ -402,9 +403,21 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             while True:
                 try:
                     if mode == "new_message":
-                        await bot.edit_message_text(
-                            chat_id=user_id, message_id=target_id, text=animated, parse_mode="HTML",
+                        # Fresh messages avoid Telegram's "Edited" label.
+                        if target_id is not None:
+                            try:
+                                await bot.delete_message(chat_id=user_id, message_id=target_id)
+                            except TelegramAPIError:
+                                log.debug("Previous animation frame was already unavailable")
+                            target_id = None
+                        frame_message = await bot.send_message(
+                            chat_id=user_id, text=animated, parse_mode="HTML",
                         )
+                        target_id = frame_message.message_id
+                        current = _gate_animation_tasks.get(key)
+                        running_task = asyncio.current_task()
+                        if current and current[0] is running_task:
+                            _gate_animation_tasks[key] = (running_task, target_id)
                     else:
                         content = animated if animation_only else f"{base_text}\n\n{animated}"
                         if gate_message.photo or gate_message.animation or gate_message.document:
