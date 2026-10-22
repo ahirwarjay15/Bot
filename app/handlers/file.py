@@ -75,6 +75,8 @@ async def waiting_command(message:Message,state:FSMContext):
 async def receive_file(message:Message,state:FSMContext,settings:Settings,database):
     if not message.from_user:return
     state_data = await state.get_data()
+    record = None
+    link_message = None
     try:
         # If the user forwarded a post from the configured storage channel, reuse
         # its original channel message ID instead of trying to copy the forwarded
@@ -140,6 +142,11 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
         except TelegramAPIError:
             log.warning("Could not delete submitted message after saving", exc_info=True)
     except TelegramAPIError as exc:
+        if record is not None and link_message is None:
+            try:
+                await database.db.files.delete_one({"file_key": record["file_key"], "kind": "file"})
+            except Exception:
+                log.warning("Could not clean up an unlinked file record", exc_info=True)
         log.exception("Could not create file link")
         reason = type(exc).__name__
         if "chat not found" in str(exc).lower():
@@ -152,5 +159,10 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
             detail = f"Telegram error: {reason}. Check the bot's storage channel access and SOURCE_CHANNEL_ID."
         await message.answer(f"Couldn't store this message. {detail}")
     except Exception:
+        if record is not None and link_message is None:
+            try:
+                await database.db.files.delete_one({"file_key": record["file_key"], "kind": "file"})
+            except Exception:
+                log.warning("Could not clean up an unlinked file record", exc_info=True)
         log.exception("File link creation failed");await message.answer("Unexpected error while saving this link. Check bot logs.")
     finally:await state.clear()
