@@ -544,7 +544,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
     join_buttons = []
     for index, channel in enumerate(missing):
         channel_cfg = await database.db.settings.find_one({"key": "force_join_channel", "channel": channel}) or {}
-        target = await resolve_force_join_button_target(bot, database.db, channel, channel_cfg, query.from_user.id)
+        target = await resolve_force_join_button_target(bot, database.db, channel, channel_cfg, user.id)
         button = build_force_join_channel_button(channel_cfg, index + 1, target, channel)
         if button:
             join_buttons.append(button)
