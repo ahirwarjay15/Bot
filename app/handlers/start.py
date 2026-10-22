@@ -601,9 +601,9 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
 
 async def send_file_animation(bot, db, user_id: int) -> None:
     """Briefly show configured pre-delivery text; deletion failures never block delivery."""
-    cfg = await db.settings.find_one({"key": "file_animation"}) or {}
-    text = str(cfg.get("text") or "").strip()
-    if not cfg.get("enabled") or not text:
+    cfg = await db.settings.find_one({"key": "animation"}) or {}
+    text = str(cfg.get("file_animation_text") or "").strip()
+    if not text:
         return
     msg = None
     try:
