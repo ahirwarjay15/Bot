@@ -6,8 +6,8 @@ from html import escape
 def normalize_telegram_text(value: str | None) -> str:
     """Convert supported Markdown to Telegram HTML; leave formatting markers invisible."""
     text = str(value or "")
-    # Repair legacy values that may contain one or more literal backslashes before n.\n    text = re.sub(r"\\\\+n", "\\n", text)
-    code_blocks = []
+    # Repair legacy values with any number of literal backslashes before n.
+    text = re.sub(r"\\+n", "\n", text)
 
     def save_code(match):
         code_blocks.append("<pre>" + escape(match.group(1).strip("\n")) + "</pre>")
