@@ -555,9 +555,16 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
         return False
 
     join_buttons = []
-    for index, channel in enumerate(missing):
-        channel_cfg = await database.db.settings.find_one({"key": "force_join_channel", "channel": channel}) or {}
-        target = await resolve_force_join_button_target(bot, database.db, channel, channel_cfg, user.id)
+    channel_cfgs = await asyncio.gather(*(
+        database.db.settings.find_one({"key": "force_join_channel", "channel": channel})
+        for channel in missing
+    ))
+    channel_cfgs = [item or {} for item in channel_cfgs]
+    targets = await asyncio.gather(*(
+        resolve_force_join_button_target(bot, database.db, channel, channel_cfg, user.id)
+        for channel, channel_cfg in zip(missing, channel_cfgs)
+    ))
+    for index, (channel, channel_cfg, target) in enumerate(zip(missing, channel_cfgs, targets)):
         button = build_force_join_channel_button(channel_cfg, index + 1, target, channel)
         if button:
             join_buttons.append(button)
@@ -963,11 +970,17 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
     )
     if missing:
         join_buttons = []
-        for index, channel in enumerate(missing):
-            channel_cfg = await database.db.settings.find_one({"key": "force_join_channel", "channel": channel}) or {}
-            target = await resolve_force_join_button_target(
-                bot, database.db, channel, channel_cfg
-            )
+        channel_cfgs = await asyncio.gather(*(
+            database.db.settings.find_one({"key": "force_join_channel", "channel": channel})
+            for channel in missing
+        ))
+        channel_cfgs = [item or {} for item in channel_cfgs]
+        # Verification refreshes expired join links without changing its own callback.
+        targets = await asyncio.gather(*(
+            resolve_force_join_button_target(bot, database.db, channel, channel_cfg, user_id)
+            for channel, channel_cfg in zip(missing, channel_cfgs)
+        ))
+        for index, (channel, channel_cfg, target) in enumerate(zip(missing, channel_cfgs, targets)):
             button = build_force_join_channel_button(channel_cfg, index + 1, target, channel)
             if button:
                 join_buttons.append(button)
