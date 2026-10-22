@@ -639,11 +639,15 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
     payload=command.args or ""
     if payload:
         if payload.startswith("file_"):
+            # Deepcode is always the first five characters. Accept both the
+            # full 20-character public token and a bare 5-character code.
             token = payload[5:]
-            record = await repo.get_file(token[:5]) if len(token) == 20 else None
+            code = token[:5]
+            record = await repo.get_file(code) if len(token) in (5, 20) else None
         elif payload.startswith("batch_"):
             token = payload[6:]
-            record = await repo.get_batch(token[:5]) if len(token) == 20 else None
+            code = token[:5]
+            record = await repo.get_batch(code) if len(token) in (5, 20) else None
         else:
             await message.answer("This link is invalid or expired.");return
         if not record:
