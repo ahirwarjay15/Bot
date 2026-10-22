@@ -231,14 +231,16 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     await db.settings.update_one({"key": "force_join_channel", "channel": channel}, {"$set": {
         "key": "force_join_channel", "channel": channel, "channel_title": chat.title or str(chat_id),
         "chat_type": chat.type, "mode": mode}}, upsert=True)
-    old = await db.force_join_links.find_one({"user_id": int(user_id), "chat_id": chat_id})
-    if old:
-        if old.get("refresh_at") and old["refresh_at"] > now and old.get("expires_at") and old["expires_at"] > now:
-            return old["invite_link"]
+    # Every Force Join page view gets a fresh link. Revoke and remove any older
+    # link for this user/chat before creating the replacement.
+    old_records = [r async for r in db.force_join_links.find(
+        {"user_id": int(user_id), "chat_id": chat_id}
+    )]
+    for old in old_records:
         await _revoke_tracked_force_join_link(bot, db, old)
     try:
         invite = await bot.create_chat_invite_link(chat_id=chat_id, expire_date=int(now.timestamp()) + 300,
-            creates_join_request=(mode == "join_request"), name="Titania Force Join")
+            creates_join_request=(mode == "join_request"), name="Force Join")
     except TelegramAPIError:
         log.exception("Could not create temporary Force Join link for %s", chat_id)
         return None
@@ -627,6 +629,11 @@ async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:d
 async def start_command(message:Message,command:CommandObject,settings:Settings,database,bot):
     user=message.from_user
     if not user:return
+    # Remove the incoming /start command so repeated link opens do not clutter chat.
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
     repo=FileRepository(database.db);await repo.save_user(user)
     if await repo.is_banned(user.id):return
     payload=command.args or ""
