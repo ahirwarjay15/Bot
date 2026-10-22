@@ -335,14 +335,21 @@ async def build_forcejoin_page(bot, db, settings):
     rows = [channel_buttons[i:i+2] for i in range(0, len(channel_buttons), 2)]
     if len(channels) < 10:
         rows.append([("✚ ADD", "settings:forcejoin_add")])
+    # Force Join is active exactly while at least one channel is configured.
+    enabled = bool(channels)
+    if cfg.get("enabled") != enabled:
+        await db.settings.update_one(
+            {"key": "force_join"},
+            {"$set": {"enabled": enabled}},
+            upsert=True,
+        )
     rows.extend([
-        [("FORCE JOIN MESSAGE", "settings:forcejoin_message"), ("FORCE JOIN MEDIA", "settings:forcejoin_media")],
-        [("VERIFY", "settings:forcejoin_verify_text"),
-         ("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")],
+        [("ONLY MESSAGE", "settings:forcejoin_message"), ("ONLY MEDIA", "settings:forcejoin_media")],
+        [("VERIFY", "settings:forcejoin_verify_text")],
         [("《 BACK", "settings:home")],
     ])
     text = ("FORCE JOIN\n\n"
-            f"Status: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\n\n"
+            f"Status: {'ENABLED ✅' if enabled else 'DISABLED ❌'}\n\n"
             "Users must verify the required channels before receiving files.\n\n"
             "You can add up to 10 force-join channels.")
     return text, kb(rows)
