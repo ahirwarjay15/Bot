@@ -169,85 +169,95 @@ def build_force_join_channel_button(
     return None
 
 
-async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict) -> str | None:
-    """Resolve a valid join URL and repair missing per-channel metadata when possible."""
-    target = channel_cfg.get("button_url")
-    chat = None
+async def _revoke_tracked_force_join_link(bot, db, record: dict) -> None:
+    link, chat_id = record.get("invite_link"), record.get("chat_id")
+    if link and chat_id is not None:
+        try:
+            await bot.revoke_chat_invite_link(chat_id=int(chat_id), invite_link=link)
+        except TelegramAPIError:
+            log.debug("Force Join link already expired/revoked", exc_info=True)
+    await db.force_join_links.delete_one({"_id": record["_id"]})
+
+
+async def cleanup_expired_force_join_links(bot, db, limit: int = 200) -> int:
+    now = datetime.now(timezone.utc)
+    records = [r async for r in db.force_join_links.find({"expires_at": {"$lte": now}}).limit(limit)]
+    for record in records:
+        await _revoke_tracked_force_join_link(bot, db, record)
+    return len(records)
+
+
+async def run_force_join_link_cleanup_worker(bot, db, interval_seconds: int = 30):
+    while True:
+        try:
+            await cleanup_expired_force_join_links(bot, db)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("Force Join link cleanup failed", exc_info=True)
+        await asyncio.sleep(interval_seconds)
+
+
+async def _revoke_used_force_join_link(bot, db, chat_id: int, invite_link) -> None:
+    url = getattr(invite_link, "invite_link", None) if invite_link else None
+    if not url:
+        return
+    record = await db.force_join_links.find_one({"chat_id": int(chat_id), "invite_link": url})
+    if record:
+        await _revoke_tracked_force_join_link(bot, db, record)
+
+
+async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
+    if user_id is None:
+        return None
     try:
         chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
         chat = await bot.get_chat(chat_arg)
-    except ValueError:
-        log.warning("Invalid Force Join chat identifier %r", channel, exc_info=True)
-    except TelegramAPIError as exc:
-        log.warning("Could not resolve Force Join chat %r via Telegram: %s", channel, exc, exc_info=True)
-
-    if chat and chat.username:
-        # Public channels should always use their own canonical username link,
-        # even if a legacy settings write left another URL on the record.
-        target = f"https://t.me/{chat.username}"
-        values = {
-            "key": "force_join_channel", "channel": channel,
-            "button_url": target, "channel_title": chat.title or str(chat.id),
-            "chat_type": chat.type, "mode": "normal",
-        }
-        if any(
-            channel_cfg.get(key) != value
-            for key, value in values.items()
-            if key not in {"key", "channel"}
-        ):
-            await db.settings.update_one(
-                {"key": "force_join_channel", "channel": channel},
-                {"$set": values},
-                upsert=True,
-            )
-        return target
-
-    stale_private_metadata = bool(
-        chat and target and (
-            not channel_cfg.get("channel_title")
-            or not channel_cfg.get("chat_type")
-            or (chat.title and channel_cfg.get("channel_title") != chat.title)
-            or channel_cfg.get("chat_type") != chat.type
-            or channel_cfg.get("mode", "join_request") != "join_request"
-        )
-    )
-    if target and not stale_private_metadata:
-        return target
-    if stale_private_metadata:
-        # A previous channel-key collision could leave another channel's invite
-        # attached to this record. Recreate it when the saved metadata disagrees.
-        target = None
-
-    if chat:
+    except (ValueError, TelegramAPIError):
+        log.warning("Could not resolve Force Join chat %r", channel, exc_info=True)
+        return None
+    now = datetime.now(timezone.utc)
+    chat_id = int(chat.id)
+    mode = "normal" if getattr(chat, "username", None) else channel_cfg.get("mode", "join_request")
+    if mode not in {"normal", "join_request"}:
+        mode = "join_request"
+    legacy = channel_cfg.get("button_url")
+    if legacy:
         try:
-            invite = await bot.create_chat_invite_link(
-                chat_id=chat.id, creates_join_request=True, name="FB Force Join - Request"
-            )
-        except TelegramAPIError as exc:
-            log.error(
-                "Could not create a private Force Join invite for chat %s: %s",
-                chat.id, exc, exc_info=True,
-            )
-            # Reuse the saved URL if Telegram refuses a replacement; never invent
-            # a private invite URL.
-            return channel_cfg.get("button_url") or None
-        target = invite.invite_link
-        await db.settings.update_one(
-            {"key": "force_join_channel", "channel": channel},
-            {"$set": {
-                "key": "force_join_channel", "channel": channel,
-                "button_url": target, "channel_title": chat.title or str(chat.id),
-                "chat_type": chat.type, "mode": "join_request",
-            }},
-            upsert=True,
-        )
-        return target
-
-    if channel.startswith(("https://t.me/", "http://t.me/")):
-        return channel
-    if not channel.lstrip("-").isdigit():
-        return f"https://t.me/{channel.lstrip('@')}"
-    return None
+            await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=legacy)
+        except TelegramAPIError:
+            log.debug("Legacy Force Join link already invalid", exc_info=True)
+        await db.settings.update_one({"key": "force_join_channel", "channel": channel}, {"$unset": {"button_url": ""}})
+    await db.settings.update_one({"key": "force_join_channel", "channel": channel}, {"$set": {
+        "key": "force_join_channel", "channel": channel, "channel_title": chat.title or str(chat_id),
+        "chat_type": chat.type, "mode": mode}}, upsert=True)
+    old = await db.force_join_links.find_one({"user_id": int(user_id), "chat_id": chat_id})
+    if old:
+        if old.get("refresh_at") and old["refresh_at"] > now and old.get("expires_at") and old["expires_at"] > now:
+            return old["invite_link"]
+        await _revoke_tracked_force_join_link(bot, db, old)
+    try:
+        invite = await bot.create_chat_invite_link(chat_id=chat_id, expire_date=int(now.timestamp()) + 300,
+            creates_join_request=(mode == "join_request"), name="Titania Force Join")
+    except TelegramAPIError:
+        log.exception("Could not create temporary Force Join link for %s", chat_id)
+        return None
+    created = datetime.now(timezone.utc)
+    record = {"user_id": int(user_id), "chat_id": chat_id, "invite_link": invite.invite_link,
+        "mode": mode, "created_at": created, "refresh_at": created + timedelta(seconds=240),
+        "expires_at": created + timedelta(seconds=300), "cleanup_at": created + timedelta(seconds=360)}
+    try:
+        await db.force_join_links.replace_one({"user_id": int(user_id), "chat_id": chat_id}, record, upsert=True)
+    except Exception:
+        try:
+            await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
+        except TelegramAPIError:
+            log.warning("Could not revoke concurrent duplicate invite", exc_info=True)
+        winner = await db.force_join_links.find_one({"user_id": int(user_id), "chat_id": chat_id})
+        if winner and winner.get("expires_at") and winner["expires_at"] > datetime.now(timezone.utc):
+            return winner.get("invite_link")
+        raise
+    return invite.invite_link
 
 
 def _is_private_chat(chat) -> bool:
@@ -534,7 +544,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
     join_buttons = []
     for index, channel in enumerate(missing):
         channel_cfg = await database.db.settings.find_one({"key": "force_join_channel", "channel": channel}) or {}
-        target = await resolve_force_join_button_target(bot, database.db, channel, channel_cfg)
+        target = await resolve_force_join_button_target(bot, database.db, channel, channel_cfg, query.from_user.id)
         button = build_force_join_channel_button(channel_cfg, index + 1, target, channel)
         if button:
             join_buttons.append(button)
@@ -759,6 +769,7 @@ async def run_pending_join_request_cleanup_worker(db, interval_seconds: int = 36
 
 @router.chat_join_request()
 async def remember_pending_join_request(event, database):
+    await _revoke_used_force_join_link(event.bot, database.db, event.chat.id, getattr(event, "invite_link", None))
     # Telegram emits this only when the bot has the appropriate channel admin rights.
     await database.db.pending_join_requests.update_one(
         {"chat_id": event.chat.id, "user_id": event.from_user.id},
@@ -769,6 +780,7 @@ async def remember_pending_join_request(event, database):
 
 @router.chat_member()
 async def clear_accepted_private_join_request(event, database):
+    await _revoke_used_force_join_link(event.bot, database.db, event.chat.id, getattr(event, "invite_link", None))
     """Drop a saved request only when a private-channel request becomes membership."""
     if not _is_private_chat(event.chat):
         return
@@ -814,7 +826,7 @@ async def forcejoin_repair_link(query: CallbackQuery, database):
     channel_cfg = await database.db.settings.find_one(
         {"key": "force_join_channel", "channel": channel}
     ) or {}
-    target = await resolve_force_join_button_target(query.bot, database.db, channel, channel_cfg)
+    target = await resolve_force_join_button_target(query.bot, database.db, channel, channel_cfg, query.from_user.id)
     if target:
         rows = []
         for row in query.message.reply_markup.inline_keyboard:
