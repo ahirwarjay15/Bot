@@ -21,12 +21,20 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("SOURCE_CHANNEL_ID", "DB_CHANNEL_ID"),
     )
+    deeplink_channel_id: int | None = Field(default=None, validation_alias="DEEPLINK_CHANNEL")
     force_join_channels: list[str] = Field(default_factory=list, validation_alias="FORCE_JOIN_CHANNELS")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
 
     @field_validator("source_channel_id", mode="before")
     @classmethod
     def parse_optional_source_channel(cls, value):
+        if value is None or value == "":
+            return None
+        return value
+
+    @field_validator("deeplink_channel_id", mode="before")
+    @classmethod
+    def parse_optional_deeplink_channel(cls, value):
         if value is None or value == "":
             return None
         return value
