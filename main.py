@@ -43,7 +43,7 @@ async def health(_request):
     """Report readiness, not merely that the HTTP listener is alive."""
     if not SERVICE_READY:
         return web.json_response({"status": "starting", "service": "Telegram File Bot"}, status=503)
-    return web.json_response({"status": "ok", "service": "Titania"})
+    return web.json_response({"status": "ok", "service": "Telegram File Bot"})
 
 
 async def start_health_server():
