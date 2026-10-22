@@ -1088,8 +1088,8 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         except TelegramAPIError:
             log.info("Could not remove Force Join verification animation")
     repo=FileRepository(database.db)
-    if payload.startswith("file_"):record=await repo.get_file(payload[5:])
-    elif payload.startswith("batch_"):record=await repo.get_batch(payload[6:])
+    if payload.startswith("file_"):record=await repo.get_file(payload[5:][:5])
+    elif payload.startswith("batch_"):record=await repo.get_batch(payload[6:][:5])
     else:return
     if not record:
         if old_post:
