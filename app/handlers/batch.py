@@ -15,6 +15,7 @@ from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
 from app.database.files import FileRepository
 from app.services.permissions import is_owner_or_moderator
+from app.services.deeplink_channel import mirror_deeplink
 
 router = Router(name="batch")
 log = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ async def _parse_message_reference(message: Message, bot, configured_chat_id):
     """Accept a forwarded post or a t.me/<channel>/<id> / t.me/c/<id>/<id> link."""
     origin = _origin(message, configured_chat_id)
     if origin:
-        return origin[1], (message.caption or message.text or "").strip()
+        return origin[1], (message.caption if message.caption is not None else (message.text or ""))
 
     raw = (message.text or message.caption or "").strip()
     match = re.search(r"(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/([^\s]+)", raw)
@@ -77,6 +78,41 @@ def _link_keyboard(link: str):
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
     ]])
+
+async def _source_post_content(message: Message, source_chat_id: int, message_id: int):
+    """Read exact text/caption and formatting entities; temporary forwards are deleted."""
+    origin = _origin(message, source_chat_id)
+    if origin and origin[1] == int(message_id):
+        source = message
+        temporary = False
+    else:
+        source = await message.bot.forward_message(
+            chat_id=message.chat.id,
+            from_chat_id=source_chat_id,
+            message_id=message_id,
+        )
+        temporary = True
+    try:
+        if source.caption is not None:
+            text = source.caption
+            entities = source.caption_entities or []
+        else:
+            text = source.text or ""
+            entities = source.entities or []
+        serialized = [entity.model_dump(mode="json", exclude_none=True) for entity in entities]
+        return text, serialized
+    finally:
+        if temporary:
+            try:
+                await message.bot.delete_message(chat_id=source.chat.id, message_id=source.message_id)
+            except TelegramAPIError:
+                log.warning("Could not delete temporary source-post lookup message %s", source.message_id, exc_info=True)
+
+
+def _entities_from_data(data):
+    from aiogram.types import MessageEntity
+    return [MessageEntity.model_validate(item) for item in (data or [])]
+
 
 
 @router.message(Command("batch"))
@@ -114,7 +150,13 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
         await message.answer("Please forward the first Database Channel post with its forward tag, or send its message link.")
         return
     first_id, first_caption = parsed
-    await state.update_data(first_message_id=first_id, first_caption=first_caption)
+    try:
+        first_caption, first_entities = await _source_post_content(message, int(settings.source_channel_id), first_id)
+    except TelegramAPIError:
+        log.exception("Could not read the first source post's text/entities")
+        await message.answer("I couldn't read the first post from the Database Channel. Check that the bot can access and forward that post.")
+        return
+    await state.update_data(first_message_id=first_id, first_caption=first_caption, first_caption_entities=first_entities)
     await state.set_state(BatchState.waiting_last)
     await message.answer(
         "Forward The Batch Last Message From Database Channel (With Forward Tag).. or Give Me Batch last message link from your batch channel"
@@ -132,6 +174,12 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         await message.answer("Please forward the last Database Channel post with its forward tag, or send its message link.")
         return
     last_id, last_caption = parsed
+    try:
+        last_caption, last_entities = await _source_post_content(message, int(settings.source_channel_id), last_id)
+    except TelegramAPIError:
+        log.exception("Could not read the last source post's text/entities")
+        await message.answer("I couldn't read the last post from the Database Channel. Check that the bot can access and forward that post.")
+        return
     data = await state.get_data()
     first_id = int(data["first_message_id"])
     source_chat_id = int(data["source_chat_id"])
@@ -152,15 +200,23 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         batch = await FileRepository(database.db).save_batch(items)
         me = await message.bot.get_me()
         link = f"https://t.me/{me.username}?start=batch_{batch['batch_id']}"
-        sent_link = await message.answer(link, reply_markup=_link_keyboard(link))
-        # Caption text is transient; do not add it to MongoDB. For forwarded inputs,
-        # Telegram supplies it on the incoming Message object.
-        captions = []
-        for caption in (data.get("first_caption", ""), last_caption):
-            if caption and caption not in captions:
-                captions.append(caption)
-        for caption in captions:
-            await message.answer(caption, reply_to_message_id=sent_link.message_id)
+        keyboard = _link_keyboard(link)
+        sent_link = await message.answer(link, reply_markup=keyboard)
+        # Reply in first-then-last order, preserving the original Telegram entities.
+        captions = [
+            (data.get("first_caption", ""), data.get("first_caption_entities", [])),
+            (last_caption, last_entities),
+        ]
+        for caption, entities_data in captions:
+            if caption:
+                await message.bot.send_message(
+                    chat_id=message.chat.id,
+                    text=caption,
+                    entities=_entities_from_data(entities_data),
+                    parse_mode=None,
+                    reply_to_message_id=sent_link.message_id,
+                )
+        await mirror_deeplink(message.bot, settings, link, keyboard, captions)
         await state.clear()
     except Exception:
         log.exception("Range batch generation failed")
