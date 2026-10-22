@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     bot_token: SecretStr = Field(validation_alias="BOT_TOKEN")
     owner_id: int = Field(validation_alias="OWNER_ID", gt=0)
     mongodb_uri: SecretStr = Field(validation_alias="MONGODB_URI")
-    mongodb_db_name: str = Field(default="file_bot", validation_alias="MONGODB_DB_NAME")
+    mongodb_db_name: str = Field(validation_alias="MONGODB_DB_NAME", min_length=1)
     source_channel_id: int | None = Field(
         default=None,
         validation_alias=AliasChoices("SOURCE_CHANNEL_ID", "DB_CHANNEL_ID"),

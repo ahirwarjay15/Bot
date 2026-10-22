@@ -602,11 +602,15 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
     if await repo.is_banned(user.id):return
     payload=command.args or ""
     if payload:
-        if payload.startswith("file_"):record=await repo.get_file(payload[5:])
-        elif payload.startswith("batch_"):record=await repo.get_batch(payload[6:])
+        if payload.startswith("file_"):
+            token = payload[5:]
+            record = await repo.get_file(token[:5]) if len(token) == 20 else None
+        elif payload.startswith("batch_"):
+            token = payload[6:]
+            record = await repo.get_batch(token[:5]) if len(token) == 20 else None
         else:
             await message.answer("This link is invalid or expired.");return
-        if not record or len(payload.split("_",1)[1])>40:
+        if not record:
             await message.answer("This link is invalid or expired.");return
         if await gate_or_prompt(message,payload,settings,database,bot):return
         request_key = f"start:{user.id}:{message.message_id}"

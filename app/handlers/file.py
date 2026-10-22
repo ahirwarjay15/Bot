@@ -8,7 +8,7 @@ from aiogram.types import Message,InlineKeyboardMarkup,InlineKeyboardButton,Copy
 from aiogram.exceptions import TelegramAPIError
 from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
-from app.database.files import FileRepository
+from app.database.files import FileRepository, build_deeplink_token
 from app.services.permissions import is_owner_or_moderator
 from app.services.deeplink_channel import mirror_deeplink
 router=Router(name="file");log=logging.getLogger(__name__)
@@ -108,7 +108,7 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
             reply_markup=markup_data,
         )
         me = await message.bot.get_me()
-        link = f"https://t.me/{me.username}?start=file_{record['file_key']}"
+        link = f"https://t.me/{me.username}?start=file_{build_deeplink_token(record['file_key'])}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])

@@ -13,7 +13,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from aiogram.dispatcher.event.bases import SkipHandler
 
 from app.config import Settings
-from app.database.files import FileRepository
+from app.database.files import FileRepository, build_deeplink_token
 from app.services.permissions import is_owner_or_moderator
 from app.services.deeplink_channel import mirror_deeplink
 
@@ -201,7 +201,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     try:
         batch = await FileRepository(database.db).save_batch(items)
         me = await message.bot.get_me()
-        link = f"https://t.me/{me.username}?start=batch_{batch['batch_id']}"
+        link = f"https://t.me/{me.username}?start=batch_{build_deeplink_token(batch['batch_id'])}"
         keyboard = _link_keyboard(link)
         link_send_attempted = True
         sent_link = await message.answer(link, reply_markup=keyboard)

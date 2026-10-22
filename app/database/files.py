@@ -7,6 +7,13 @@ from string import ascii_letters, digits
 _CODE_ALPHABET = ascii_letters + digits
 
 
+def build_deeplink_token(code: str) -> str:
+    """Build public token: stored five-character code + random 15-character suffix."""
+    if len(code) != 5 or any(char not in _CODE_ALPHABET for char in code):
+        raise ValueError("Deepcode must be exactly 5 alphanumeric characters")
+    return code + "".join(choice(_CODE_ALPHABET) for _ in range(15))
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -17,8 +24,8 @@ class FileRepository:
 
     async def reserve_code(self, length: int, kind: str) -> str:
         """Reserve a random alphanumeric code permanently, even if a session is abandoned."""
-        if length not in (10, 15, 20):
-            raise ValueError("Deeplink codes must be 10, 15, or 20 characters")
+        if length != 5:
+            raise ValueError("Deepcodes must be exactly 5 characters")
         for _ in range(100):
             code = "".join(choice(_CODE_ALPHABET) for _ in range(length))
             # Check legacy records concurrently; this avoids three serial DB round trips
@@ -46,7 +53,7 @@ class FileRepository:
         reply_markup: dict | None = None,
     ) -> dict:
         for _ in range(8):
-            key = await self.reserve_code(20, "file")
+            key = await self.reserve_code(5, "file")
             doc = {
                 "file_key": key,
                 "source_chat_id": source_chat_id,
@@ -81,7 +88,7 @@ class FileRepository:
             )
             return await self.db.batches.find_one({"batch_id": batch_id, "kind": "batch"})
         for _ in range(8):
-            key = await self.reserve_code(20, "batch")
+            key = await self.reserve_code(5, "batch")
             doc = {
                 "batch_id": key, "items": items, "kind": "batch",
             }
