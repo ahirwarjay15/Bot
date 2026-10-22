@@ -10,6 +10,7 @@ from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
 from app.database.files import FileRepository
 from app.services.permissions import is_owner_or_moderator
+from app.services.deeplink_channel import mirror_deeplink
 router=Router(name="file");log=logging.getLogger(__name__)
 class FileStates(StatesGroup):waiting_for_message=State()
 
@@ -109,10 +110,22 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])
         link_message = await message.answer(link, reply_markup=keyboard)
-        # Reply with the original text/caption transiently; never duplicate it in MongoDB.
-        original_text = (message.caption or message.text or "").strip()
+        # Keep the original text and Telegram entities so the reply looks identical.
+        original_text = message.caption if message.caption is not None else (message.text or "")
+        original_entities = message.caption_entities if message.caption is not None else message.entities
+        entities_data = [entity.model_dump(mode="json", exclude_none=True) for entity in (original_entities or [])]
         if original_text:
-            await message.answer(original_text, reply_to_message_id=link_message.message_id)
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text=original_text,
+                entities=original_entities or None,
+                parse_mode=None,
+                reply_to_message_id=link_message.message_id,
+            )
+        await mirror_deeplink(
+            message.bot, settings, link, keyboard,
+            [(original_text, entities_data)] if original_text else [],
+        )
         # Remove the collection prompt only after the deeplink has been delivered.
         prompt_message_id = state_data.get("prompt_message_id")
         prompt_chat_id = state_data.get("prompt_chat_id")
