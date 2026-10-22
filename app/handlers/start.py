@@ -10,7 +10,7 @@ from aiogram import Router,F
 from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message,InlineKeyboardMarkup,InlineKeyboardButton,CallbackQuery
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter, TelegramNetworkError
 from app.config import Settings
 from app.database.files import FileRepository
 from app.services.delivery import deliver_reference,deliver_batch,claim_delivery_request,finish_delivery_request
@@ -174,6 +174,9 @@ async def _revoke_tracked_force_join_link(bot, db, record: dict) -> None:
     if link and chat_id is not None:
         try:
             await bot.revoke_chat_invite_link(chat_id=int(chat_id), invite_link=link)
+        except (TelegramRetryAfter, TelegramNetworkError):
+            # Preserve the record so the background cleanup worker can retry.
+            raise
         except TelegramAPIError:
             log.debug("Force Join link already expired/revoked", exc_info=True)
     await db.force_join_links.delete_one({"_id": record["_id"]})
@@ -245,10 +248,12 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
         mode = "join_request"
     legacy = channel_cfg.get("button_url")
     if legacy:
-        try:
-            await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=legacy)
-        except TelegramAPIError:
-            log.debug("Legacy Force Join link already invalid", exc_info=True)
+        async def revoke_legacy_link():
+            try:
+                await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=legacy)
+            except TelegramAPIError:
+                log.debug("Legacy Force Join link already invalid", exc_info=True)
+        asyncio.create_task(revoke_legacy_link())
         await db.settings.update_one({"key": "force_join_channel", "channel": channel}, {"$unset": {"button_url": ""}})
     await db.settings.update_one({"key": "force_join_channel", "channel": channel}, {"$set": {
         "key": "force_join_channel", "channel": channel, "channel_title": chat.title or str(chat_id),
@@ -846,7 +851,7 @@ async def remember_pending_join_request(event, database):
 
 @router.chat_member()
 async def clear_accepted_private_join_request(event, database):
-    await _revoke_used_force_join_link(event.bot, database.db, event.chat.id, getattr(event, "invite_link", None))
+    _schedule_used_force_join_link_cleanup(event.bot, database.db, event.chat.id, getattr(event, "invite_link", None))
     """Drop a saved request only when a private-channel request becomes membership."""
     if not _is_private_chat(event.chat):
         return
