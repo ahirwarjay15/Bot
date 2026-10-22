@@ -1,24 +1,31 @@
-import time
 import pytest
-from app.handlers.batch import SESSION_TTL, _expired, menu
+from app.handlers.batch import _parse_message_reference, _entities_from_data
 from app.handlers.start import _join_signature
 from app.services.delivery import _minutes, _notice, DEFAULT_NOTICE
 from app.handlers.settings import time_label, time_words
 
 
 @pytest.mark.asyncio
-async def test_batch_session_expires_after_200_seconds():
-    assert await _expired({"status": "collecting", "last_activity_ts": time.time() - SESSION_TTL - 1})
+async def test_batch_reference_rejects_unrelated_message_link():
+    class FakeMessage:
+        text = "https://t.me/some_other_channel/123"
+        caption = None
+        forward_origin = None
+
+    class FakeBot:
+        async def get_chat(self, chat_id):
+            raise AssertionError("Unconfigured channel lookup should not be needed")
+
+    assert await _parse_message_reference(FakeMessage(), FakeBot(), -1001234567890) is None
 
 
-@pytest.mark.asyncio
-async def test_generating_batch_is_not_expired_mid_generation():
-    assert not await _expired({"status": "generating", "last_activity_ts": 0})
-
-
-def test_batch_menu_exposes_only_generate_and_cancel():
-    labels = [button.text for row in menu().inline_keyboard for button in row]
-    assert labels == ["ɢᴇɴᴇʀᴀᴛᴇ ʟɪɴᴋ", "ᴄᴀɴᴄᴇʟ"]
+def test_batch_entities_round_trip_preserves_entity_fields():
+    original = [{"type": "bold", "offset": 0, "length": 4}]
+    restored = _entities_from_data(original)
+    assert len(restored) == 1
+    assert restored[0].type == "bold"
+    assert restored[0].offset == 0
+    assert restored[0].length == 4
 
 
 def test_force_join_signature_is_order_independent_but_configuration_sensitive():
