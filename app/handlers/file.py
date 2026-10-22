@@ -77,6 +77,7 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
     state_data = await state.get_data()
     record = None
     link_message = None
+    link_send_attempted = False
     try:
         # If the user forwarded a post from the configured storage channel, reuse
         # its original channel message ID instead of trying to copy the forwarded
@@ -111,6 +112,7 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])
+        link_send_attempted = True
         link_message = await message.answer(link, reply_markup=keyboard)
         # Keep the original text and Telegram entities so the reply looks identical.
         original_text = message.caption if message.caption is not None else (message.text or "")
@@ -142,7 +144,7 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
         except TelegramAPIError:
             log.warning("Could not delete submitted message after saving", exc_info=True)
     except TelegramAPIError as exc:
-        if record is not None and link_message is None:
+        if record is not None and not link_send_attempted:
             try:
                 await database.db.files.delete_one({"file_key": record["file_key"], "kind": "file"})
             except Exception:
