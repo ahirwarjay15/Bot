@@ -215,6 +215,20 @@ async def _revoke_used_force_join_link(bot, db, chat_id: int, invite_link) -> No
         await _revoke_tracked_force_join_link(bot, db, record)
 
 
+def _schedule_used_force_join_link_cleanup(bot, db, chat_id: int, invite_link) -> None:
+    """Keep invite revocation off the Telegram membership-event hot path."""
+    if not invite_link or not getattr(invite_link, "invite_link", None):
+        return
+
+    async def cleanup():
+        try:
+            await _revoke_used_force_join_link(bot, db, chat_id, invite_link)
+        except Exception:
+            log.warning("Deferred used-link cleanup failed; expiry worker will retry", exc_info=True)
+
+    asyncio.create_task(cleanup())
+
+
 async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
     if user_id is None:
         return None
@@ -821,7 +835,7 @@ async def run_pending_join_request_cleanup_worker(db, interval_seconds: int = 36
 
 @router.chat_join_request()
 async def remember_pending_join_request(event, database):
-    await _revoke_used_force_join_link(event.bot, database.db, event.chat.id, getattr(event, "invite_link", None))
+    _schedule_used_force_join_link_cleanup(event.bot, database.db, event.chat.id, getattr(event, "invite_link", None))
     # Telegram emits this only when the bot has the appropriate channel admin rights.
     await database.db.pending_join_requests.update_one(
         {"chat_id": event.chat.id, "user_id": event.from_user.id},
