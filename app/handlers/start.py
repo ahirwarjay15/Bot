@@ -182,12 +182,20 @@ async def _revoke_tracked_force_join_link(bot, db, record: dict) -> None:
 async def cleanup_expired_force_join_links(bot, db, limit: int = 200) -> int:
     now = datetime.now(timezone.utc)
     records = [r async for r in db.force_join_links.find({"expires_at": {"$lte": now}}).limit(limit)]
-    for record in records:
-        await _revoke_tracked_force_join_link(bot, db, record)
+    semaphore = asyncio.Semaphore(10)
+
+    async def cleanup_one(record):
+        async with semaphore:
+            try:
+                await _revoke_tracked_force_join_link(bot, db, record)
+            except Exception:
+                log.warning("Could not clean up an expired Force Join link; will retry", exc_info=True)
+
+    await asyncio.gather(*(cleanup_one(record) for record in records))
     return len(records)
 
 
-async def run_force_join_link_cleanup_worker(bot, db, interval_seconds: int = 30):
+async def run_force_join_link_cleanup_worker(bot, db, interval_seconds: int = 5):
     while True:
         try:
             await cleanup_expired_force_join_links(bot, db)
@@ -377,10 +385,15 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
     mode = cfg.get("mode", "force_join_poster")
     target_id = separate_message_id if mode == "new_message" else gate_message.message_id
     frame_index = 0  # The first frame is already visible.
+    frame_updates = 0
+    # Delete+send creates real messages, so cap it to avoid flooding a chat.
+    max_new_message_updates = 4
+    if mode == "new_message":
+        speed = max(speed, 0.5)
     next_beat = time.monotonic() + speed
     key = (user_id, payload)
     try:
-        while True:
+        while mode != "new_message" or frame_updates < max_new_message_updates:
             if stop_event and stop_event.is_set():
                 break
             delay = max(0.0, next_beat - time.monotonic())
@@ -408,7 +421,8 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                             try:
                                 await bot.delete_message(chat_id=user_id, message_id=target_id)
                             except TelegramAPIError:
-                                log.debug("Previous animation frame was already unavailable")
+                                log.debug("Could not delete the previous animation frame; stopping this loop")
+                                return
                             target_id = None
                         frame_message = await bot.send_message(
                             chat_id=user_id, text=animated, parse_mode="HTML",
@@ -418,6 +432,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                         running_task = asyncio.current_task()
                         if current and current[0] is running_task:
                             _gate_animation_tasks[key] = (running_task, target_id)
+                        frame_updates += 1
                     else:
                         content = animated if animation_only else f"{base_text}\n\n{animated}"
                         if gate_message.photo or gate_message.animation or gate_message.document:
