@@ -484,13 +484,11 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
     _gate_animation_tasks[key] = (task, separate_id)
 
 
-async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->bool:
+async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, verify_button: bool = True)->bool:
     user=message.from_user
     if not user or user.id==settings.owner_id or await is_owner_or_moderator(database.db,user.id,settings):
         return False
     cfg = await database.db.settings.find_one({"key": "force_join"}) or {}
-    if not cfg.get("enabled", False):
-        return False
     channels = await effective_force_join_channels(database, settings)
     if not channels:
         return False
@@ -549,7 +547,8 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
         if button:
             join_buttons.append(button)
     rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
-    rows.append([InlineKeyboardButton(text=cfg.get("verify_text") or "♻️ ʀᴇᴛʀʏ",callback_data=f"forcejoin:check:{payload}")])
+    if verify_button:
+        rows.append([InlineKeyboardButton(text=cfg.get("verify_text") or "♻️ ʀᴇᴛʀʏ", callback_data=f"forcejoin:check:{payload}")])
     raw_text = ensure_default_quote_format(cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\\n\\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.", "force_join")
     me = await bot.get_me()
     rendered = render_common_variables(raw_text, user, me).replace("{remaining_count}", str(len(missing)))
@@ -667,6 +666,9 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             except Exception: log.exception("Could not update delivery request status")
         return
     if await is_owner_or_moderator(database.db,user.id,settings):return
+    # Plain /start checks Force Join first; this prompt intentionally has no Verify button.
+    if await gate_or_prompt(message, "", settings, database, bot, verify_button=False):
+        return
     cfg=await database.db.settings.find_one({"key":"start_message"}) or {}
     if cfg.get("enabled", True):
         rows = []
