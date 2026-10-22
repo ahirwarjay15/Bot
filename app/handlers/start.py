@@ -681,16 +681,13 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         parsed2 = urlparse(button2_url)
         if cfg.get("button2_enabled", False) and button2_text and parsed2.scheme in ("http", "https") and parsed2.netloc:
             configured_buttons.append(InlineKeyboardButton(text=button2_text, url=button2_url))
-        button3_url = cfg.get("button3_url", "")
-        button3_text = cfg.get("button3_text", "")
-        parsed3 = urlparse(button3_url)
-        button3 = None
-        if cfg.get("button3_enabled", False) and button3_text and parsed3.scheme in ("http", "https") and parsed3.netloc:
-            button3 = InlineKeyboardButton(text=button3_text, url=button3_url)
-        if configured_buttons:
-            rows.append(configured_buttons)
-        if button3:
-            rows.append([button3])
+        for index in (3, 4):
+            button_url = cfg.get(f"button{index}_url", "")
+            button_text = cfg.get(f"button{index}_text", "")
+            parsed_button = urlparse(button_url)
+            if cfg.get(f"button{index}_enabled", False) and button_text and parsed_button.scheme in ("http", "https") and parsed_button.netloc:
+                configured_buttons.append(InlineKeyboardButton(text=button_text, url=button_url))
+        rows.extend(configured_buttons[i:i+2] for i in range(0, len(configured_buttons), 2))
         if cfg.get("about_enabled", True):
             rows.append([InlineKeyboardButton(text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="start:about")])
         markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
