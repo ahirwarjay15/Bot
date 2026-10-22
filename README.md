@@ -19,8 +19,9 @@ Set these environment variables in your hosting provider or a private `.env` fil
 - `BOT_TOKEN`: token for this bot instance.
 - `OWNER_ID`: numeric Telegram owner ID.
 - `MONGODB_URI`: MongoDB connection string.
-- `MONGODB_DB_NAME`: database name; defaults to `file_bot`.
+- `MONGODB_DB_NAME`: database name; defaults to `file_bot` for backward compatibility. Set it explicitly (for example, `titania`) if you want the MongoDB database name to match this repository.
 - `SOURCE_CHANNEL_ID`: private source channel ID (legacy `DB_CHANNEL_ID` is also accepted).
+- `DEEPLINK_CHANNEL`: optional numeric Telegram channel ID where generated deeplinks and their original formatted captions are mirrored; the bot must have permission to post there.
 - `FORCE_JOIN_CHANNELS`: optional comma-separated usernames or channel IDs.
 - `LOG_LEVEL`: optional logging level, defaults to `INFO`.
 - `PORT`: optional HTTP health-check port, defaults to `10000`.
