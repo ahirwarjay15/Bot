@@ -8,7 +8,7 @@ from app.handlers.settings import time_label, time_words
 @pytest.mark.asyncio
 async def test_batch_reference_rejects_unrelated_message_link():
     class FakeMessage:
-        text = "https://t.me/some_other_channel/123"
+        text = "https://t.me/c/12345/123"
         caption = None
         forward_origin = None
 
