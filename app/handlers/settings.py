@@ -680,14 +680,32 @@ async def settings_command(message: Message, settings: Settings, database):
         return
     me = await message.bot.get_me()
     name = f'<a href="https://t.me/{me.username}">{__import__("html").escape(me.full_name)}</a>' if me.username else __import__("html").escape(me.full_name)
-    await message.answer(f"<b><u>CUSTOMIZE</u></b>\n\n<i>✰ Name: {name}</i>\n\n<i>Configure Bot Settings Using the Buttons Below.</i>", parse_mode="HTML", link_preview_options={"is_disabled": True}, reply_markup=kb([
+    panel = await message.answer(f"<b><u>CUSTOMIZE</u></b>\n\n<i>✰ Name: {name}</i>\n\n<i>Configure Bot Settings Using the Buttons Below.</i>", parse_mode="HTML", link_preview_options={"is_disabled": True}, reply_markup=kb([
         [("START MSG", "settings:start"), ("FORCE JOIN", "settings:forcejoin")],
         [("ANIMATION", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
         [("INVALID", "settings:invalid"), ("SHORTENER", "settings:shortener")],
         [("MODERATORS", "settings:mods"), ("STATS", "settings:stats")],
         [("CUSTOM BUTTON", "settings:custom_button")],
     ]))
-    # Keep the user's /settings command out of the visible panel history.
+    # Track and replace only the previous /settings panel for this owner.
+    # Do not sweep or delete any other bot/user messages.
+    previous = await database.db.settings.find_one({"key": "settings_panel", "owner_id": message.from_user.id})
+    if previous:
+        try:
+            await message.bot.delete_message(
+                chat_id=int(previous.get("chat_id", message.chat.id)),
+                message_id=int(previous["message_id"]),
+            )
+        except (TelegramAPIError, KeyError, TypeError, ValueError):
+            pass
+    await database.db.settings.update_one(
+        {"key": "settings_panel", "owner_id": message.from_user.id},
+        {"$set": {"key": "settings_panel", "owner_id": message.from_user.id,
+                  "chat_id": message.chat.id, "message_id": panel.message_id,
+                  "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    # Keep existing /settings command-message cleanup behaviour unchanged.
     try:
         await message.delete()
     except TelegramAPIError:
