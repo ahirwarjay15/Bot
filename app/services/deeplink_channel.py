@@ -2,6 +2,7 @@
 import logging
 
 from aiogram.exceptions import TelegramAPIError
+from aiogram.types import MessageEntity
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ async def mirror_deeplink(bot, settings, link, reply_markup, caption_items=()):
             await bot.send_message(
                 chat_id=channel_id,
                 text=text,
-                entities=entities or None,
+                entities=[MessageEntity.model_validate(item) if isinstance(item, dict) else item for item in (entities or [])] or None,
                 parse_mode=None,
                 reply_to_message_id=link_message.message_id,
             )
