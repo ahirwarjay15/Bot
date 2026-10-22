@@ -196,11 +196,14 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     # The existing repository and delivery pipeline store only source IDs, not copied media.
     items = [{"source_chat_id": source_chat_id, "source_message_id": mid}
              for mid in range(first_id, last_id + 1)]
+    batch = None
+    link_send_attempted = False
     try:
         batch = await FileRepository(database.db).save_batch(items)
         me = await message.bot.get_me()
         link = f"https://t.me/{me.username}?start=batch_{batch['batch_id']}"
         keyboard = _link_keyboard(link)
+        link_send_attempted = True
         sent_link = await message.answer(link, reply_markup=keyboard)
         # Reply in first-then-last order, preserving the original Telegram entities.
         captions = [
@@ -219,5 +222,10 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         await mirror_deeplink(message.bot, settings, link, keyboard, captions)
         await state.clear()
     except Exception:
+        if batch is not None and not link_send_attempted:
+            try:
+                await database.db.batches.delete_one({"batch_id": batch["batch_id"], "kind": "batch"})
+            except Exception:
+                log.warning("Could not clean up an unlinked batch record", exc_info=True)
         log.exception("Range batch generation failed")
         await message.answer("Batch link generation failed. Check that the message links are valid and the bot can access the Database Channel.")
