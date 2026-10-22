@@ -409,13 +409,17 @@ async def refresh_button_panel(bot, chat_id, message_id, db, kind):
     status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", True) if is_start else bool(cfg.get("button_text") and cfg.get("button_url"))) else "OFF ❌"
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
+    status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
     title = "START MESSAGE BUTTONS" if is_start else "INVALID POST BUTTONS"
     back = "settings:start" if is_start else "settings:invalid"
     prefix = "start" if is_start else "invalid"
-    page_text = format_settings_page(f"{title}\nCustomize buttons shown with {'your start message' if is_start else 'invalid posts'}.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}")
+    page_text = format_settings_page(
+        f"{title}\nCustomize buttons shown with {'your start message' if is_start else 'invalid posts'}.\n\n"
+        f"Button 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
+    )
     keyboard = kb([
         [(f"1 {status1}", f"settings:{prefix}_button_toggle:1"), (f"2 {status2}", f"settings:{prefix}_button_toggle:2")],
-        [(f"3 {status3}", f"settings:{prefix}_button_toggle:3")],
+        [(f"3 {status3}", f"settings:{prefix}_button_toggle:3"), (f"4 {status4}", f"settings:{prefix}_button_toggle:4")],
         [("《 BACK", back)],
     ])
     try:
