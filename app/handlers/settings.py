@@ -344,7 +344,7 @@ async def build_forcejoin_page(bot, db, settings):
             upsert=True,
         )
     rows.extend([
-        [("ONLY MESSAGE", "settings:forcejoin_message"), ("ONLY MEDIA", "settings:forcejoin_media")],
+        [("FORCE JOIN MESSAGE", "settings:forcejoin_message"), ("FORCE JOIN MEDIA", "settings:forcejoin_media")],
         [("VERIFY", "settings:forcejoin_verify_text")],
         [("《 BACK", "settings:home")],
     ])
