@@ -489,8 +489,8 @@ def build_animation_page(cfg):
          ("FRAMES" + (" 🟢" if frames_enabled else " 🔴"), "settings:animation_frames")],
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:animation_toggle"),
          ("SPEED", "settings:animation_speed")],
-        [("MODE", "settings:animation_mode_toggle")],
-        [("FILE ANIMATION " + ("🟢" if file_animation_enabled else "🔴"), "settings:file_animation")],
+        [("MODE", "settings:animation_mode_toggle"),
+         ("FILE ANIMATION " + ("🟢" if file_animation_enabled else "🔴"), "settings:file_animation")],
         [("《 BACK", "settings:home")],
     ])
     return text, markup
