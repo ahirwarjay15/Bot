@@ -8,6 +8,7 @@ def _set_required_env(monkeypatch):
     monkeypatch.setenv("BOT_TOKEN", "123456:fake-token")
     monkeypatch.setenv("OWNER_ID", "12345")
     monkeypatch.setenv("MONGODB_URI", "mongodb://localhost:27017")
+    monkeypatch.setenv("MONGODB_DB_NAME", "test_bot")
 
 
 def test_force_join_channels_accept_comma_separated_values(monkeypatch):
