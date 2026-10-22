@@ -99,6 +99,6 @@ async def stats_ok(query: CallbackQuery, settings: Settings, database):
         await query.answer("Not authorized.", show_alert=True)
         return
     total = await database.db.users.count_documents({})
-    blocked = await database.db.users.count_documents({"$or": [{"blocked": True}, {"last_delivery_error": {"$exists": True}}]})
+    blocked = await database.db.users.count_documents({"blocked": True})
     me = await query.bot.get_me()
     await query.answer(f"{me.full_name}\n\nUSERS: {total}\n\nBLOCKED: {blocked}", show_alert=True)
