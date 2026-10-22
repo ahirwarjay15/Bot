@@ -458,6 +458,7 @@ def build_animation_page(cfg):
     prefix = html.escape(normalize_animation_prefix(cfg.get("prefix") or "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...")) if prefix_enabled else "OFF"
     mode = cfg.get("mode", "force_join_poster")
     mode_label = "NEW MESSAGE" if mode == "new_message" else "FORCE JOIN POSTER"
+    file_animation_enabled = bool(cfg.get("file_animation_text"))
     try:
         speed = float(cfg.get("speed", 0.25))
     except (TypeError, ValueError):
@@ -469,7 +470,8 @@ def build_animation_page(cfg):
         f"Prefix Status: {'ENABLED ✅' if prefix_enabled else 'DISABLED ❌'}\n"
         f"Frames Status: {'ENABLED ✅' if frames_enabled else 'DISABLED ❌'}\n"
         f"Speed: {speed:.2f}s per frame\nMode: {mode_label}\n"
-        f"Status: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}"
+        f"Status: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\n"
+        f"File Animation: {'ENABLED ✅' if file_animation_enabled else 'DISABLED ❌'}"
     )
     markup = kb([
         [("PREFIX" + (" 🟢" if prefix_enabled else " 🔴"), "settings:animation_prefix"),
@@ -477,6 +479,7 @@ def build_animation_page(cfg):
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:animation_toggle"),
          ("SPEED", "settings:animation_speed")],
         [("MODE", "settings:animation_mode_toggle")],
+        [("FILE ANIMATION " + ("🟢" if file_animation_enabled else "🔴"), "settings:file_animation")],
         [("《 BACK", "settings:home")],
     ])
     return text, markup
@@ -1112,6 +1115,16 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await render_invalid(query, db)
     elif action == "forcejoin_animation":
         await render_animation(query, db)
+    elif action == "file_animation":
+        cfg = await db.settings.find_one({"key": "animation"}) or {}
+        if cfg.get("file_animation_text"):
+            await db.settings.update_one({"key": "animation"}, {"$unset": {"file_animation_text": ""}})
+            await render_animation(query, db)
+        else:
+            await state.set_state(SettingInput.waiting)
+            await state.update_data(field="file_animation_text", animation_panel_chat_id=query.message.chat.id if query.message else None, animation_panel_message_id=query.message.message_id if query.message else None)
+            if query.message:
+                await tracked_answer(query.message, state, "Send the File Animation text. It will briefly appear before each file or batch delivery.")
     elif action == "animation_prefix":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
         if cfg.get("prefix_enabled", bool(cfg.get("prefix"))):
@@ -1570,6 +1583,17 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             except TelegramAPIError:
                 pass
         await clear_state_preserving_prompts(state)
+        return
+    if field == "file_animation_text":
+        if not message.text or not value:
+            await tracked_answer(message, state, "Please send non-empty File Animation text.")
+            return
+        panel_chat_id = data.get("animation_panel_chat_id")
+        panel_message_id = data.get("animation_panel_message_id")
+        await db.settings.update_one({"key": "animation"}, {"$set": {"file_animation_text": formatted_input_text(message, value)}}, upsert=True)
+        await clear_state_preserving_prompts(state)
+        await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
+        await tracked_answer(message, state, "✨ File Animation text saved and enabled.")
         return
     if field == "animation_prefix":
         panel_chat_id = data.get("animation_panel_chat_id")
