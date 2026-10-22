@@ -11,7 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import get_settings
 from app.database.connection import Database
-from app.handlers.start import router as start_router, run_pending_join_request_cleanup_worker
+from app.handlers.start import router as start_router, run_pending_join_request_cleanup_worker, run_force_join_link_cleanup_worker
 from app.handlers.file import router as file_router
 from app.handlers.batch import router as batch_router
 from app.handlers.admin import router as admin_router
@@ -124,6 +124,7 @@ async def main():
                 (run_batch_delivery_worker, (bot, database.db), "batch-delivery-worker"),
                 (run_broadcast_worker, (bot, database.db), "broadcast-worker"),
                 (run_pending_join_request_cleanup_worker, (database.db,), "pending-join-request-cleanup-worker"),
+                (run_force_join_link_cleanup_worker, (bot, database.db), "force-join-link-cleanup-worker"),
             )
             for worker, args, name in workers:
                 tasks.append(asyncio.create_task(

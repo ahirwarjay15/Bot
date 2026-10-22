@@ -599,6 +599,26 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot)->boo
             pass
     return True
 
+async def send_file_animation(bot, db, user_id: int) -> None:
+    """Briefly show configured pre-delivery text; deletion failures never block delivery."""
+    cfg = await db.settings.find_one({"key": "file_animation"}) or {}
+    text = str(cfg.get("text") or "").strip()
+    if not cfg.get("enabled") or not text:
+        return
+    msg = None
+    try:
+        msg = await bot.send_message(user_id, text, parse_mode="HTML")
+        await asyncio.sleep(0.35)
+    except TelegramAPIError:
+        log.warning("File Animation send failed; continuing delivery", exc_info=True)
+    finally:
+        if msg:
+            try:
+                await msg.delete()
+            except TelegramAPIError:
+                log.debug("File Animation delete failed; continuing delivery", exc_info=True)
+
+
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
     me=await bot.get_me();link=f"https://t.me/{me.username}?start={payload}"
     if payload.startswith("file_"):return await deliver_reference(bot,database.db,settings,user_id=user_id,file_doc=record,deeplink=link,request_key=request_key)
@@ -628,6 +648,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             return
         success = False
         try:
+            await send_file_animation(bot, database.db, message.chat.id)
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
             if payload.startswith("batch_") and result[0]==0:
                 await message.answer("None of the batch files could be delivered. The source messages may be unavailable.")
