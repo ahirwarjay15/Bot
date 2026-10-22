@@ -106,7 +106,15 @@ class Database:
             await self.db.delivery_requests.create_index([("status", ASCENDING), ("updated_at", ASCENDING)])
             await self.db.batches.create_index([("batch_id", ASCENDING)], unique=True, sparse=True)
             await self.db.deeplink_codes.create_index([("code", ASCENDING)], unique=True)
-            await self.db.force_join_links.create_index([("user_id", ASCENDING), ("chat_id", ASCENDING)], unique=True, name="user_chat_unique")
+            # Keep multiple short-lived links per user/chat so issuing a fresh
+            # link never has to revoke an older one in the interactive request path.
+            force_join_indexes = await self.db.force_join_links.index_information()
+            if "user_chat_unique" in force_join_indexes:
+                await self.db.force_join_links.drop_index("user_chat_unique")
+            if "user_chat_lookup" not in force_join_indexes:
+                await self.db.force_join_links.create_index(
+                    [("user_id", ASCENDING), ("chat_id", ASCENDING)], name="user_chat_lookup"
+                )
             force_join_indexes = await self.db.force_join_links.index_information()
             if "temporary_link_ttl" in force_join_indexes:
                 await self.db.force_join_links.drop_index("temporary_link_ttl")
