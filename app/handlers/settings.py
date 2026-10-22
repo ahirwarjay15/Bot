@@ -701,6 +701,9 @@ async def settings_command(message: Message, settings: Settings, database):
     await database.db.settings.update_one(
         {"key": "settings_panel", "owner_id": message.from_user.id},
         {"$set": {"key": "settings_panel", "owner_id": message.from_user.id,
+                  # The settings collection has a unique (key, channel) index.
+                  # Namespace each owner's panel to avoid null-channel collisions.
+                  "channel": f"settings_panel:{message.from_user.id}:{message.chat.id}",
                   "chat_id": message.chat.id, "message_id": panel.message_id,
                   "updated_at": datetime.now(timezone.utc)}},
         upsert=True,
