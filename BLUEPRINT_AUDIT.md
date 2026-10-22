@@ -1,40 +1,26 @@
-# File-Bot Audit Status
+# Titania Repository Audit Status
 
-**Repository:** `ahirwarjay15/File-Bot`  
+**Repository:** `ahirwarjay15/Bot`  
 **Branch:** `main`  
-**Last reviewed:** 2026-10-15  
-**Current main commit at review:** `9f4f2c4` — Enable tested auto-deploy from main
+**Last updated:** 2026-10-22
 
-> This document replaces the dated implementation-pass notes below. It records verified repository/CI/deployment status and known audit limitations; it is not a claim that every Telegram interaction has been end-to-end tested.
+This file records repository-level checks only. It does not claim that live Telegram, MongoDB Atlas, Render, or Oracle integrations have all been end-to-end tested.
 
-## Verified current status
+## Known operational boundaries
 
-- `main` is the active development and deployment branch.
-- GitHub Actions CI completed successfully for the current main push, including dependency installation, Python compilation, and `pytest -q`.
-- The `Oracle Auto Deploy` workflow completed successfully for that push. Both **Verify code before deployment** and **Deploy to Oracle Cloud** succeeded.
-- The deployment workflow fetches the tested commit on the Oracle host, installs requirements, compiles the application, restarts `file-bot.service`, and checks that the service is active.
-- On the server, `git branch --show-current` reported `main`, the working tree was clean, and `systemctl is-active file-bot` returned `active`.
-- A backup tag, `backup-before-main-migration-20261015`, was created before the main-branch migration. Keep it until the migration has been stable and no longer needs rollback.
+- CI runs Python compilation and the repository regression tests. A passing run does not prove production Telegram/MongoDB interactions work end to end.
+- The source channel stores actual Telegram posts; MongoDB stores references. Deleted or inaccessible source posts cannot be reconstructed.
+- Telegram Bot API does not provide a general history-reading method for arbitrary channel posts. Batch caption/entity recovery from a message link therefore depends on the bot being able to access and forward that post; protected content may prevent this.
+- Exactly-once delivery cannot be guaranteed across a crash between Telegram accepting a send and MongoDB recording it. Ambiguous in-flight operations should be recorded as unknown rather than blindly resent.
+- Telegram generally does not allow a bot to delete user-authored messages in private chats. Deletion features must report success only when Telegram confirms the deletion.
+- `DEEPLINK_CHANNEL` is optional. When configured, the bot must be a member with permission to post messages.
 
-## Audit scope and limitations
+## Release checklist
 
-- The available blueprint source begins at section 5 (Auto Delete); sections 1–4 were not available for this comparison. A complete specification-to-code audit cannot be certified without those missing sections.
-- CI passing confirms the automated checks in the repository pass; it does **not** prove every Telegram, MongoDB Atlas, or real-user interaction works end to end.
-- Telegram/Atlas/Oracle integration behavior should be tested in the live environment for Force Join verification and animation, invalid-post deletion rules, auto-delete timing, batch delivery/recovery, and broadcast recovery.
-- Exactly-once delivery cannot be guaranteed across a Telegram-send/database-write crash window. Interrupted in-flight operations should be reported as unknown rather than blindly resent.
-- Telegram generally does not allow a bot to delete user-authored messages in private chats. Any deletion feature must only report success when the Telegram deletion call actually succeeds.
-
-## Release and maintenance checklist
-
-- [x] Current `main` CI run passed.
-- [x] Current `main` Oracle deployment run passed.
-- [x] Oracle `file-bot` service reported active after deployment.
-- [ ] Obtain the missing blueprint sections 1–4 for a complete requirements audit.
-- [ ] Continue targeted live integration checks for Telegram and MongoDB Atlas flows; do not treat CI alone as end-to-end certification.
-- [ ] Retain the migration backup tag until the new main-only workflow has been stable.
-
-## Branch policy
-
-- Make new changes on `main` only.
-- Pushes to `main` run CI; the Oracle deploy job runs only on `main` and only when the repository variable `ORACLE_DEPLOY_ENABLED` is set to `true`.
-- Do not delete old remote branches or the backup tag until their unique commits have been reviewed and the main-only setup is confirmed stable.
+- [ ] Confirm GitHub Actions CI passes on the current `main` commit.
+- [ ] Confirm the deployment workflow completes for the intended host.
+- [ ] Confirm both Render services use the intended `MONGODB_DB_NAME`, `SOURCE_CHANNEL_ID`, and `DEEPLINK_CHANNEL` values.
+- [ ] Smoke-test /file and /batch with ordinary and protected source posts.
+- [ ] Smoke-test caption formatting/entities and deeplink mirroring.
+- [ ] Smoke-test delivery, auto-delete, broadcast recovery, Force Join, and moderator settings against the live bot.
+- [ ] Obtain missing original blueprint/specification sections before certifying full specification coverage.
