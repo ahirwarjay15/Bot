@@ -769,7 +769,6 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                     keyboard=[
                         [KeyboardButton(text="Group", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True)),
                          KeyboardButton(text="Channel", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True))],
-                        [KeyboardButton(text="Cancel")],
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
             )
@@ -785,7 +784,6 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                     keyboard=[
                         [KeyboardButton(text="Group", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
                         [KeyboardButton(text="Channel", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True))],
-                        [KeyboardButton(text="Cancel")],
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
             )
@@ -1395,7 +1393,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     if field == "forcejoin_wait_chat":
         shared = getattr(message, "chat_shared", None)
         if not shared:
-            await tracked_answer(message, state, "Please use the Group or Channel buttons to select a chat, or tap Cancel.")
+            await tracked_answer(message, state, "Please use the Group or Channel buttons to select a chat, or send /cancel.")
             return
         # Telegram's chat-shared update appears as a user-side message; remove it
         # immediately so the “You shared … with …” line does not remain in chat.
