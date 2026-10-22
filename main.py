@@ -42,7 +42,7 @@ def get_service_role() -> str:
 async def health(_request):
     """Report readiness, not merely that the HTTP listener is alive."""
     if not SERVICE_READY:
-        return web.json_response({"status": "starting", "service": "Titania"}, status=503)
+        return web.json_response({"status": "starting", "service": "Telegram File Bot"}, status=503)
     return web.json_response({"status": "ok", "service": "Titania"})
 
 
@@ -101,7 +101,7 @@ async def main():
         role = get_service_role()
         settings = get_settings()
         logging.getLogger().setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
-        log.info("Starting Titania with SERVICE_ROLE=%s", role)
+        log.info("Starting bot with SERVICE_ROLE=%s", role)
         bot = Bot(
             token=settings.bot_token.get_secret_value(),
             default=DefaultBotProperties(link_preview_is_disabled=True),
@@ -136,7 +136,7 @@ async def main():
                 ))
 
         SERVICE_READY = True
-        log.info("Titania is ready; service role=%s", role)
+        log.info("Bot is ready; service role=%s", role)
         if dp is not None:
             await run_polling_with_lease(dp, bot, database.db)
         else:
