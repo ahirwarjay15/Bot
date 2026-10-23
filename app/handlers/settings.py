@@ -345,7 +345,7 @@ async def build_forcejoin_page(bot, db, settings):
         )
     rows.extend([
         [("MESSAGE", "settings:forcejoin_message"), ("MEDIA", "settings:forcejoin_media")],
-        [("VERIFY", "settings:forcejoin_verify_text")],
+        [("VERIFY", "settings:forcejoin_verify_text"), ("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")],
         [("《 BACK", "settings:home")],
     ])
     text = ("FORCE JOIN\n\n"
@@ -770,16 +770,9 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         if not chat_id or not channel_id:
             await query.answer("Selection expired. Please add the chat again.", show_alert=True)
             return
+        # Invite links are created lazily on the first user request and rotated
+        # by the shared ten-minute temporary-link lifecycle.
         link = None
-        if mode == "join_request":
-            try:
-                invite = await query.bot.create_chat_invite_link(
-                    chat_id=int(chat_id), creates_join_request=True
-                )
-                link = invite.invite_link
-            except TelegramAPIError:
-                await query.answer("Could not create a Join Request invite. Check bot admin permissions.", show_alert=True)
-                return
         channels = await effective_force_join_channels(database, settings)
         if channel_id not in channels:
             channels.append(channel_id)
