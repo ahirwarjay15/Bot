@@ -474,6 +474,10 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             if next_beat <= time.monotonic():
                 next_beat = time.monotonic() + speed
     finally:
+        # Never hold Force Join processing until the cycle timeout if animation
+        # stopped early because Telegram rejected an edit or the task was stopped.
+        if cycle_event:
+            cycle_event.set()
         if _gate_animation_stop_events.get(key) is stop_event:
             _gate_animation_stop_events.pop(key, None)
 
