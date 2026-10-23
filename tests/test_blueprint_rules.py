@@ -53,13 +53,12 @@ def test_blueprint_timer_display_labels():
     assert time_words(1440) == "24 hours"
 
 
-def test_animation_mode_buttons_persist_distinct_modes():
-    from app.handlers.settings import _animation_mode_for_action
-
-    assert _animation_mode_for_action("animation_mode_new") == "new_message"
-    assert _animation_mode_for_action("animation_mode_poster") == "force_join_poster"
-
-
+def test_animation_modes_use_message_poster_disabled_cycle():
+    from app.handlers.settings import build_animation_page
+    text, markup = build_animation_page({"mode": "message", "enabled": True, "frames": ["1", "2", "3", "4"], "speed": 0.25})
+    assert "Status: Message" in text
+    mode_button = next(button for row in markup.inline_keyboard for button in row if button.callback_data == "settings:animation_mode_toggle")
+    assert mode_button.text == "MODE"
 def test_settings_buttons_use_small_caps_with_required_exceptions():
     from app.handlers.settings import unicode_buttons
 
@@ -367,51 +366,36 @@ def test_shortener_accepts_command_urls_and_plain_domains():
 
 
 @pytest.mark.asyncio
-async def test_force_join_settings_page_uses_real_line_breaks():
+async def test_force_sub_settings_page_uses_real_line_breaks():
     from types import SimpleNamespace
     from app.handlers.settings import build_forcejoin_page
-
     class SettingsCollection:
         async def find_one(self, query):
             if query.get("key") == "force_join":
                 return {"enabled": True, "channels": []}
             if query.get("key") == "animation":
-                return {"prefix": "Checking", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"}
+                return {"frames": ["Checking.", "Checking..", "Checking...", "Checking...."], "speed": 0.25, "mode": "poster", "enabled": True}
             return None
-
         async def update_one(self, *args, **kwargs):
             return None
-
     class FakeBot:
         async def get_chat(self, chat_id):
             raise AssertionError("No channels should need resolving")
-
     class Database:
         settings = SettingsCollection()
-
     text, _ = await build_forcejoin_page(FakeBot(), Database(), SimpleNamespace(force_join_channels=[]))
-    assert "FORCE JOIN\n\n" in text
-    assert r"FORCE JOIN\n\n" not in text
-
-
-def test_new_message_animation_is_deleted_only_after_replacement_post():
+    assert "FORCE SUB\\n\\n" in text
+    assert r"FORCE SUB\\n\\n" not in text
+def test_message_animation_is_removed_only_after_replacement_post():
     from pathlib import Path
-
     source = Path("app/handlers/start.py").read_text()
-    assert "delete_separate: bool = True" in source
-    assert "delete_separate=False" in source
-    send_position = source.index('new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)')
-    delete_position = source.index('await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)', send_position)
-    old_post_delete_position = source.index('await old_post.delete()', send_position)
-    # Configured poster is sent before the animation and stale Force Join post
-    # are removed; the non-poster fallback keeps its replacement ordering.
-    assert send_position < delete_position < old_post_delete_position
-    fallback_position = source.index('new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)', send_position + 1)
-    poster_delete_position = source.index('await animation_post.delete()', fallback_position)
-    fallback_old_delete_position = source.index('await old_post.delete()', fallback_position)
-    assert fallback_position < poster_delete_position < fallback_old_delete_position
-
-
+    impl = source.split("async def _forcejoin_check_impl", 1)[1]
+    message_branch = impl.split('if animation_enabled and animation_mode == "message":', 1)[1].split("\n        new_post = await _send_force_join_post", 1)[0]
+    assert "separate_animation_id = await _cancel_gate_animation" in impl
+    send_pos = impl.index('new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)', impl.index('if animation_enabled and animation_mode == "message":'))
+    delete_pos = impl.index('await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)', send_pos)
+    assert send_pos < delete_pos
+    assert "wait_for_cycle=True" in impl
 def test_force_join_add_cleans_prompts_and_returns_to_main_page():
     from pathlib import Path
 
@@ -487,15 +471,14 @@ async def test_force_join_custom_label_updates_only_selected_channel():
     assert second["channel_title"] == "Second Channel"
     assert second["button_text"] == "Premium Channel"
 
-def test_new_message_animation_is_reused_as_force_join_post_for_verify_and_deeplink():
+def test_message_animation_uses_canonical_mode_and_final_post_is_fresh():
     from pathlib import Path
-
     source = Path("app/handlers/start.py").read_text()
-    assert 'animation_mode == "new_message"' in source
+    assert 'animation_mode == "message"' in source
     assert 'new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)' in source
     assert 'await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)' in source
     assert 'if old_post and old_post.message_id != new_post.message_id:' in source
-
+    assert 'animation_mode == "new_message"' not in source
 def test_settings_flow_messages_are_tracked_for_page_navigation_cleanup():
     from pathlib import Path
 
@@ -530,41 +513,26 @@ def test_stats_alert_only_contains_total_and_banned_users():
     assert 'BLOCKED:' not in stats_block
 
 
-def test_animation_legacy_defaults_are_migrated_and_frames_are_bold():
+def test_animation_legacy_prefix_is_removed_and_custom_frames_preserved():
     from app.handlers.start import animation_frame_text, normalize_animation_config
-
     cfg = normalize_animation_config({
-        "enabled": True,
-        "prefix": "Checking..",
-        "frames": ["OLD", "VALUES", "HERE"],
-        "speed": 0.75,
-        "mode": "new_message",
+        "enabled": True, "prefix": "Checking..",
+        "frames": ["<b>OLD</b>", "VALUES", "HERE", "FOUR"],
+        "speed": 0.08, "mode": "new_message",
     })
-    assert cfg["prefix"] == "Checking"
-    assert cfg["frames"] == ["OLD", "VALUES", "HERE", "....", "....."]
-    assert cfg["speed"] == 0.08
-    assert cfg["mode"] == "new_message"
+    assert "prefix" not in cfg
+    assert cfg["frames"] == ["<b>OLD</b>", "VALUES", "HERE", "FOUR"]
+    assert cfg["speed"] == 0.2
+    assert cfg["mode"] == "message"
     assert cfg["enabled"] is True
-    assert cfg["frames_enabled"] is True
-    assert cfg["prefix_enabled"] is True
-    assert animation_frame_text(cfg["prefix"], cfg["frames"][0]) == "Checking<b>OLD</b>"
-
-
-def test_animation_speed_is_clamped_for_both_modes_without_overriding_custom_speed():
+    assert "frames_enabled" not in cfg and "prefix_enabled" not in cfg
+    assert animation_frame_text(cfg["frames"][0]) == "<b>OLD</b>"
+def test_animation_speed_is_clamped_to_point_two_and_preserves_custom_speed():
     from app.handlers.start import normalize_animation_config
-
-    slow = normalize_animation_config({
-        "prefix": "Checking", "frames": [".", "..", "..."],
-        "speed": 0.05, "mode": "force_join_poster",
-    })
-    fast = normalize_animation_config({
-        "prefix": "Checking", "frames": [".", "..", "..."],
-        "speed": 0.75, "mode": "new_message",
-    })
-    assert slow["speed"] == 0.08
+    slow = normalize_animation_config({"frames": ["1", "2", "3", "4"], "speed": 0.05, "mode": "poster"})
+    fast = normalize_animation_config({"frames": ["1", "2", "3", "4"], "speed": 0.75, "mode": "message"})
+    assert slow["speed"] == 0.2
     assert fast["speed"] == 0.75
-
-
 def test_animation_speed_never_exceeds_supported_range():
     from app.handlers.start import normalize_animation_config
 
@@ -773,18 +741,15 @@ def test_invalid_post_ignores_commands_banned_users_owner_and_moderators():
 
 
 
-def test_force_join_poster_keeps_old_post_until_replacement_is_ready():
+def test_poster_mode_sends_replacement_before_removing_temporary_posts():
     from pathlib import Path
-
     source = Path("app/handlers/start.py").read_text()
     impl_start = source.index("async def _forcejoin_check_impl")
-    missing_check = source.index("missing = [] if await is_owner_or_moderator", impl_start)
-    old_post_delete = source.index("await old_post.delete()", impl_start)
-    replacement_edit = source.index("if await _edit_force_join_post(animation_post, rendered, markup):", impl_start)
-
-    assert missing_check < replacement_edit < old_post_delete
-
-
+    impl = source[impl_start:]
+    poster_send = impl.index('animation_post = await bot.send_animation(user_id, force_cfg["poster_file_id"])')
+    replacement = impl.index('new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)', poster_send)
+    temporary_delete = impl.index('await temporary_post.delete()', replacement)
+    assert poster_send < replacement < temporary_delete
 def test_broadcast_report_counts_skipped_banned_recipients():
     from app.handlers.broadcast import format_broadcast_report
 
@@ -947,45 +912,30 @@ def test_settings_refresh_falls_back_when_telegram_rejects_edit():
     assert "return replacement.message_id" in refresh
     assert "await refresh_settings_panel(" in source
 
-def test_animation_uses_five_frames_and_respects_configured_speed_in_both_modes():
+def test_animation_uses_four_to_six_frames_and_respects_speed():
     from pathlib import Path
     from app.handlers.start import normalize_animation_config
-
-    for mode in ("new_message", "force_join_poster"):
-        cfg = normalize_animation_config({
-            "enabled": True,
-            "prefix": "Checking",
-            "frames": ["1", "2", "3", "4", "5"],
-            "speed": 0.35,
-            "mode": mode,
-        })
+    for mode in ("message", "poster"):
+        cfg = normalize_animation_config({"enabled": True, "frames": ["1", "2", "3", "4", "5"], "speed": 0.35, "mode": mode})
         assert len(cfg["frames"]) == 5
         assert cfg["speed"] == 0.35
-
     source = Path("app/handlers/start.py").read_text()
-    animation_loop = source.split("async def _animate_gate", 1)[1].split(
-        "\nasync def _start_gate_animation", 1
-    )[0]
-    assert 'speed = max(speed, 1.0)' not in animation_loop
-    assert 'await bot.edit_message_text(' in animation_loop
-    assert 'await bot.edit_message_caption(' in animation_loop
-    new_message_branch = animation_loop.split('if mode == "new_message":', 1)[1].split('else:', 1)[0]
-    assert 'await bot.edit_message_text(' in new_message_branch
-    assert 'await bot.delete_message(' not in new_message_branch
-    assert 'await bot.send_message(' not in new_message_branch
-    assert 'await asyncio.sleep(0.08)' in source
-
-
-def test_animation_frame_editor_saves_only_after_five_inputs_and_updates_status():
+    animation_loop = source.split("async def _animate_gate", 1)[1].split("\nasync def _start_gate_animation", 1)[0]
+    assert "speed = max(speed, 1.0)" not in animation_loop
+    assert "await bot.edit_message_text(" in animation_loop
+    assert "await bot.edit_message_caption(" in animation_loop
+    message_branch = animation_loop.split('if mode == "message":', 1)[1].split("else:", 1)[0]
+    assert "await bot.edit_message_text(" in message_branch
+    assert "await bot.delete_message(" not in message_branch
+    assert "await bot.send_message(" not in message_branch
+    assert "wait_for_cycle" in source
+def test_animation_frame_editor_saves_four_to_six_inputs_on_done():
     from pathlib import Path
-
     source = Path("app/handlers/settings.py").read_text()
-    assert '"animation_frame_4", "animation_frame_5"' in source
-    assert "if len(frames) < 5:" in source
-    assert '"frames": frames, "frames_enabled": True, "enabled": True' in source
-    assert "Send frame 5 of 5." in source
+    assert 'field="animation_frames_collect"' in source
+    assert 'value.lower() == "/done"' in source
+    assert "if len(frames) < 4:" in source
+    assert "len(frames) >= 6" in source
+    assert '"frames": frames' in source
     assert "await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)" in source
-    assert 'await db.settings.update_one(' in source.split('if field in ("animation_frame_1", "animation_frame_2", "animation_frame_3", "animation_frame_4", "animation_frame_5"):', 1)[1].split('if field == "forcejoin_label":', 1)[0]
     assert 'saved_cfg.get("frames") != frames' in source
-    assert 'All 5 animation frames were saved and the status panel was refreshed.' in source
-
