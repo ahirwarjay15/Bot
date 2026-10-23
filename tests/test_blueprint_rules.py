@@ -691,8 +691,9 @@ def test_force_join_chat_add_has_a_main_panel_fallback_and_poster_is_kept_for_ve
     assert "build_forcejoin_page(message.bot, db, settings)" in handler
     assert "replacement = await message.bot.send_message(" in handler
     assert "await message.bot.delete_message(chat_id=panel_chat_id, message_id=panel_message_id)" in handler
-    assert 'force_cfg.get("poster_file_id") or force_cfg.get("poster_photo_id")' in start_source
-    assert 'cfg.get("poster_file_id") or cfg.get("poster_photo_id")' in start_source
+    poster_sender = start_source.split("async def _send_force_join_post", 1)[1].split("async def _edit_force_join_post", 1)[0]
+    assert 'cfg.get("poster_file_id")' in poster_sender
+    assert 'cfg.get("poster_photo_id")' in poster_sender
 
 
 def test_pending_join_request_expires_and_requires_timestamp():
