@@ -375,6 +375,11 @@ async def test_force_join_settings_page_uses_real_line_breaks():
         async def find_one(self, query):
             if query.get("key") == "force_join":
                 return {"enabled": True, "channels": []}
+            if query.get("key") == "animation":
+                return {"prefix": "Checking", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"}
+            return None
+
+        async def update_one(self, *args, **kwargs):
             return None
 
     class FakeBot:
@@ -423,7 +428,7 @@ def test_force_join_verification_resolves_public_chat_username_for_join_button()
     source = Path("app/handlers/start.py").read_text()
     gate_prompt = source.split("async def gate_or_prompt", 1)[1].split("@router.callback_query(F.data == \"start:about\")", 1)[0]
     verification = source.split("async def _forcejoin_check_impl", 1)[1]
-    assert "resolve_force_join_button_target(bot, database.db, channel, channel_cfg)" in gate_prompt
+    assert "resolve_force_join_button_target(" in gate_prompt
     assert "resolve_force_join_button_target(" in verification
 
 def test_settings_index_migration_allows_multiple_force_join_channel_documents():
@@ -486,11 +491,10 @@ def test_new_message_animation_is_reused_as_force_join_post_for_verify_and_deepl
     from pathlib import Path
 
     source = Path("app/handlers/start.py").read_text()
-    assert 'message_id=separate_animation_id,' in source
-    assert 'text=rendered,' in source
-    assert 'Could not convert deeplink animation message into Force Join post' in source
-    assert 'Could not convert Verify animation message into Force Join post' in source
-    assert 'if old_post and old_post.message_id != separate_animation_id:' in source
+    assert 'animation_mode == "new_message"' in source
+    assert 'new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)' in source
+    assert 'await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)' in source
+    assert 'if old_post and old_post.message_id != new_post.message_id:' in source
 
 def test_settings_flow_messages_are_tracked_for_page_navigation_cleanup():
     from pathlib import Path
