@@ -408,14 +408,15 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
     target_id = separate_message_id if mode == "new_message" else gate_message.message_id
     frame_index = 0  # The first frame is already visible.
     frame_updates = 0
-    # Delete+send creates real messages, so cap it to avoid flooding a chat.
-    max_new_message_updates = 4
+    # New-message mode keeps animating until verification stops it. Each
+    # frame is a delete+send pair, so limit it to one frame per second to stay
+    # comfortably below Telegram's per-chat message rate limits.
     if mode == "new_message":
-        speed = max(speed, 0.5)
+        speed = max(speed, 1.0)
     next_beat = time.monotonic() + speed
     key = (user_id, payload)
     try:
-        while mode != "new_message" or frame_updates < max_new_message_updates:
+        while True:
             if stop_event and stop_event.is_set():
                 break
             delay = max(0.0, next_beat - time.monotonic())
