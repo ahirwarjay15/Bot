@@ -9,6 +9,8 @@ def normalize_telegram_text(value: str | None) -> str:
     # Repair legacy values with any number of literal backslashes before n.
     text = re.sub(r"\\+n", "\n", text)
 
+    code_blocks = []
+
     def save_code(match):
         code_blocks.append("<pre>" + escape(match.group(1).strip("\n")) + "</pre>")
         return f"\x00CODE{len(code_blocks) - 1}\x00"
