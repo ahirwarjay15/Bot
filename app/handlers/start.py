@@ -547,7 +547,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
                 await _start_gate_animation(
                     bot, user.id, payload, animation_post or message, "",
                     InlineKeyboardMarkup(inline_keyboard=[]), text_animation_cfg,
-                    animation_only=True, wait_for_cycle=True,
+                    animation_only=True,
                 )
             except TelegramAPIError:
                 log.warning("Could not create Force Join animation poster during deeplink check", exc_info=True)
@@ -992,7 +992,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 text_animation_cfg = {**animation_cfg, "mode": "message"}
                 await _start_gate_animation(
                     bot, user_id, payload, animation_post or old_post, "", empty_markup,
-                    text_animation_cfg, animation_only=True, wait_for_cycle=True,
+                    text_animation_cfg, animation_only=True,
                 )
             except TelegramAPIError:
                 log.warning("Could not create Force Join animation poster", exc_info=True)
