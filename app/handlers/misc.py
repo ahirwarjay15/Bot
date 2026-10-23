@@ -93,16 +93,38 @@ def _invalid_markup(cfg):
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 
-async def _edit_same_post(message, text, markup):
+async def _replace_about_post(bot, user_id, cfg, old_message, text, markup):
+    """Send a fresh About/Invalid post so caption or text edits never add an Edited label."""
+    replacement = None
     try:
-        if message.photo or message.animation:
-            await message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
+        if cfg.get("poster_file_id"):
+            replacement = await bot.send_animation(
+                user_id, cfg["poster_file_id"], caption=text,
+                parse_mode="HTML", reply_markup=markup,
+            )
+        elif cfg.get("poster_photo_id"):
+            replacement = await bot.send_photo(
+                user_id, cfg["poster_photo_id"], caption=text,
+                parse_mode="HTML", reply_markup=markup,
+            )
         else:
-            await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+            replacement = await bot.send_message(
+                user_id, text, parse_mode="HTML", reply_markup=markup,
+            )
     except TelegramAPIError:
-        # The callback still acknowledges; an inaccessible/stale post is not recreated
-        # because the blueprint requires About to edit the original post in place.
-        return
+        log.warning("Could not send replacement About/Invalid post with its poster; retrying as text", exc_info=True)
+        try:
+            replacement = await bot.send_message(
+                user_id, text, parse_mode="HTML", reply_markup=markup,
+            )
+        except TelegramAPIError:
+            log.exception("Could not send replacement About/Invalid text post")
+            return
+    if replacement:
+        try:
+            await old_message.delete()
+        except TelegramAPIError:
+            pass
 
 
 @router.message()
@@ -178,7 +200,9 @@ async def invalid_about(query: CallbackQuery, database, bot):
     me = await bot.get_me()
     raw = await load_shared_about_text(database.db)
     rendered = _render_user_text(raw, user, me).replace("{bot_name}", _render_user_text("{bot_mention}", user, me))
-    await _edit_same_post(message, rendered, _about_markup())
+    await _replace_about_post(
+        bot, user.id, cfg, message, rendered, _about_markup()
+    )
 
 
 @router.callback_query(F.data == "invalid:about_back")
@@ -193,4 +217,8 @@ async def invalid_about_back(query: CallbackQuery, settings: Settings, database)
     if not cfg:
         return
     me = await query.bot.get_me()
-    await _edit_same_post(message, _render_user_text(cfg.get("text") or DEFAULT_INVALID, user, me), _invalid_markup(cfg))
+    await _replace_about_post(
+        query.bot, user.id, cfg, message,
+        _render_user_text(cfg.get("text") or DEFAULT_INVALID, user, me),
+        _invalid_markup(cfg),
+    )
