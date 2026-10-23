@@ -95,7 +95,7 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     normalized = dict(cfg or {})
     frames = normalized.get("frames")
     frames = [str(frame) for frame in frames if str(frame).strip()] if isinstance(frames, list) else []
-    if not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    if not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
     normalized["frames"] = frames[:6]
     mode = normalized.get("mode")
     if mode in ("new_message", "message"): mode = "message"
@@ -377,7 +377,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                         stop_event: asyncio.Event | None = None,
                         cycle_event: asyncio.Event | None = None):
     frames = cfg.get("frames")
-    if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    if not isinstance(frames, list) or not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
     frames = [str(frame) for frame in frames]
     try: speed = float(cfg.get("speed", 0.25))
     except (TypeError, ValueError): speed = 0.25
@@ -483,7 +483,7 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
     separate_id = None
     if mode == "message":
         frames = cfg.get("frames")
-        if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+        if not isinstance(frames, list) or not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
         first = animation_frame_text(frames[0])
         try:
             animation_message = await bot.send_message(user_id, first, parse_mode="HTML")
@@ -532,7 +532,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
             await _start_gate_animation(bot, user.id, payload, message, "", InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg, wait_for_cycle=True)
         else:
             frames = animation_cfg.get("frames")
-            if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+            if not isinstance(frames, list) or not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
             first = animation_frame_text(frames[0])
             try:
                 if cfg.get("poster_file_id"):
@@ -998,7 +998,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             )
         else:
             frames = animation_cfg.get("frames")
-            if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+            if not isinstance(frames, list) or not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
             first = animation_frame_text(frames[0])
             empty_markup = InlineKeyboardMarkup(inline_keyboard=[])
             try:
