@@ -542,7 +542,7 @@ def test_animation_legacy_defaults_are_migrated_and_frames_are_bold():
     })
     assert cfg["prefix"] == "Checking"
     assert cfg["frames"] == ["OLD", "VALUES", "HERE", "....", "....."]
-    assert cfg["speed"] == 0.15
+    assert cfg["speed"] == 0.08
     assert cfg["mode"] == "new_message"
     assert cfg["enabled"] is True
     assert cfg["frames_enabled"] is True
@@ -561,7 +561,7 @@ def test_animation_speed_is_clamped_for_both_modes_without_overriding_custom_spe
         "prefix": "Checking", "frames": [".", "..", "..."],
         "speed": 0.75, "mode": "new_message",
     })
-    assert slow["speed"] == 0.15
+    assert slow["speed"] == 0.08
     assert fast["speed"] == 0.75
 
 
@@ -967,10 +967,11 @@ def test_animation_uses_five_frames_and_respects_configured_speed_in_both_modes(
         "\nasync def _start_gate_animation", 1
     )[0]
     assert 'speed = max(speed, 1.0)' not in animation_loop
-    assert 'await bot.edit_message_text(' not in animation_loop
-    assert 'await bot.edit_message_caption(' not in animation_loop
-    assert 'await bot.delete_message(chat_id=user_id, message_id=target_id)' in animation_loop
-    assert 'await bot.send_message(' in animation_loop
+    assert 'await bot.edit_message_text(' in animation_loop
+    assert 'await bot.edit_message_caption(' in animation_loop
+    assert 'previous_id = target_id' in animation_loop
+    assert animation_loop.index('frame_message = await bot.send_message(') < animation_loop.index('await bot.delete_message(chat_id=user_id, message_id=previous_id)')
+    assert 'await asyncio.sleep(0.08)' in source
 
 
 def test_animation_frame_editor_saves_only_after_five_inputs_and_updates_status():
