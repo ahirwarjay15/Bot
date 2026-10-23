@@ -626,6 +626,7 @@ async def send_file_animation(bot, db, user_id: int) -> None:
         cfg = await load_animation_config(db)
         text = str(cfg.get("file_animation_text") or "").strip()
         if not text:
+            await asyncio.sleep(cfg["speed"])
             return
         msg = await bot.send_message(user_id, text, parse_mode="HTML")
         await asyncio.sleep(cfg["speed"])
@@ -639,11 +640,12 @@ async def send_file_animation(bot, db, user_id: int) -> None:
                 log.debug("Blink delete failed; continuing delivery", exc_info=True)
 
 
-async def delete_start_command_after(message: Message, db) -> None:
+async def delete_start_command_after(message: Message, db, *, delay: bool = True) -> None:
     """Let the destination post appear, then delete /start after one configured beat."""
     try:
-        cfg = await load_animation_config(db)
-        await asyncio.sleep(cfg["speed"])
+        if delay:
+            cfg = await load_animation_config(db)
+            await asyncio.sleep(cfg["speed"])
         await message.delete()
     except Exception:
         log.debug("Could not delay/delete the incoming /start command", exc_info=True)
@@ -705,7 +707,8 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         finally:
             # The file/batch must be delivered before the configured blink appears.
             await send_file_animation(bot, database.db, message.chat.id)
-            await delete_start_command_after(message, database.db)
+            # send_file_animation already waited one configured beat after delivery.
+            await delete_start_command_after(message, database.db, delay=False)
             try: await finish_delivery_request(database.db, request_key, success)
             except Exception: log.exception("Could not update delivery request status")
         return
