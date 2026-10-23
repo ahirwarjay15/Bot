@@ -800,13 +800,28 @@ async def start_about(query: CallbackQuery, database):
     about_text = await load_shared_about_text(database.db)
     rendered = render_common_variables(about_text, query.from_user, me).replace("{bot_name}", render_common_variables("{bot_mention}", query.from_user, me))
     back_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="《 BACK", callback_data="start:about_back")]])
+    # Send a fresh About post instead of editing the Start post (which can show Edited).
     try:
-        if query.message.photo or query.message.animation:
-            await query.message.edit_caption(caption=rendered, parse_mode="HTML", reply_markup=back_markup)
+        if cfg.get("poster_file_id"):
+            replacement = await query.bot.send_animation(
+                query.from_user.id, cfg["poster_file_id"], caption=rendered,
+                parse_mode="HTML", reply_markup=back_markup,
+            )
+        elif cfg.get("poster_photo_id"):
+            replacement = await query.bot.send_photo(
+                query.from_user.id, cfg["poster_photo_id"], caption=rendered,
+                parse_mode="HTML", reply_markup=back_markup,
+            )
         else:
-            await query.message.edit_text(rendered, parse_mode="HTML", reply_markup=back_markup)
+            replacement = await query.bot.send_message(
+                query.from_user.id, rendered, parse_mode="HTML", reply_markup=back_markup,
+            )
+        try:
+            await query.message.delete()
+        except TelegramAPIError:
+            pass
     except TelegramAPIError:
-        pass
+        log.warning("Could not send replacement About post", exc_info=True)
 
 @router.callback_query(F.data == "start:about_back")
 async def start_about_back(query: CallbackQuery, settings: Settings, database):
@@ -846,15 +861,29 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
     raw = cfg.get("text") or "<b><i>✨ ʜᴇʟʟᴏ {mention}</i></b>\n\nɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
     rendered = render_common_variables(raw, user, me)
+    # Re-send the main Start post and remove About instead of editing in place.
+    # This avoids Telegram's Edited label on both text and media messages.
     try:
-        if msg.photo:
-            await msg.edit_caption(caption=rendered, parse_mode="HTML", reply_markup=markup)
-        elif msg.animation:
-            await msg.edit_caption(caption=rendered, parse_mode="HTML", reply_markup=markup)
+        if cfg.get("poster_file_id"):
+            replacement = await query.bot.send_animation(
+                user.id, cfg["poster_file_id"], caption=rendered,
+                parse_mode="HTML", reply_markup=markup,
+            )
+        elif cfg.get("poster_photo_id"):
+            replacement = await query.bot.send_photo(
+                user.id, cfg["poster_photo_id"], caption=rendered,
+                parse_mode="HTML", reply_markup=markup,
+            )
         else:
-            await msg.edit_text(rendered, parse_mode="HTML", reply_markup=markup)
+            replacement = await query.bot.send_message(
+                user.id, rendered, parse_mode="HTML", reply_markup=markup,
+            )
+        try:
+            await msg.delete()
+        except TelegramAPIError:
+            pass
     except TelegramAPIError:
-        pass
+        log.warning("Could not send replacement Start post", exc_info=True)
 
 async def cleanup_expired_pending_join_requests(db, now=None, max_age_days: int = 15):
     """Delete pending-request records only after their 15-day expiry."""
