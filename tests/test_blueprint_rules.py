@@ -935,3 +935,15 @@ def test_batch_panel_is_not_sent_from_each_file_update():
     assert "waiting_first" in source and "waiting_last" in source
     assert "await state.clear()" in source
 
+def test_settings_refresh_falls_back_when_telegram_rejects_edit():
+    from pathlib import Path
+
+    source = Path("app/handlers/settings.py").read_text()
+    refresh = source.split("async def refresh_settings_panel", 1)[1].split(
+        "\\nasync def refresh_animation_panel", 1
+    )[0]
+    assert "await bot.send_message(" in refresh
+    assert "await bot.delete_message(chat_id=chat_id, message_id=message_id)" in refresh
+    assert "return replacement.message_id" in refresh
+    assert "await refresh_settings_panel(" in source
+
