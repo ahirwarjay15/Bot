@@ -266,7 +266,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     # link now; expiry/join cleanup workers revoke older links asynchronously.
     try:
         invite = await bot.create_chat_invite_link(chat_id=chat_id, expire_date=int(now.timestamp()) + 300,
-            creates_join_request=(mode == "join_request"), name="Force Join")
+            creates_join_request=(mode == "join_request"))
     except TelegramAPIError:
         log.exception("Could not create temporary Force Join link for %s", chat_id)
         return None
