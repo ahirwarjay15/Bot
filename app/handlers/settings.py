@@ -312,7 +312,7 @@ async def render_home(query):
     name = f'<a href="https://t.me/{me.username}">{html.escape(me.full_name)}</a>' if me.username else html.escape(me.full_name)
     await edit_page(query, f"CUSTOMIZE\n<i>✰ Name: {name}</i>\n\nConfigure Bot Settings Using the Buttons Below.", kb([
         [("START", "settings:start"), ("FORCE SUB", "settings:forcejoin")],
-        [("ANIM", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
+        [("ANIMATION", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
         [("INVALID", "settings:invalid"), ("SHORTENER", "settings:shortener")],
         [("MODERATORS", "settings:mods"), ("STATS", "settings:stats")],
         [("CUSTOM BUTTON", "settings:custom_button")],
@@ -717,7 +717,7 @@ async def settings_command(message: Message, settings: Settings, database):
     name = f'<a href="https://t.me/{me.username}">{__import__("html").escape(me.full_name)}</a>' if me.username else __import__("html").escape(me.full_name)
     panel = await message.answer(f"<b><u>CUSTOMIZE</u></b>\n\n<i>✰ Name: {name}</i>\n\n<i>Configure Bot Settings Using the Buttons Below.</i>", parse_mode="HTML", link_preview_options={"is_disabled": True}, reply_markup=kb([
         [("START", "settings:start"), ("FORCE SUB", "settings:forcejoin")],
-        [("ANIM", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
+        [("ANIMATION", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
         [("INVALID", "settings:invalid"), ("SHORTENER", "settings:shortener")],
         [("MODERATORS", "settings:mods"), ("STATS", "settings:stats")],
         [("CUSTOM BUTTON", "settings:custom_button")],
