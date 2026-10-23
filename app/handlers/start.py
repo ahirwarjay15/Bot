@@ -451,19 +451,21 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                 try:
                     content = animated if animation_only else f"{base_text}\n\n{animated}"
                     if mode == "new_message":
-                        # This mode deliberately uses fresh messages to avoid
-                        # Telegram's Edited label; remove the previous frame.
+                        # Delete the old frame first, then immediately send the
+                        # next one. This avoids overlapping frames; a tiny blank
+                        # gap can remain because Telegram API calls have latency.
                         previous_id = target_id
-                        frame_message = await bot.send_message(
-                            chat_id=user_id, text=content, parse_mode="HTML",
-                            reply_markup=markup,
-                        )
-                        target_id = frame_message.message_id
                         if previous_id is not None:
                             try:
                                 await bot.delete_message(chat_id=user_id, message_id=previous_id)
                             except TelegramAPIError:
                                 log.debug("Could not delete the previous animation frame")
+                        target_id = None
+                        frame_message = await bot.send_message(
+                            chat_id=user_id, text=content, parse_mode="HTML",
+                            reply_markup=markup,
+                        )
+                        target_id = frame_message.message_id
                     else:
                         # Force Join Poster mode must animate the SAME poster.
                         # Telegram's API does not let bots suppress its Edited label.
