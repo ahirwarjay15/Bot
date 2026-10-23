@@ -983,4 +983,7 @@ def test_animation_frame_editor_saves_only_after_five_inputs_and_updates_status(
     assert '"frames": frames, "frames_enabled": True, "enabled": True' in source
     assert "Send frame 5 of 5." in source
     assert "await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)" in source
+    assert 'await db.settings.update_one(' in source.split('if field in ("animation_frame_1", "animation_frame_2", "animation_frame_3", "animation_frame_4", "animation_frame_5"):', 1)[1].split('if field == "forcejoin_label":', 1)[0]
+    assert 'saved_cfg.get("frames") != frames' in source
+    assert 'All 5 animation frames were saved and the status panel was refreshed.' in source
 
