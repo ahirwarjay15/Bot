@@ -335,7 +335,7 @@ async def build_forcejoin_page(bot, db, settings):
     rows = [channel_buttons[i:i+2] for i in range(0, len(channel_buttons), 2)]
     if len(channels) < 10:
         rows.append([("✚ ADD", "settings:forcejoin_add")])
-    # Force Join is active exactly while at least one channel is configured.
+    # Force Sub is active exactly while at least one channel is configured.
     enabled = bool(channels)
     if cfg.get("enabled") != enabled:
         await db.settings.update_one(
@@ -455,8 +455,6 @@ async def render_start_about(query, db):
 
 def _animation_mode_for_action(action: str) -> str:
     """Translate legacy animation mode action names to canonical values."""
-    return "message" if action == "animation_mode_new" else "poster"
-
 def build_animation_page(cfg):
     """Render compact animation status and the remaining controls."""
     normalized = normalize_animation_config(cfg)
@@ -880,7 +878,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "forcejoin_message": await render_forcejoin_message(query)
     elif action == "forcejoin_message_edit":
         await show_input_prompt(query, state, "forcejoin_message",
-            "Send the Force Join message. Telegram bold, italic, quotes and monospace formatting will be preserved.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — owner link\n<code>{hindi_anime}</code> — Lexi Anime Hindi link\n<code>{remaining_count}</code> — remaining channels count",
+            "Send the Force Sub message. Telegram bold, italic, quotes and monospace formatting will be preserved.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — owner link\n<code>{hindi_anime}</code> — Lexi Anime Hindi link\n<code>{remaining_count}</code> — remaining channels count",
             "forcejoin")
     elif action == "forcejoin_message_see":
         cfg = await db.settings.find_one({"key": "force_join"}) or {}
@@ -900,11 +898,11 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         me = await query.bot.get_me()
         preview = DEFAULT_FORCE_JOIN_MESSAGE.replace("{mention}", query.from_user.full_name if query.from_user else "User").replace("{remaining_count}", "3")
         preview = preview.replace("{bot_mention}", me.full_name or me.username or "Bot")
-        await query.answer("✅ Force Join message restored to the recommended default.\n\n" + plain_preview(preview)[:130], show_alert=True)
+        await query.answer("✅ Force Sub message restored to the recommended default.\n\n" + plain_preview(preview)[:130], show_alert=True)
         await render_forcejoin_message(query)
         return
     elif action == "forcejoin_media":
-        await edit_page(query, "FORCE SUB MEDIA\n\nAdd or remove the image/GIF shown with the Force Join message.", kb([
+        await edit_page(query, "FORCE SUB MEDIA\n\nAdd or remove the image/GIF shown with the Force Sub message.", kb([
             [("✚ ADD", "settings:forcejoin_media_add"), ("REMOVE", "settings:forcejoin_media_remove")],
             [("《 BACK", "settings:forcejoin")],
         ]))
@@ -961,7 +959,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start_text": await render_start_text(query)
     elif action == "start_text_edit":
         await show_input_prompt(query, state, "start_text",
-            "Send the new Start Message text.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — link to the owner\n<code>{hindi_anime}</code> — link to Lexi Anime Hindi",
+            "Send the new Caption text.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — link to the owner\n<code>{hindi_anime}</code> — link to Lexi Anime Hindi",
             "start_text")
     elif action == "start_text_see":
         import re
@@ -985,7 +983,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start_text_default":
         await patch(db, "start_message", {"text": DEFAULT_START_TEXT}, {"enabled": True})
         preview = plain_preview(DEFAULT_START_TEXT).replace("{user_mention}", query.from_user.full_name if query.from_user else "User")
-        await query.answer("✅ Start message restored to the recommended default.\n\n" + preview[:130], show_alert=True)
+        await query.answer("✅ Start caption restored to the recommended default.\n\n" + preview[:130], show_alert=True)
         await render_start_text(query)
         return
     elif action == "start_button":
@@ -1113,7 +1111,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "invalid_text": await render_invalid_text(query)
     elif action == "invalid_text_edit":
         await show_input_prompt(query, state, "invalid_text",
-            "Send the new Invalid Message text. Telegram bold, italic, quotes and monospace formatting will be preserved.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — owner link\n<code>{hindi_anime}</code> — Lexi Anime Hindi link",
+            "Send the new Invalid Caption text. Telegram bold, italic, quotes and monospace formatting will be preserved.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — owner link\n<code>{hindi_anime}</code> — Lexi Anime Hindi link",
             "invalid")
     elif action == "invalid_text_see":
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
@@ -1386,7 +1384,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             panel_text, panel_markup = await build_forcejoin_page(message.bot, db, settings)
             try:
                 # The Add page is the existing settings panel: turn it back into
-                # the Force Join page so the newly added chat appears immediately.
+                # the Force Sub page so the newly added chat appears immediately.
                 await message.bot.edit_message_text(
                     chat_id=panel_chat_id,
                     message_id=panel_message_id,
@@ -1426,7 +1424,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         except TelegramAPIError:
             pass
         if shared.request_id not in (5101, 5102):
-            await tracked_answer(message, state, "That chat selection expired. Open /settings → Force Join → Add again.")
+            await tracked_answer(message, state, "That chat selection expired. Open /settings → Force Sub → Add again.")
             await clear_state_preserving_prompts(state)
             return
         expected_type = "channel" if shared.request_id == 5102 else "group"
@@ -1464,12 +1462,12 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         if channel_id in channels or (chat.username and "@" + chat.username in channels):
             await remove_temporary_prompts(message.bot, data)
             await clear_state_preserving_prompts(state)
-            await tracked_answer(message, state, "That Force Join chat is already configured.", reply_markup=ReplyKeyboardRemove())
+            await tracked_answer(message, state, "That Force Sub chat is already configured.", reply_markup=ReplyKeyboardRemove())
             return
         if len(channels) >= 10:
             await remove_temporary_prompts(message.bot, data)
             await clear_state_preserving_prompts(state)
-            await tracked_answer(message, state, "Maximum 10 Force Join channels/groups are allowed.", reply_markup=ReplyKeyboardRemove())
+            await tracked_answer(message, state, "Maximum 10 Force Sub channels/groups are allowed.", reply_markup=ReplyKeyboardRemove())
             return
         # Public chats can always use their stable username URL. Private chats
         # require an explicit mode choice after selection.
@@ -1700,7 +1698,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         return
     if field == "forcejoin_channel":
         await clear_state_preserving_prompts(state)
-        await tracked_answer(message, state, "Please add a Group or Channel using the chat-selection keyboard from /settings → Force Join → Add.")
+        await tracked_answer(message, state, "Please add a Group or Channel using the chat-selection keyboard from /settings → Force Sub → Add.")
         return
     if field == "start_poster":
         if message.animation:
@@ -1881,7 +1879,7 @@ async def setstart(m: Message, settings: Settings, database):
     p=(m.text or "").split(maxsplit=1)
     if len(p)!=2 or p[1].lower() not in ("on","off"): await m.answer("Usage: /setstart on|off"); return
     await patch(database.db, "start_message", {"enabled": p[1].lower()=="on"}, {"text": DEFAULT_START_TEXT, "button_enabled": True, "button_text": "📟 UPDATE CHANNEL", "button_url": "http://t.me/lexiAnime", "about_enabled": True})
-    await m.answer("Start message setting updated.")
+    await m.answer("Start setting updated.")
 
 @router.message(Command("setstarttext"))
 async def setstarttext(m: Message, settings: Settings, database):
