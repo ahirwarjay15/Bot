@@ -970,9 +970,9 @@ def test_animation_uses_five_frames_and_respects_configured_speed_in_both_modes(
     assert 'await bot.edit_message_text(' in animation_loop
     assert 'await bot.edit_message_caption(' in animation_loop
     new_message_branch = animation_loop.split('if mode == "new_message":', 1)[1].split('else:', 1)[0]
-    assert 'await bot.edit_message_text(' in new_message_branch
-    assert 'await bot.delete_message(' not in new_message_branch
-    assert 'await bot.send_message(' not in new_message_branch
+    assert 'await bot.send_message(' in new_message_branch
+    assert 'await bot.delete_message(' in new_message_branch
+    assert 'await bot.edit_message_text(' not in new_message_branch
     assert 'await asyncio.sleep(0.08)' in source
 
 
