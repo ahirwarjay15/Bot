@@ -838,8 +838,6 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             upsert=True,
         )
         await state.clear()
-        try:
-        await state.clear()
         panel_chat_id = pending.get("pending_forcejoin_panel_chat_id")
         panel_message_id = pending.get("pending_forcejoin_panel_message_id")
         if panel_chat_id and panel_message_id:
