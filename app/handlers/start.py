@@ -104,15 +104,15 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     if legacy_default:
         normalized["prefix"] = "Checking"
         # Older configs may still have the legacy prefix but already contain
-        # custom frames. Only seed defaults when no valid three-frame sequence
+        # custom frames. Only seed defaults when no valid five-frame sequence
         # exists; otherwise every runtime load silently discards the user's frames.
         frames = normalized.get("frames")
-        if not isinstance(frames, list) or len(frames) != 3:
-            normalized["frames"] = [".", "..", "..."]
+        if not isinstance(frames, list) or len(frames) != 5:
+            normalized["frames"] = [".", "..", "...", "....", "....."]
         normalized["speed"] = 0.15
     frames = normalized.get("frames")
-    if not isinstance(frames, list) or len(frames) != 3:
-        normalized["frames"] = [".", "..", "..."]
+    if not isinstance(frames, list) or len(frames) != 5:
+        normalized["frames"] = [".", "..", "...", "....", "....."]
     # Persist explicit switches for legacy records so the settings panel and
     # runtime use the same defaults instead of interpreting a missing field
     # independently.
@@ -398,8 +398,8 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
     frames_enabled = cfg.get("frames_enabled", True)
     prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
     frames = cfg.get("frames")
-    if not isinstance(frames, list) or len(frames) != 3:
-        frames = [".", "..", "..."]
+    if not isinstance(frames, list) or len(frames) != 5:
+        frames = [".", "..", "...", "....", "....."]
     if not frames_enabled:
         frames = [""]
     prefix_value = normalize_animation_prefix(cfg.get("prefix") or "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...") if prefix_enabled else ""
@@ -414,11 +414,10 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
     target_id = separate_message_id if mode == "new_message" else gate_message.message_id
     frame_index = 0  # The first frame is already visible.
     frame_updates = 0
-    # New-message mode keeps animating until verification stops it. Each
-    # frame is a delete+send pair, so limit it to one frame per second to stay
-    # comfortably below Telegram's per-chat message rate limits.
-    if mode == "new_message":
-        speed = max(speed, 1.0)
+    # Both modes replace the previous message instead of editing it. Telegram
+    # labels edited messages as "Edited" and does not offer a way to suppress it.
+    # The configured speed is therefore the target interval for every frame in
+    # either mode; Telegram RetryAfter responses are still respected below.
     next_beat = time.monotonic() + speed
     key = (user_id, payload)
     try:
@@ -444,36 +443,44 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             animated = animation_frame_text(prefix_value, frames[frame_index])
             while True:
                 try:
-                    if mode == "new_message":
-                        # Fresh messages avoid Telegram's "Edited" label.
-                        if target_id is not None:
-                            try:
-                                await bot.delete_message(chat_id=user_id, message_id=target_id)
-                            except TelegramAPIError:
-                                log.debug("Could not delete the previous animation frame; stopping this loop")
-                                return
-                            target_id = None
-                        frame_message = await bot.send_message(
-                            chat_id=user_id, text=animated, parse_mode="HTML",
+                    content = animated if animation_only else f"{base_text}\n\n{animated}"
+                    if target_id is not None:
+                        try:
+                            await bot.delete_message(chat_id=user_id, message_id=target_id)
+                        except TelegramAPIError:
+                            log.debug("Could not delete the previous animation frame; stopping this loop")
+                            return
+                        target_id = None
+
+                    # Send a fresh message in both modes: Telegram's Bot API
+                    # cannot hide the "Edited" marker on edited messages. Keep
+                    # the configured poster media in poster mode.
+                    if mode != "new_message" and gate_message.animation:
+                        frame_message = await bot.send_animation(
+                            chat_id=user_id, animation=gate_message.animation.file_id,
+                            caption=content, parse_mode="HTML", reply_markup=markup,
                         )
-                        target_id = frame_message.message_id
-                        current = _gate_animation_tasks.get(key)
-                        running_task = asyncio.current_task()
-                        if current and current[0] is running_task:
-                            _gate_animation_tasks[key] = (running_task, target_id)
-                        frame_updates += 1
+                    elif mode != "new_message" and gate_message.photo:
+                        frame_message = await bot.send_photo(
+                            chat_id=user_id, photo=gate_message.photo[-1].file_id,
+                            caption=content, parse_mode="HTML", reply_markup=markup,
+                        )
+                    elif mode != "new_message" and gate_message.document:
+                        frame_message = await bot.send_document(
+                            chat_id=user_id, document=gate_message.document.file_id,
+                            caption=content, parse_mode="HTML", reply_markup=markup,
+                        )
                     else:
-                        content = animated if animation_only else f"{base_text}\n\n{animated}"
-                        if gate_message.photo or gate_message.animation or gate_message.document:
-                            await bot.edit_message_caption(
-                                chat_id=user_id, message_id=target_id, caption=content,
-                                parse_mode="HTML", reply_markup=markup,
-                            )
-                        else:
-                            await bot.edit_message_text(
-                                chat_id=user_id, message_id=target_id, text=content,
-                                parse_mode="HTML", reply_markup=markup,
-                            )
+                        frame_message = await bot.send_message(
+                            chat_id=user_id, text=content, parse_mode="HTML",
+                            reply_markup=markup,
+                        )
+                    target_id = frame_message.message_id
+                    current = _gate_animation_tasks.get(key)
+                    running_task = asyncio.current_task()
+                    if current and current[0] is running_task:
+                        _gate_animation_tasks[key] = (running_task, target_id)
+                    frame_updates += 1
                 except TelegramRetryAfter as exc:
                     retry_delay = max(speed, float(exc.retry_after))
                     if stop_event:
@@ -520,8 +527,8 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
             prefix_value = "Checking"
         frames_enabled = cfg.get("frames_enabled", True)
         frames = cfg.get("frames")
-        if not isinstance(frames, list) or len(frames) != 3:
-            frames = [".", "..", "..."]
+        if not isinstance(frames, list) or len(frames) != 5:
+            frames = [".", "..", "...", "....", "....."]
         if not frames_enabled:
             frames = [""]
         first = animation_frame_text(prefix_value, frames[0])
@@ -565,8 +572,8 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
         else:
             frames_enabled = animation_cfg.get("frames_enabled", True)
             frames = animation_cfg.get("frames")
-            if not isinstance(frames, list) or len(frames) != 3:
-                frames = [".", "..", "..."]
+            if not isinstance(frames, list) or len(frames) != 5:
+                frames = [".", "..", "...", "....", "....."]
             if not frames_enabled:
                 frames = [""]
             prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
@@ -980,8 +987,8 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         else:
             frames_enabled = animation_cfg.get("frames_enabled", True)
             frames = animation_cfg.get("frames")
-            if not isinstance(frames, list) or len(frames) != 3:
-                frames = [".", "..", "..."]
+            if not isinstance(frames, list) or len(frames) != 5:
+                frames = [".", "..", "...", "....", "....."]
             if not frames_enabled:
                 frames = [""]
             prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
