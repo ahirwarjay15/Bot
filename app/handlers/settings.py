@@ -351,7 +351,7 @@ async def build_forcejoin_page(bot, db, settings):
     text = ("FORCE SUB\n\n"
             f"Status: {'ENABLED ✅' if enabled else 'DISABLED ❌'}\n\n"
             "Users must verify the required channels before receiving files.\n\n"
-            "You can add up to 10 force-join channels.")
+            "You can add up to 10 force-sub channels.")
     return text, kb(rows)
 
 
@@ -866,7 +866,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         index = int(action.split(":", 1)[1])
         if index < len(channels):
             await state.set_state(SettingInput.waiting); await state.update_data(field="forcejoin_label", channel=channels[index])
-            if query.message: await tracked_answer(query.message, state, "Send new button text for force-join channel button.")
+            if query.message: await tracked_answer(query.message, state, "Send new button text for force-sub channel button.")
     elif action.startswith("forcejoin_remove_one:"):
         channels = await effective_force_join_channels(database, settings)
         index = int(action.split(":", 1)[1])
@@ -908,7 +908,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         ]))
     elif action == "forcejoin_media_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="forcejoin_media")
-        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new force-join poster here.")
+        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new force-sub poster here.")
     elif action == "forcejoin_media_remove":
         await db.settings.update_one({"key": "force_join"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
         if query.message: await tracked_answer(query.message, state, "✨ Force-join poster removed successfully.")
@@ -1672,7 +1672,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             return
         await save_force_join_channel_label(message.bot, db, channel, value)
         await clear_state_preserving_prompts(state)
-        await tracked_answer(message, state, f"✨ Successfully updated button text for {channel} force-join button.")
+        await tracked_answer(message, state, f"✨ Successfully updated button text for {channel} force-sub button.")
         return
     if field == "forcejoin_message":
         value = formatted_input_text(message, value)
