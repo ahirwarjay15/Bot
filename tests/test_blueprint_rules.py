@@ -541,7 +541,7 @@ def test_animation_legacy_defaults_are_migrated_and_frames_are_bold():
         "mode": "new_message",
     })
     assert cfg["prefix"] == "Checking"
-    assert cfg["frames"] == ["OLD", "VALUES", "HERE"]
+    assert cfg["frames"] == ["OLD", "VALUES", "HERE", "....", "....."]
     assert cfg["speed"] == 0.15
     assert cfg["mode"] == "new_message"
     assert cfg["enabled"] is True
@@ -946,4 +946,40 @@ def test_settings_refresh_falls_back_when_telegram_rejects_edit():
     assert "await bot.delete_message(chat_id=chat_id, message_id=message_id)" in refresh
     assert "return replacement.message_id" in refresh
     assert "await refresh_settings_panel(" in source
+
+def test_animation_uses_five_frames_and_respects_configured_speed_in_both_modes():
+    from pathlib import Path
+    from app.handlers.start import normalize_animation_config
+
+    for mode in ("new_message", "force_join_poster"):
+        cfg = normalize_animation_config({
+            "enabled": True,
+            "prefix": "Checking",
+            "frames": ["1", "2", "3", "4", "5"],
+            "speed": 0.35,
+            "mode": mode,
+        })
+        assert len(cfg["frames"]) == 5
+        assert cfg["speed"] == 0.35
+
+    source = Path("app/handlers/start.py").read_text()
+    animation_loop = source.split("async def _animate_gate", 1)[1].split(
+        "\\nasync def _start_gate_animation", 1
+    )[0]
+    assert 'speed = max(speed, 1.0)' not in animation_loop
+    assert 'await bot.edit_message_text(' not in animation_loop
+    assert 'await bot.edit_message_caption(' not in animation_loop
+    assert 'await bot.delete_message(chat_id=user_id, message_id=target_id)' in animation_loop
+    assert 'await bot.send_message(' in animation_loop
+
+
+def test_animation_frame_editor_saves_only_after_five_inputs_and_updates_status():
+    from pathlib import Path
+
+    source = Path("app/handlers/settings.py").read_text()
+    assert '"animation_frame_4", "animation_frame_5"' in source
+    assert "if len(frames) < 5:" in source
+    assert '"frames": frames, "frames_enabled": True, "enabled": True' in source
+    assert "Send frame 5 of 5." in source
+    assert "await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)" in source
 
