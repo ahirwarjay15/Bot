@@ -465,7 +465,11 @@ def build_animation_page(cfg):
     mode = normalized["mode"]
     status = {"disabled": "Disabled ❌", "message": "Message", "poster": "Poster"}.get(mode, "Disabled ❌")
     blink_status = "Enabled ✅" if normalized.get("file_animation_text") else "Disabled ❌"
-    text = (\n        "ANIMATION\\n"\n        "\\n<i>Add a custom animation for the verification process.</i>"\n        f"\\n\\n<i>Status: {status}\\nFrames: {frames_text}\\nSpeed: {speed:.2f}s per frame\\nBlink: {blink_status}</i>"\n    )
+    text = (
+        "ANIMATION\n"
+        "\n<i>Add a custom animation for the verification process.</i>"
+        f"\n\n<i>Status: {status}\nFrames: {frames_text}\nSpeed: {speed:.2f}s per frame\nBlink: {blink_status}</i>"
+    )
     markup = kb([
         [("FRAMES", "settings:animation_frames"), ("SPEED", "settings:animation_speed")],
         [("MODE", "settings:animation_mode_toggle"), ("BLINK", "settings:file_animation")],
