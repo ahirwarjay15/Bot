@@ -648,7 +648,21 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
         except TelegramAPIError:
             pass
     if animation_enabled and animation_mode == "new_message":
-        # Keep every animation frame and the final gate post as fresh messages.
+        # Reuse the visible animation message as the final Force Join post.
+        # This avoids leaving a separate animation message and a second gate post.
+        if separate_animation_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=user.id,
+                    message_id=separate_animation_id,
+                    text=rendered,
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                    link_preview_options={"is_disabled": True},
+                )
+                return True
+            except TelegramAPIError:
+                log.warning("Could not convert animation message into Force Join post; sending fallback", exc_info=True)
         await _send_force_join_post(bot, user.id, cfg, rendered, markup)
         if separate_animation_id:
             try:
