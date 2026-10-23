@@ -210,26 +210,13 @@ async def run_force_join_link_cleanup_worker(bot, db, interval_seconds: int = 5)
 
 
 async def _revoke_used_force_join_link(bot, db, chat_id: int, invite_link) -> None:
-    url = getattr(invite_link, "invite_link", None) if invite_link else None
-    if not url:
-        return
-    record = await db.force_join_links.find_one({"chat_id": int(chat_id), "invite_link": url})
-    if record:
-        await _revoke_tracked_force_join_link(bot, db, record)
+    """Invite links are revoked only by the ten-minute expiry worker."""
+    return
 
 
 def _schedule_used_force_join_link_cleanup(bot, db, chat_id: int, invite_link) -> None:
-    """Keep invite revocation off the Telegram membership-event hot path."""
-    if not invite_link or not getattr(invite_link, "invite_link", None):
-        return
-
-    async def cleanup():
-        try:
-            await _revoke_used_force_join_link(bot, db, chat_id, invite_link)
-        except Exception:
-            log.warning("Deferred used-link cleanup failed; expiry worker will retry", exc_info=True)
-
-    asyncio.create_task(cleanup())
+    """Do not revoke a shared invite when one user uses it; keep it live for ten minutes."""
+    return
 
 
 async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
@@ -239,58 +226,65 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     except (ValueError, TelegramAPIError):
         log.warning("Could not resolve Force Join chat %r", channel, exc_info=True)
         return None
+
     chat_id = int(chat.id)
-    username = getattr(chat, "username", None)
-    # Public chats already have a stable direct join URL; avoid creating and
-    # persisting unnecessary temporary invites for them.
-    if username:
-        return f"https://t.me/{username}"
-    now = datetime.now(timezone.utc)
-    mode = channel_cfg.get("mode", "join_request")
+    # All chats use temporary rotating invite links, including public chats.
+    # Public chats default to normal mode; private chats default to join requests.
+    mode = channel_cfg.get("mode", "normal" if getattr(chat, "username", None) else "join_request")
     if mode not in {"normal", "join_request"}:
-        mode = "join_request"
-    tracking_user_id = int(user_id) if user_id is not None else 0
+        mode = "normal" if getattr(chat, "username", None) else "join_request"
     links_collection = getattr(db, "force_join_links", None)
-    # Reuse one shared link for this chat/mode for five minutes. Telegram's
-    # expiry is ten minutes, giving the replacement period a safe overlap.
-    if links_collection is not None:
+    if links_collection is None:
+        log.error("Force Join invite rotation requires the force_join_links collection")
+        return None
+
+    # Serialize cache-miss creation per chat/mode so concurrent users don't
+    # create multiple links for the same rotation window in this process.
+    lock = _forcejoin_locks.setdefault((chat_id, mode), asyncio.Lock())
+    async with lock:
+        now = datetime.now(timezone.utc)
         cached = await links_collection.find_one({
             "chat_id": chat_id, "mode": mode, "is_rotation_current": True,
             "refresh_at": {"$gt": now}, "expires_at": {"$gt": now},
         })
         if cached and cached.get("invite_link"):
             return cached["invite_link"]
-    try:
-        invite = await bot.create_chat_invite_link(
-            chat_id=chat_id, expire_date=int(now.timestamp()) + 600,
-            creates_join_request=(mode == "join_request"),
-        )
-    except TelegramAPIError:
-        log.exception("Could not create rotating Force Join link for %s", chat_id)
-        return None
-    created = datetime.now(timezone.utc)
-    record = {
-        "user_id": tracking_user_id, "chat_id": chat_id, "invite_link": invite.invite_link,
-        "mode": mode, "created_at": created, "refresh_at": created + timedelta(seconds=300),
-        "expires_at": created + timedelta(seconds=600), "cleanup_at": created + timedelta(seconds=600),
-        "is_rotation_current": True,
-    }
-    if links_collection is None:
-        return invite.invite_link
-    try:
-        await links_collection.update_many(
-            {"chat_id": chat_id, "mode": mode, "is_rotation_current": True},
-            {"$set": {"is_rotation_current": False}},
-        )
-        await links_collection.insert_one(record)
-    except Exception:
+
         try:
-            await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
+            invite = await bot.create_chat_invite_link(
+                chat_id=chat_id,
+                expire_date=int(now.timestamp()) + 600,
+                creates_join_request=(mode == "join_request"),
+            )
         except TelegramAPIError:
-            log.warning("Could not revoke untracked rotating invite", exc_info=True)
-        log.exception("Could not persist rotating Force Join link")
-        return None
-    return invite.invite_link
+            log.exception("Could not create rotating Force Join link for %s", chat_id)
+            return None
+
+        created = datetime.now(timezone.utc)
+        record = {
+            "chat_id": chat_id,
+            "invite_link": invite.invite_link,
+            "mode": mode,
+            "created_at": created,
+            "refresh_at": created + timedelta(seconds=300),
+            "expires_at": created + timedelta(seconds=600),
+            "cleanup_at": created + timedelta(seconds=600),
+            "is_rotation_current": True,
+        }
+        try:
+            await links_collection.update_many(
+                {"chat_id": chat_id, "mode": mode, "is_rotation_current": True},
+                {"$set": {"is_rotation_current": False}},
+            )
+            await links_collection.insert_one(record)
+        except Exception:
+            try:
+                await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
+            except TelegramAPIError:
+                log.warning("Could not revoke untracked rotating invite", exc_info=True)
+            log.exception("Could not persist rotating Force Join link")
+            return None
+        return invite.invite_link
 
 
 def _is_private_chat(chat) -> bool:
