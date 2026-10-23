@@ -450,25 +450,12 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                 try:
                     content = animated if animation_only else f"{base_text}\n\n{animated}"
                     if mode == "new_message":
-                        # Send each frame as a fresh message so Telegram never
-                        # marks the animation message as Edited. Send first, then
-                        # remove the previous frame to avoid a blank gap.
-                        next_message = await bot.send_message(
-                            chat_id=user_id, text=content,
-                            parse_mode="HTML", reply_markup=markup,
+                        # New Message mode also edits the same frame message;
+                        # both animation modes must update frames in place.
+                        await bot.edit_message_text(
+                            chat_id=user_id, message_id=target_id,
+                            text=content, parse_mode="HTML", reply_markup=markup,
                         )
-                        previous_target_id = target_id
-                        target_id = next_message.message_id
-                        current = _gate_animation_tasks.get(key)
-                        running_task = asyncio.current_task()
-                        if current and current[0] is running_task:
-                            _gate_animation_tasks[key] = (running_task, target_id)
-                        try:
-                            await bot.delete_message(
-                                chat_id=user_id, message_id=previous_target_id
-                            )
-                        except TelegramAPIError:
-                            log.debug("Could not remove previous New Message animation frame", exc_info=True)
                     else:
                         # Force Join Poster mode must animate the SAME poster.
                         # Telegram's API does not let bots suppress its Edited label.
