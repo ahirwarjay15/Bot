@@ -386,6 +386,11 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
     target_id = separate_message_id if mode == "message" else gate_message.message_id
     frame_index = 0
     frame_updates = 0
+    # A single configured frame is a static display: do not repeatedly edit the same text.
+    if len(frames) == 1:
+        if cycle_event:
+            cycle_event.set()
+        return
     key = (user_id, payload)
     next_beat = time.monotonic() + speed
     key = (user_id, payload)
