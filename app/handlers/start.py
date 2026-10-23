@@ -862,7 +862,9 @@ async def remember_pending_join_request(event, database):
 
 @router.chat_member()
 async def clear_accepted_private_join_request(event, database):
-    _schedule_used_force_join_link_cleanup(event.bot, database.db, event.chat.id, getattr(event, "invite_link", None))
+    bot = getattr(event, "bot", None)
+    if bot is not None:
+        _schedule_used_force_join_link_cleanup(bot, database.db, event.chat.id, getattr(event, "invite_link", None))
     """Drop a saved request only when a private-channel request becomes membership."""
     if not _is_private_chat(event.chat):
         return
