@@ -465,7 +465,7 @@ def build_animation_page(cfg):
     mode = normalized["mode"]
     status = {"disabled": "Disabled", "message": "Message", "poster": "Poster"}.get(mode, "Disabled")
     blink_status = "Enabled" if normalized.get("file_animation_text") else "Disabled"
-    text = f"ANIM\\n\\nStatus: {status}\\nFrames: {frames_text}\\nSpeed: {speed:.2f}s per frame\\nBlink: {blink_status}"
+    text = f"ANIM\n\nStatus: {status}\nFrames: {frames_text}\nSpeed: {speed:.2f}s per frame\nBlink: {blink_status}"
     markup = kb([
         [("FRAMES", "settings:animation_frames"), ("SPEED", "settings:animation_speed")],
         [("MODE", "settings:animation_mode_toggle"), ("BLINK", "settings:file_animation")],
@@ -716,8 +716,8 @@ async def settings_command(message: Message, settings: Settings, database):
     me = await message.bot.get_me()
     name = f'<a href="https://t.me/{me.username}">{__import__("html").escape(me.full_name)}</a>' if me.username else __import__("html").escape(me.full_name)
     panel = await message.answer(f"<b><u>CUSTOMIZE</u></b>\n\n<i>✰ Name: {name}</i>\n\n<i>Configure Bot Settings Using the Buttons Below.</i>", parse_mode="HTML", link_preview_options={"is_disabled": True}, reply_markup=kb([
-        [("START MSG", "settings:start"), ("FORCE SUB", "settings:forcejoin")],
-        [("ANIMATION", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
+        [("START", "settings:start"), ("FORCE SUB", "settings:forcejoin")],
+        [("ANIM", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
         [("INVALID", "settings:invalid"), ("SHORTENER", "settings:shortener")],
         [("MODERATORS", "settings:mods"), ("STATS", "settings:stats")],
         [("CUSTOM BUTTON", "settings:custom_button")],
@@ -1166,10 +1166,10 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "invalid_poster": await render_poster(query)
     elif action == "poster_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="poster")
-        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new invalid-post poster here.")
+        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new invalid poster here.")
     elif action == "poster_remove":
         await db.settings.update_one({"key": "invalid_post"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
-        if query.message: await tracked_answer(query.message, state, "✨ Invalid-post poster removed successfully.")
+        if query.message: await tracked_answer(query.message, state, "✨ Invalid poster removed successfully.")
         await render_poster(query)
     elif action == "invalid_about": await render_about(query, db)
     elif action == "invalid_about_toggle":
@@ -1719,7 +1719,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         else:
             await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
             return
-        await clear_state_preserving_prompts(state); await tracked_answer(message, state, "✨ Invalid-post poster updated successfully."); return
+        await clear_state_preserving_prompts(state); await tracked_answer(message, state, "✨ Invalid poster updated successfully."); return
     if not value:
         await tracked_answer(message, state, "Please send a non-empty value.")
         return
@@ -1815,7 +1815,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     elif field == "invalid_text":
         value = formatted_input_text(message, value)
         await patch(db, "invalid_post", {"text": value}, {"enabled": False, "about_enabled": False})
-        await finish_input_panel(message, state, "INVALID MESSAGE TEXT", "invalid")
+        await finish_input_panel(message, state, "INVALID TEXT", "invalid")
         await clear_state_preserving_prompts(state)
         return
     elif field == "invalid_button_text":
@@ -1897,7 +1897,7 @@ async def setinvalid(m: Message, settings: Settings, database):
     p=(m.text or "").split(maxsplit=1)
     if len(p)!=2 or p[1].lower() not in ("on","off"): await m.answer("Usage: /setinvalid on|off"); return
     await patch(database.db, "invalid_post", {"enabled":p[1].lower()=="on"}, {"text":DEFAULT_INVALID, "about_enabled": False})
-    await m.answer("Invalid-post setting updated.")
+    await m.answer("Invalid setting updated.")
 
 @router.message(Command("setinvalidtext"))
 async def setinvalidtext(m: Message, settings: Settings, database):
