@@ -332,6 +332,7 @@ async def join_status(bot, user_id: int, channels: list[str], db=None) -> list[s
 # Active text-animation tasks are process-local; file/gate state itself remains in MongoDB.
 _gate_animation_tasks: dict[tuple[int, str], tuple[asyncio.Task, int | None]] = {}
 _gate_animation_stop_events: dict[tuple[int, str], asyncio.Event] = {}
+_gate_animation_cycle_events: dict[tuple[int, str], asyncio.Event] = {}
 _forcejoin_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 
@@ -510,11 +511,18 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
     )
     key = (user_id, payload)
     _gate_animation_stop_events[key] = stop_event
+    _gate_animation_cycle_events[key] = cycle_event
     _gate_animation_tasks[key] = (task, separate_id)
     if wait_for_cycle and mode == "message":
-        # Enforce a minimum of one complete animation cycle without imposing
-        # an arbitrary maximum timeout. _animate_gate always signals this event
-        # when the cycle completes or the animation exits early.
+        await cycle_event.wait()
+
+
+async def _wait_for_gate_animation_minimum_cycle(user_id: int, payload: str, mode: str) -> None:
+    """Message mode waits for one cycle; poster mode never has a minimum-cycle delay."""
+    if mode != "message":
+        return
+    cycle_event = _gate_animation_cycle_events.get((user_id, payload))
+    if cycle_event:
         await cycle_event.wait()
 
 
@@ -536,7 +544,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     # animation during that check rather than only after the user taps Verify.
     if animation_enabled:
         if animation_mode == "message":
-            await _start_gate_animation(bot, user.id, payload, message, "", InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg, wait_for_cycle=True)
+            await _start_gate_animation(bot, user.id, payload, message, "", InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg)
         else:
             frames = animation_cfg.get("frames")
             if not isinstance(frames, list) or not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
@@ -594,6 +602,10 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     rendered = render_common_variables(raw_text, user, me).replace("{remaining_count}", str(len(missing)))
     markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
+    # Let Force Join checks and invite-link resolution run alongside the animation.
+    # Only Message mode has a minimum cycle; Poster mode proceeds as soon as the work is ready.
+    if animation_enabled:
+        await _wait_for_gate_animation_minimum_cycle(user.id, payload, animation_mode)
     separate_animation_id = None
     if animation_enabled:
         separate_animation_id = await _cancel_gate_animation(
@@ -1001,7 +1013,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         if animation_mode == "message":
             await _start_gate_animation(
                 bot, user_id, payload, old_post, "",
-                InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg, wait_for_cycle=True,
+                InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg,
             )
         else:
             frames = animation_cfg.get("frames")
@@ -1052,6 +1064,10 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         rendered = render_common_variables(normalize_telegram_text(raw_text), query.from_user, me).replace("{remaining_count}", str(len(missing)))
         markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
+        # Wait only for Message mode's minimum cycle, after verification work has run.
+        # Poster mode has no minimum-cycle limit and is replaced immediately when ready.
+        if animation_enabled:
+            await _wait_for_gate_animation_minimum_cycle(user_id, payload, animation_mode)
         # Stop the animation, then edit its poster in place with the current
         # remaining-channel buttons and configured Force Sub message.
         if animation_mode == "message":
@@ -1104,8 +1120,10 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 pass
         return
 
-    # Verification succeeded: stop the animation and remove the Force Sub
-    # prompt before sending any requested file or batch item.
+    # Verification succeeded: Message mode completes its minimum cycle; Poster mode does not wait.
+    # Then remove the Force Sub prompt before sending the requested file or batch item.
+    if animation_enabled:
+        await _wait_for_gate_animation_minimum_cycle(user_id, payload, animation_mode)
     separate_animation_id = await _cancel_gate_animation(
         bot, user_id, payload, delete_separate=False
     )
