@@ -620,13 +620,16 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     return True
 
 async def send_file_animation(bot, db, user_id: int) -> None:
-    """Show the configured blink after delivery for one configured animation beat."""
+    """Show and immediately clear the configured blink before file delivery."""
     msg = None
     try:
         cfg = await load_animation_config(db)
         text = str(cfg.get("file_animation_text") or "").strip()
         if not text:
-            await asyncio.sleep(cfg["speed"])
+            return
+        msg = await bot.send_message(user_id, text, parse_mode="HTML")
+        # A blink is a brief flash before the file, not a post-delivery message.
+        await asyncio.sleep(0.15)
             return
         msg = await bot.send_message(user_id, text, parse_mode="HTML")
         await asyncio.sleep(cfg["speed"])
@@ -691,6 +694,8 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             return
         success = False
         try:
+            # Flash and clear the blink before delivering the file/batch.
+            await send_file_animation(bot, database.db, message.chat.id)
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
             if payload.startswith("batch_") and result[0]==0:
                 await message.answer("None of the batch files could be delivered. The source messages may be unavailable.")
@@ -705,9 +710,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             log.exception("Unexpected delivery failure for %s", payload)
             await message.answer("Delivery failed due to a temporary error. Please try the link again.")
         finally:
-            # The file/batch must be delivered before the configured blink appears.
-            await send_file_animation(bot, database.db, message.chat.id)
-            # send_file_animation already waited one configured beat after delivery.
+            # The blink has already appeared before delivery.
             await delete_start_command_after(message, database.db, delay=False)
             try: await finish_delivery_request(database.db, request_key, success)
             except Exception: log.exception("Could not update delivery request status")
@@ -1136,6 +1139,8 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             pass
     success = False
     try:
+        # Show and clear the blink before the file/batch is sent.
+        await send_file_animation(bot, database.db, user_id)
         result=await deliver_payload(bot,database,settings,user_id,payload,record,request_key=request_key)
         if payload.startswith("batch_") and result[0]==0:
             await bot.send_message(user_id,"None of the batch files could be delivered.")
