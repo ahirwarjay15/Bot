@@ -344,7 +344,7 @@ async def build_forcejoin_page(bot, db, settings):
             upsert=True,
         )
     rows.extend([
-        [("MESSAGE", "settings:forcejoin_message"), ("MEDIA", "settings:forcejoin_media")],
+        [("CAPTION", "settings:forcejoin_message"), ("MEDIA", "settings:forcejoin_media")],
         [("VERIFY", "settings:forcejoin_verify_text"), ("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")],
         [("《 BACK", "settings:home")],
     ])
@@ -360,7 +360,7 @@ async def render_forcejoin(query, db, settings):
     await edit_page(query, text, markup)
 
 async def render_forcejoin_message(query):
-    await edit_page(query, "FORCE SUB MESSAGE\nCustomize the message shown to users who still need to join required channels.", kb([
+    await edit_page(query, "FORCE SUB CAPTION\nCustomize the caption shown to users who still need to join required channels.", kb([
         [("EDIT", "settings:forcejoin_message_edit"), ("SEE", "settings:forcejoin_message_see")],
         [("DEFAULT", "settings:forcejoin_message_default")],
         [("《 BACK", "settings:forcejoin")],
@@ -458,11 +458,13 @@ def _animation_mode_for_action(action: str) -> str:
 def build_animation_page(cfg):
     """Render compact animation status and the remaining controls."""
     normalized = normalize_animation_config(cfg)
-    frames_text = ", ".join(html.escape(str(frame)) for frame in normalized["frames"])
+    # Frames are saved as Telegram HTML from Message.html_text. Keep valid formatting
+    # tags intact so the settings page renders the frame instead of exposing tag source.
+    frames_text = ", ".join(str(frame) for frame in normalized["frames"])
     speed = normalized["speed"]
     mode = normalized["mode"]
-    status = {"disabled": "Disabled", "message": "Message", "poster": "Poster"}.get(mode, "Disabled")
-    blink_status = "Enabled" if normalized.get("file_animation_text") else "Disabled"
+    status = {"disabled": "Disabled ❌", "message": "Message", "poster": "Poster"}.get(mode, "Disabled ❌")
+    blink_status = "Enabled ✅" if normalized.get("file_animation_text") else "Disabled ❌"
     text = f"ANIM\n\nStatus: {status}\nFrames: {frames_text}\nSpeed: {speed:.2f}s per frame\nBlink: {blink_status}"
     markup = kb([
         [("FRAMES", "settings:animation_frames"), ("SPEED", "settings:animation_speed")],
@@ -1677,7 +1679,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     if field == "forcejoin_message":
         value = formatted_input_text(message, value)
         await patch(db, "force_join", {"message": value})
-        await finish_input_panel(message, state, "FORCE SUB MESSAGE", "forcejoin")
+        await finish_input_panel(message, state, "FORCE SUB CAPTION", "forcejoin")
         await clear_state_preserving_prompts(state)
         return
     if field == "forcejoin_verify_text":
