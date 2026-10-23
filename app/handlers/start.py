@@ -415,7 +415,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
         speed = float(cfg.get("speed", 0.25))
     except (TypeError, ValueError):
         speed = 1.0
-    speed = min(1.0, max(0.15, speed))
+    speed = min(1.0, max(0.08, speed))
     mode = cfg.get("mode", "force_join_poster")
     target_id = separate_message_id if mode == "new_message" else gate_message.message_id
     frame_index = 0  # The first frame is already visible.
@@ -450,42 +450,40 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             while True:
                 try:
                     content = animated if animation_only else f"{base_text}\n\n{animated}"
-                    if target_id is not None:
-                        try:
-                            await bot.delete_message(chat_id=user_id, message_id=target_id)
-                        except TelegramAPIError:
-                            log.debug("Could not delete the previous animation frame; stopping this loop")
-                            return
-                        target_id = None
-
-                    # Send a fresh message in both modes: Telegram's Bot API
-                    # cannot hide the "Edited" marker on edited messages. Keep
-                    # the configured poster media in poster mode.
-                    if mode != "new_message" and gate_message.animation:
-                        frame_message = await bot.send_animation(
-                            chat_id=user_id, animation=gate_message.animation.file_id,
-                            caption=content, parse_mode="HTML", reply_markup=markup,
-                        )
-                    elif mode != "new_message" and gate_message.photo:
-                        frame_message = await bot.send_photo(
-                            chat_id=user_id, photo=gate_message.photo[-1].file_id,
-                            caption=content, parse_mode="HTML", reply_markup=markup,
-                        )
-                    elif mode != "new_message" and gate_message.document:
-                        frame_message = await bot.send_document(
-                            chat_id=user_id, document=gate_message.document.file_id,
-                            caption=content, parse_mode="HTML", reply_markup=markup,
-                        )
-                    else:
+                    if mode == "new_message":
+                        # New Message mode replaces frames to avoid Telegram's
+                        # unavoidable "Edited" marker.
+                        if target_id is not None:
+                            try:
+                                await bot.delete_message(chat_id=user_id, message_id=target_id)
+                            except TelegramAPIError:
+                                log.debug("Could not delete the previous animation frame; stopping this loop")
+                                return
+                            target_id = None
                         frame_message = await bot.send_message(
                             chat_id=user_id, text=content, parse_mode="HTML",
                             reply_markup=markup,
                         )
-                    target_id = frame_message.message_id
+                        target_id = frame_message.message_id
+                    else:
+                        # Poster mode edits the existing message, preserving the
+                        # configured media and keyboard.
+                        if gate_message.animation or gate_message.photo or gate_message.document:
+                            await bot.edit_message_caption(
+                                chat_id=user_id, message_id=target_id,
+                                caption=content, parse_mode="HTML", reply_markup=markup,
+                            )
+                        else:
+                            await bot.edit_message_text(
+                                chat_id=user_id, message_id=target_id,
+                                text=content, parse_mode="HTML", reply_markup=markup,
+                            )
                     current = _gate_animation_tasks.get(key)
                     running_task = asyncio.current_task()
                     if current and current[0] is running_task:
-                        _gate_animation_tasks[key] = (running_task, target_id)
+                        _gate_animation_tasks[key] = (
+                            running_task, target_id if mode == "new_message" else None
+                        )
                     frame_updates += 1
                 except TelegramRetryAfter as exc:
                     retry_delay = max(speed, float(exc.retry_after))
@@ -672,7 +670,7 @@ async def send_file_animation(bot, db, user_id: int) -> None:
     msg = None
     try:
         msg = await bot.send_message(user_id, text, parse_mode="HTML")
-        await asyncio.sleep(0.35)
+        await asyncio.sleep(0.08)
     except TelegramAPIError:
         log.warning("File Animation send failed; continuing delivery", exc_info=True)
     finally:
