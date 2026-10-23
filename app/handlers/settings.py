@@ -1196,7 +1196,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await state.set_state(SettingInput.waiting)
         await state.update_data(field="animation_frames_collect", pending_frames=[], animation_panel_chat_id=query.message.chat.id if query.message else None, animation_panel_message_id=query.message.message_id if query.message else None)
         if query.message:
-            await tracked_answer(query.message, state, "Send frame 1 of 6. Send at least 4 frames, then /done to save (maximum 6).")
+            await tracked_answer(query.message, state, "Send frame 1 of 6. Send at least 1 frame, then /done to save (maximum 6).")
     elif action == "animation_mode_toggle":
         cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
         order = ("message", "poster", "disabled")
@@ -1633,8 +1633,8 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     if field == "animation_frames_collect":
         frames = list(data.get("pending_frames", []))
         if value.lower() == "/done":
-            if len(frames) < 4:
-                await tracked_answer(message, state, f"At least 4 frames are required. You have {len(frames)}; send more or /cancel.")
+            if len(frames) < 1:
+                await tracked_answer(message, state, f"At least 1 frame is required. You have {len(frames)}; send a frame or /cancel.")
                 return
             animation_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
             await db.settings.update_one(
@@ -1664,7 +1664,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             return
         frames.append(formatted_input_text(message, value))
         await state.update_data(field="animation_frames_collect", pending_frames=frames)
-        await tracked_answer(message, state, f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 4 frames.")
+        await tracked_answer(message, state, f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 1 frame.")
         return
     if field == "forcejoin_label":
         if not value or len(value) > 64:
