@@ -420,10 +420,9 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
     target_id = separate_message_id if mode == "new_message" else gate_message.message_id
     frame_index = 0  # The first frame is already visible.
     frame_updates = 0
-    # Both modes replace the previous message instead of editing it. Telegram
-    # labels edited messages as "Edited" and does not offer a way to suppress it.
-    # The configured speed is therefore the target interval for every frame in
-    # either mode; Telegram RetryAfter responses are still respected below.
+    # New Message mode keeps one text message and edits it for each frame.
+    # This matches the panel-style animation and avoids delete/send gaps.
+    # Telegram clients may show "Edited" for edits; the Bot API cannot suppress it.
     next_beat = time.monotonic() + speed
     key = (user_id, payload)
     try:
@@ -451,21 +450,12 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                 try:
                     content = animated if animation_only else f"{base_text}\n\n{animated}"
                     if mode == "new_message":
-                        # Delete the old frame first, then immediately send the
-                        # next one. This avoids overlapping frames; a tiny blank
-                        # gap can remain because Telegram API calls have latency.
-                        previous_id = target_id
-                        if previous_id is not None:
-                            try:
-                                await bot.delete_message(chat_id=user_id, message_id=previous_id)
-                            except TelegramAPIError:
-                                log.debug("Could not delete the previous animation frame")
-                        target_id = None
-                        frame_message = await bot.send_message(
-                            chat_id=user_id, text=content, parse_mode="HTML",
-                            reply_markup=markup,
+                        # Keep the same text message and update its frame at the
+                        # configured interval, just like an editable status panel.
+                        await bot.edit_message_text(
+                            chat_id=user_id, message_id=target_id,
+                            text=content, parse_mode="HTML", reply_markup=markup,
                         )
-                        target_id = frame_message.message_id
                     else:
                         # Force Join Poster mode must animate the SAME poster.
                         # Telegram's API does not let bots suppress its Edited label.
