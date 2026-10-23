@@ -1728,7 +1728,10 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 await state.update_data(field="animation_frame_1", pending_frames=[])
                 await tracked_answer(message, state, "Frame session reset. Send frame 1 of 5 again.")
                 return
-        frames.append(value)
+        # Store Telegram's HTML representation, not plain message.text, so
+        # bold/italic/underline/mono/spoiler/link entities survive delivery.
+        frame_value = formatted_input_text(message, value)
+        frames.append(frame_value)
         if len(frames) < 5:
             next_field = f"animation_frame_{len(frames)+1}"
             await state.update_data(field=next_field, pending_frames=frames)
