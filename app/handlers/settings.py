@@ -521,22 +521,45 @@ async def render_animation(query, db):
 
 
 async def refresh_animation_panel(bot, chat_id, message_id, db):
-    """Edit the original Animation panel after a prefix or frame input is saved."""
+    """Refresh the Animation panel, replacing it if Telegram refuses an edit."""
     if not chat_id or not message_id:
-        return
+        return None
     cfg = await db.settings.find_one({"key": "animation"}) or {}
     text, markup = build_animation_page(cfg)
+    page_text = format_settings_page(text)
     try:
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text=format_settings_page(text),
+            text=page_text,
+            parse_mode="HTML",
+            reply_markup=markup,
+            link_preview_options={"is_disabled": True},
+        )
+        return message_id
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return message_id
+    except TelegramAPIError:
+        pass
+
+    # A stale/uneditable panel must not leave the user with a saved animation
+    # but a page that still shows the old status. Send a refreshed replacement.
+    try:
+        replacement = await bot.send_message(
+            chat_id=chat_id,
+            text=page_text,
             parse_mode="HTML",
             reply_markup=markup,
             link_preview_options={"is_disabled": True},
         )
     except TelegramAPIError:
+        return None
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except TelegramAPIError:
         pass
+    return replacement.message_id
 
 async def render_auto(query, db):
     cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
@@ -1684,7 +1707,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             await tracked_answer(message, state, prompt)
             return
         animation_cfg = await db.settings.find_one({"key": "animation"}) or {}
-        frame_values = {"frames": frames, "frames_enabled": True}
+        frame_values = {"frames": frames, "frames_enabled": True, "enabled": True}
         if not animation_cfg.get("prefix"):
             frame_values["prefix"] = "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ..."
             frame_values["prefix_enabled"] = False
