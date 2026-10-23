@@ -95,7 +95,6 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     normalized = dict(cfg or {})
     frames = normalized.get("frames")
     frames = [str(frame) for frame in frames if str(frame).strip()] if isinstance(frames, list) else []
-    if len(frames) == 3: frames.append(frames[-1])
     if not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
     normalized["frames"] = frames[:6]
     mode = normalized.get("mode")
@@ -470,8 +469,6 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             if next_beat <= time.monotonic():
                 next_beat = time.monotonic() + speed
     finally:
-        if cycle_event:
-            cycle_event.set()
         if _gate_animation_stop_events.get(key) is stop_event:
             _gate_animation_stop_events.pop(key, None)
 
@@ -532,7 +529,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     # animation during that check rather than only after the user taps Verify.
     if animation_enabled:
         if animation_mode == "message":
-            await _start_gate_animation(bot, user.id, payload, message, "", InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg)
+            await _start_gate_animation(bot, user.id, payload, message, "", InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg, wait_for_cycle=True)
         else:
             frames = animation_cfg.get("frames")
             if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
@@ -550,7 +547,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
                 await _start_gate_animation(
                     bot, user.id, payload, animation_post or message, "",
                     InlineKeyboardMarkup(inline_keyboard=[]), text_animation_cfg,
-                    animation_only=True,
+                    animation_only=True, wait_for_cycle=True,
                 )
             except TelegramAPIError:
                 log.warning("Could not create Force Join animation poster during deeplink check", exc_info=True)
@@ -976,7 +973,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         if animation_mode == "message":
             await _start_gate_animation(
                 bot, user_id, payload, old_post, "",
-                InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg,
+                InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg, wait_for_cycle=True,
             )
         else:
             frames = animation_cfg.get("frames")
@@ -995,7 +992,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 text_animation_cfg = {**animation_cfg, "mode": "message"}
                 await _start_gate_animation(
                     bot, user_id, payload, animation_post or old_post, "", empty_markup,
-                    text_animation_cfg, animation_only=True,
+                    text_animation_cfg, animation_only=True, wait_for_cycle=True,
                 )
             except TelegramAPIError:
                 log.warning("Could not create Force Join animation poster", exc_info=True)
