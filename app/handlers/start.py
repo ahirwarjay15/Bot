@@ -274,8 +274,13 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     record = {"user_id": tracking_user_id, "chat_id": chat_id, "invite_link": invite.invite_link,
         "mode": mode, "created_at": created, "refresh_at": created + timedelta(seconds=240),
         "expires_at": created + timedelta(seconds=300), "cleanup_at": created + timedelta(seconds=360)}
+    links_collection = getattr(db, "force_join_links", None)
+    if links_collection is None:
+        # Lightweight callers that only resolve a button target may not expose
+        # the tracking collection. Production Database always does.
+        return invite.invite_link
     try:
-        await db.force_join_links.insert_one(record)
+        await links_collection.insert_one(record)
     except Exception:
         # If the short-lived link cannot be tracked for cleanup, revoke it rather
         # than leave an unmanaged invite active.
