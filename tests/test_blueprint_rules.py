@@ -969,9 +969,10 @@ def test_animation_uses_five_frames_and_respects_configured_speed_in_both_modes(
     assert 'speed = max(speed, 1.0)' not in animation_loop
     assert 'await bot.edit_message_text(' in animation_loop
     assert 'await bot.edit_message_caption(' in animation_loop
-    assert 'previous_id = target_id' in animation_loop
     new_message_branch = animation_loop.split('if mode == "new_message":', 1)[1].split('else:', 1)[0]
-    assert new_message_branch.index('await bot.delete_message(chat_id=user_id, message_id=previous_id)') < new_message_branch.index('frame_message = await bot.send_message(')
+    assert 'await bot.edit_message_text(' in new_message_branch
+    assert 'await bot.delete_message(' not in new_message_branch
+    assert 'await bot.send_message(' not in new_message_branch
     assert 'await asyncio.sleep(0.08)' in source
 
 
