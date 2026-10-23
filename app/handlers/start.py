@@ -107,11 +107,15 @@ def normalize_animation_config(cfg: dict | None) -> dict:
         # custom frames. Only seed defaults when no valid five-frame sequence
         # exists; otherwise every runtime load silently discards the user's frames.
         frames = normalized.get("frames")
-        if not isinstance(frames, list) or len(frames) != 5:
+        if isinstance(frames, list) and len(frames) == 3:
+            normalized["frames"] = [*frames, "....", "....."]
+        elif not isinstance(frames, list) or len(frames) != 5:
             normalized["frames"] = [".", "..", "...", "....", "....."]
         normalized["speed"] = 0.15
     frames = normalized.get("frames")
-    if not isinstance(frames, list) or len(frames) != 5:
+    if isinstance(frames, list) and len(frames) == 3:
+        normalized["frames"] = [*frames, "....", "....."]
+    elif not isinstance(frames, list) or len(frames) != 5:
         normalized["frames"] = [".", "..", "...", "....", "....."]
     # Persist explicit switches for legacy records so the settings panel and
     # runtime use the same defaults instead of interpreting a missing field
@@ -398,7 +402,9 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
     frames_enabled = cfg.get("frames_enabled", True)
     prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
     frames = cfg.get("frames")
-    if not isinstance(frames, list) or len(frames) != 5:
+    if isinstance(frames, list) and len(frames) == 3:
+        frames = [*frames, "....", "....."]
+    elif not isinstance(frames, list) or len(frames) != 5:
         frames = [".", "..", "...", "....", "....."]
     if not frames_enabled:
         frames = [""]
