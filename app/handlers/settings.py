@@ -463,7 +463,9 @@ def build_animation_page(cfg):
     frames_enabled = cfg.get("frames_enabled", True)
     prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
     frames = cfg.get("frames")
-    if not isinstance(frames, list) or len(frames) != 5:
+    if isinstance(frames, list) and len(frames) == 3:
+        frames = [*frames, "....", "....."]
+    elif not isinstance(frames, list) or len(frames) != 5:
         frames = [".", "..", "...", "....", "....."]
     frames_text = " | ".join(str(frame) for frame in frames) if frames_enabled else "OFF"
     prefix = html.escape(normalize_animation_prefix(cfg.get("prefix") or "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...")) if prefix_enabled else "OFF"
@@ -504,7 +506,9 @@ async def render_animation(query, db):
     if legacy_default:
         frames = cfg.get("frames")
         updates = {"prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "speed": 0.25}
-        if not isinstance(frames, list) or len(frames) != 5:
+        if isinstance(frames, list) and len(frames) == 3:
+            updates["frames"] = [*frames, "....", "....."]
+        elif not isinstance(frames, list) or len(frames) != 5:
             updates["frames"] = [".", "..", "...", "....", "....."]
         cfg.update(updates)
         await db.settings.update_one({"key": "animation"}, {"$set": updates}, upsert=True)
