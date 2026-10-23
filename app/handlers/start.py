@@ -93,8 +93,20 @@ def normalize_animation_prefix(value: str | None) -> str:
 
 
 def animation_frame_text(prefix: str, frame: str) -> str:
-    """Render a clean plain-text prefix followed by one bold frame."""
-    return f"{html.escape(normalize_animation_prefix(prefix))}<b>{html.escape(str(frame))}</b>"
+    """Render a plain prefix and preserve each frame's saved Telegram HTML formatting."""
+    import re
+
+    frame_text = str(frame or "")
+    # New frames are stored from Message.html_text, which safely escapes literal
+    # angle brackets and represents Telegram entities as HTML tags. Escape legacy
+    # plain-text frames, but keep saved formatting tags intact.
+    if not re.search(
+        r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote|tg-spoiler|tg-emoji|a)\b",
+        frame_text,
+        flags=re.IGNORECASE,
+    ):
+        frame_text = html.escape(frame_text)
+    return f"{html.escape(normalize_animation_prefix(prefix))}{frame_text}"
 
 
 def normalize_animation_config(cfg: dict | None) -> dict:
