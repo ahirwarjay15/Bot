@@ -463,8 +463,8 @@ def build_animation_page(cfg):
     frames_enabled = cfg.get("frames_enabled", True)
     prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
     frames = cfg.get("frames")
-    if not isinstance(frames, list) or len(frames) != 3:
-        frames = [".", "..", "..."]
+    if not isinstance(frames, list) or len(frames) != 5:
+        frames = [".", "..", "...", "....", "....."]
     frames_text = " | ".join(str(frame) for frame in frames) if frames_enabled else "OFF"
     prefix = html.escape(normalize_animation_prefix(cfg.get("prefix") or "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...")) if prefix_enabled else "OFF"
     mode = cfg.get("mode", "force_join_poster")
@@ -504,8 +504,8 @@ async def render_animation(query, db):
     if legacy_default:
         frames = cfg.get("frames")
         updates = {"prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "speed": 0.25}
-        if not isinstance(frames, list) or len(frames) != 3:
-            updates["frames"] = [".", "..", "..."]
+        if not isinstance(frames, list) or len(frames) != 5:
+            updates["frames"] = [".", "..", "...", "....", "....."]
         cfg.update(updates)
         await db.settings.update_one({"key": "animation"}, {"$set": updates}, upsert=True)
     try:
@@ -1258,7 +1258,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 animation_panel_chat_id=query.message.chat.id if query.message else None,
                 animation_panel_message_id=query.message.message_id if query.message else None,
             )
-            if query.message: await tracked_answer(query.message, state, "Send the first frame for the loop animation.")
+            if query.message: await tracked_answer(query.message, state, "Send frame 1 of 5 for the loop animation.")
     elif action == "animation_toggle":
         cfg = await db.settings.find_one({"key": "animation"}) or {}
         await patch(db, "animation", {"enabled": not cfg.get("enabled", False)}, {"prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "frames": [".", "..", "..."], "speed": 0.25, "mode": "force_join_poster"})
@@ -1710,16 +1710,17 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
         await tracked_answer(message, state, "✨ Animation prefix enabled and saved successfully.")
         return
-    if field in ("animation_frame_1", "animation_frame_2", "animation_frame_3"):
+    if field in ("animation_frame_1", "animation_frame_2", "animation_frame_3", "animation_frame_4", "animation_frame_5"):
         if not message.text or not value:
             await tracked_answer(message, state, "Please send a non-empty text frame.")
             return
         frames = list(data.get("pending_frames", []))
         frames.append(value)
-        if len(frames) < 3:
+        if len(frames) < 5:
             next_field = f"animation_frame_{len(frames)+1}"
             await state.update_data(field=next_field, pending_frames=frames)
-            prompt = "Now send the middle frame." if len(frames) == 1 else "Send the last frame."
+            prompts = {1: "Send frame 2 of 5.", 2: "Send frame 3 of 5.", 3: "Send frame 4 of 5.", 4: "Send frame 5 of 5."}
+            prompt = prompts[len(frames)]
             await tracked_answer(message, state, prompt)
             return
         animation_cfg = await db.settings.find_one({"key": "animation"}) or {}
