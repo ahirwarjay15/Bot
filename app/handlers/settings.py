@@ -108,7 +108,7 @@ async def save_force_join_channel_label(bot, db, channel: str, label: str):
             # Older buggy saves could associate another channel's invite URL
             # with this ID. Generate a correct invite for the selected private chat.
             invite = await bot.create_chat_invite_link(
-                chat_id=chat.id, creates_join_request=True, name="FB Force Join - Request"
+                chat_id=chat.id, creates_join_request=True
             )
             values["button_url"] = invite.invite_link
     except TelegramAPIError:
