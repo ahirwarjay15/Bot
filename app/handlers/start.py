@@ -451,20 +451,19 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                 try:
                     content = animated if animation_only else f"{base_text}\n\n{animated}"
                     if mode == "new_message":
-                        # New Message mode replaces frames to avoid Telegram's
-                        # unavoidable "Edited" marker.
-                        if target_id is not None:
-                            try:
-                                await bot.delete_message(chat_id=user_id, message_id=target_id)
-                            except TelegramAPIError:
-                                log.debug("Could not delete the previous animation frame; stopping this loop")
-                                return
-                            target_id = None
+                        # Send the next frame first, then remove the previous one.
+                        # This avoids an empty-chat gap while never editing a message.
+                        previous_id = target_id
                         frame_message = await bot.send_message(
                             chat_id=user_id, text=content, parse_mode="HTML",
                             reply_markup=markup,
                         )
                         target_id = frame_message.message_id
+                        if previous_id is not None:
+                            try:
+                                await bot.delete_message(chat_id=user_id, message_id=previous_id)
+                            except TelegramAPIError:
+                                log.debug("Could not delete the previous animation frame")
                     else:
                         # Poster mode edits the existing message, preserving the
                         # configured media and keyboard.
