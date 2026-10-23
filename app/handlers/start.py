@@ -80,83 +80,48 @@ async def effective_force_join_channels(database, settings) -> list[str]:
             channels.append(channel)
     return channels
 
-def normalize_animation_prefix(value: str | None) -> str:
-    """Remove markup syntax from a user-supplied prefix before rendering it as plain text."""
+DEFAULT_ANIMATION_FRAMES = ["Checking.", "Checking..", "Checking...", "Checking....", "Checking....."]
+
+def animation_frame_text(frame: str) -> str:
+    """Render a saved frame while preserving Telegram HTML formatting."""
     import re
-
-    text = html.unescape(str(value or ""))
-    # Remove Markdown code fences/backticks and common formatting markers.
-    text = text.replace("```", "").replace("`", "")
-    text = re.sub(r"</?(?:b|strong|i|em|u|s|strike|del|code|pre|blockquote|tg-spoiler)(?:\\s[^>]*)?>", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<!\\w)[*_~]{1,3}|[*_~]{1,3}(?!\\w)", "", text)
-    return " ".join(text.split()).strip()
-
-
-def animation_frame_text(prefix: str, frame: str) -> str:
-    """Render a plain prefix and preserve each frame's saved Telegram HTML formatting."""
-    import re
-
     frame_text = str(frame or "")
-    # New frames are stored from Message.html_text, which safely escapes literal
-    # angle brackets and represents Telegram entities as HTML tags. Escape legacy
-    # plain-text frames, but keep saved formatting tags intact.
-    if not re.search(
-        r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote|tg-spoiler|tg-emoji|a)\b|&(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);",
-        frame_text,
-        flags=re.IGNORECASE,
-    ):
+    if not re.search(r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote|tg-spoiler|tg-emoji|a)\\b|&(?:amp|lt|gt|quot|#\\d+|#x[0-9a-f]+);", frame_text, flags=re.IGNORECASE):
         frame_text = html.escape(frame_text)
-    return f"{html.escape(normalize_animation_prefix(prefix))}{frame_text}"
-
+    return frame_text
 
 def normalize_animation_config(cfg: dict | None) -> dict:
-    """Normalize legacy defaults and clamp the timer for both animation modes."""
+    """Migrate legacy settings and enforce current frame and speed rules."""
     normalized = dict(cfg or {})
-    legacy_default = "prefix_enabled" not in normalized and (not normalized.get("prefix") or normalized.get("prefix") == "Checking..")
-    if legacy_default:
-        normalized["prefix"] = "Checking"
-        # Older configs may still have the legacy prefix but already contain
-        # custom frames. Only seed defaults when no valid five-frame sequence
-        # exists; otherwise every runtime load silently discards the user's frames.
-        frames = normalized.get("frames")
-        if isinstance(frames, list) and len(frames) == 3:
-            normalized["frames"] = [*frames, "....", "....."]
-        elif not isinstance(frames, list) or len(frames) != 5:
-            normalized["frames"] = [".", "..", "...", "....", "....."]
-        normalized["speed"] = 0.15
     frames = normalized.get("frames")
-    if isinstance(frames, list) and len(frames) == 3:
-        normalized["frames"] = [*frames, "....", "....."]
-    elif not isinstance(frames, list) or len(frames) != 5:
-        normalized["frames"] = [".", "..", "...", "....", "....."]
-    # Persist explicit switches for legacy records so the settings panel and
-    # runtime use the same defaults instead of interpreting a missing field
-    # independently.
-    normalized.setdefault("frames_enabled", True)
-    normalized.setdefault("prefix_enabled", bool(normalized.get("prefix")))
-    try:
-        speed = float(normalized.get("speed", 0.25))
-    except (TypeError, ValueError):
-        speed = 1.0
-    normalized["speed"] = min(1.0, max(0.15, speed))
-    if normalized.get("mode") not in ("force_join_poster", "new_message"):
-        normalized["mode"] = "force_join_poster"
+    frames = [str(frame) for frame in frames if str(frame).strip()] if isinstance(frames, list) else []
+    if len(frames) == 3: frames.append(frames[-1])
+    if not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    normalized["frames"] = frames[:6]
+    mode = normalized.get("mode")
+    if mode in ("new_message", "message"): mode = "message"
+    elif mode in ("force_join_poster", "poster"): mode = "poster"
+    elif mode != "disabled": mode = "poster" if normalized.get("enabled", False) else "disabled"
+    if normalized.get("enabled") is False: mode = "disabled"
+    normalized["mode"] = mode
+    normalized["enabled"] = mode != "disabled"
+    try: speed = float(normalized.get("speed", 0.25))
+    except (TypeError, ValueError): speed = 0.25
+    normalized["speed"] = min(1.0, max(0.20, speed))
+    normalized.pop("prefix", None)
+    normalized.pop("prefix_enabled", None)
+    normalized.pop("frames_enabled", None)
     return normalized
-
 
 async def load_animation_config(db) -> dict:
-    """Load and persist the corrected legacy defaults once, so old saved values do not flash."""
+    """Load and persist migrated animation defaults once."""
     raw = await db.settings.find_one({"key": "animation"}) or {}
     normalized = normalize_animation_config(raw)
-    persisted_keys = ("prefix", "frames", "speed", "mode", "frames_enabled", "prefix_enabled")
-    if any(raw.get(key) != normalized.get(key) for key in persisted_keys):
-        await db.settings.update_one(
-            {"key": "animation"},
-            {"$set": {key: normalized[key] for key in persisted_keys}},
-            upsert=True,
-        )
+    persisted_keys = ("frames", "speed", "mode", "enabled")
+    legacy_keys = ("prefix", "prefix_enabled", "frames_enabled")
+    if any(raw.get(key) != normalized.get(key) for key in persisted_keys) or any(key in raw for key in legacy_keys):
+        await db.settings.update_one({"key": "animation"}, {"$set": {key: normalized[key] for key in persisted_keys}, "$unset": {key: "" for key in legacy_keys}}, upsert=True)
     return normalized
-
 
 def _join_signature(channels: list[str]) -> str:
     return hashlib.sha256(",".join(sorted(c.strip() for c in channels if c.strip())).encode()).hexdigest()
@@ -410,31 +375,19 @@ async def _cancel_gate_animation(bot, user_id: int, payload: str,
 async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                         base_text: str, markup: InlineKeyboardMarkup, cfg: dict,
                         separate_message_id: int | None, animation_only: bool = False,
-                        stop_event: asyncio.Event | None = None):
-    frames_enabled = cfg.get("frames_enabled", True)
-    prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
+                        stop_event: asyncio.Event | None = None,
+                        cycle_event: asyncio.Event | None = None):
     frames = cfg.get("frames")
-    if isinstance(frames, list) and len(frames) == 3:
-        frames = [*frames, "....", "....."]
-    elif not isinstance(frames, list) or len(frames) != 5:
-        frames = [".", "..", "...", "....", "....."]
-    if not frames_enabled:
-        frames = [""]
-    prefix_value = normalize_animation_prefix(cfg.get("prefix") or "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...") if prefix_enabled else ""
-    if prefix_value == "Checking..":
-        prefix_value = "Checking"
-    try:
-        speed = float(cfg.get("speed", 0.25))
-    except (TypeError, ValueError):
-        speed = 1.0
-    speed = min(1.0, max(0.08, speed))
-    mode = cfg.get("mode", "force_join_poster")
-    target_id = separate_message_id if mode == "new_message" else gate_message.message_id
-    frame_index = 0  # The first frame is already visible.
+    if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    frames = [str(frame) for frame in frames]
+    try: speed = float(cfg.get("speed", 0.25))
+    except (TypeError, ValueError): speed = 0.25
+    speed = min(1.0, max(0.20, speed))
+    mode = cfg.get("mode", "poster")
+    target_id = separate_message_id if mode == "message" else gate_message.message_id
+    frame_index = 0
     frame_updates = 0
-    # New Message mode keeps one text message and edits it for each frame.
-    # This matches the panel-style animation and avoids delete/send gaps.
-    # Telegram clients may show "Edited" for edits; the Bot API cannot suppress it.
+    key = (user_id, payload)
     next_beat = time.monotonic() + speed
     key = (user_id, payload)
     try:
@@ -457,11 +410,11 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             if stop_event and stop_event.is_set():
                 break
             frame_index = (frame_index + 1) % len(frames)
-            animated = animation_frame_text(prefix_value, frames[frame_index])
+            animated = animation_frame_text(frames[frame_index])
             while True:
                 try:
                     content = animated if animation_only else f"{base_text}\n\n{animated}"
-                    if mode == "new_message":
+                    if mode == "message":
                         # New Message mode also edits the same frame message;
                         # both animation modes must update frames in place.
                         await bot.edit_message_text(
@@ -485,9 +438,11 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                     running_task = asyncio.current_task()
                     if current and current[0] is running_task:
                         _gate_animation_tasks[key] = (
-                            running_task, target_id if mode == "new_message" else None
+                            running_task, target_id if mode == "message" else None
                         )
                     frame_updates += 1
+                    if cycle_event and frame_updates >= len(frames):
+                        cycle_event.set()
                 except TelegramRetryAfter as exc:
                     retry_delay = max(speed, float(exc.retry_after))
                     if stop_event:
@@ -515,30 +470,24 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             if next_beat <= time.monotonic():
                 next_beat = time.monotonic() + speed
     finally:
+        if cycle_event:
+            cycle_event.set()
         if _gate_animation_stop_events.get(key) is stop_event:
             _gate_animation_stop_events.pop(key, None)
 
 
 async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: Message,
                                 base_text: str, markup: InlineKeyboardMarkup, cfg: dict,
-                                animation_only: bool = False):
-    if not cfg.get("enabled") or not (cfg.get("frames_enabled", True) or cfg.get("prefix_enabled", bool(cfg.get("prefix")))):
+                                animation_only: bool = False, wait_for_cycle: bool = False):
+    if not cfg.get("enabled") or cfg.get("mode") == "disabled":
         return
     await _cancel_gate_animation(bot, user_id, payload)
-    mode = cfg.get("mode", "force_join_poster")
+    mode = cfg.get("mode", "poster")
     separate_id = None
-    if mode == "new_message":
-        prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
-        prefix_value = str(cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
-        if prefix_value == "Checking..":
-            prefix_value = "Checking"
-        frames_enabled = cfg.get("frames_enabled", True)
+    if mode == "message":
         frames = cfg.get("frames")
-        if not isinstance(frames, list) or len(frames) != 5:
-            frames = [".", "..", "...", "....", "....."]
-        if not frames_enabled:
-            frames = [""]
-        first = animation_frame_text(prefix_value, frames[0])
+        if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+        first = animation_frame_text(frames[0])
         try:
             animation_message = await bot.send_message(user_id, first, parse_mode="HTML")
             separate_id = animation_message.message_id
@@ -546,15 +495,23 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
             log.warning("Could not send separate Force Join animation", exc_info=True)
             return
     stop_event = asyncio.Event()
+    cycle_event = asyncio.Event()
     task = asyncio.create_task(
         _animate_gate(
             bot, user_id, payload, gate_message, base_text, markup, cfg,
-            separate_id, animation_only, stop_event,
+            separate_id, animation_only, stop_event, cycle_event,
         )
     )
     key = (user_id, payload)
     _gate_animation_stop_events[key] = stop_event
     _gate_animation_tasks[key] = (task, separate_id)
+    if wait_for_cycle and mode == "message":
+        try:
+            frames = cfg.get("frames") or DEFAULT_ANIMATION_FRAMES
+            speed = float(cfg.get("speed", 0.25))
+            await asyncio.wait_for(cycle_event.wait(), timeout=max(2.0, speed * len(frames) + 5.0))
+        except asyncio.TimeoutError:
+            log.warning("Message animation did not complete its first cycle in time")
 
 
 async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, verify_button: bool = True)->bool:
@@ -568,26 +525,18 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
 
     animation_cfg = await load_animation_config(database.db)
     animation_enabled = bool(animation_cfg.get("enabled"))
-    animation_mode = animation_cfg.get("mode", "force_join_poster")
+    animation_mode = animation_cfg.get("mode", "poster")
     animation_post = None
 
     # Deeplink entry performs a membership check too, so show the configured
     # animation during that check rather than only after the user taps Verify.
     if animation_enabled:
-        if animation_mode == "new_message":
+        if animation_mode == "message":
             await _start_gate_animation(bot, user.id, payload, message, "", InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg)
         else:
-            frames_enabled = animation_cfg.get("frames_enabled", True)
             frames = animation_cfg.get("frames")
-            if not isinstance(frames, list) or len(frames) != 5:
-                frames = [".", "..", "...", "....", "....."]
-            if not frames_enabled:
-                frames = [""]
-            prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
-            prefix_value = str(animation_cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
-            if prefix_value == "Checking..":
-                prefix_value = "Checking"
-            first = animation_frame_text(prefix_value, frames[0])
+            if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+            first = animation_frame_text(frames[0])
             try:
                 if cfg.get("poster_file_id"):
                     # Keep media immutable during animation: caption edits add Telegram's Edited label.
@@ -597,7 +546,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
                 else:
                     animation_post = None
                 # Animate a separate text message; the final Force Join post is sent fresh with its poster.
-                text_animation_cfg = {**animation_cfg, "mode": "new_message"}
+                text_animation_cfg = {**animation_cfg, "mode": "message"}
                 await _start_gate_animation(
                     bot, user.id, payload, animation_post or message, "",
                     InlineKeyboardMarkup(inline_keyboard=[]), text_animation_cfg,
@@ -644,9 +593,9 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     separate_animation_id = None
     if animation_enabled:
         separate_animation_id = await _cancel_gate_animation(
-            bot, user.id, payload, delete_separate=(animation_mode != "new_message")
+            bot, user.id, payload, delete_separate=(animation_mode != "message")
         )
-    if animation_enabled and animation_mode == "force_join_poster" and animation_post:
+    if animation_enabled and animation_mode == "poster" and animation_post:
         # Never edit media captions: Telegram marks edited media messages as Edited.
         # Send the final poster+prompt as a new post, then remove the temporary poster.
         await _send_force_join_post(bot, user.id, cfg, rendered, markup)
@@ -655,7 +604,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
         except TelegramAPIError:
             pass
         return True
-    if animation_enabled and animation_mode == "new_message":
+    if animation_enabled and animation_mode == "message":
         # A text message cannot be converted into media through the Bot API.
         # Send the final Force Join post with its configured poster, then remove the last frame.
         await _send_force_join_post(bot, user.id, cfg, rendered, markup)
@@ -1018,29 +967,21 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
     force_cfg = force_cfg_result or {}
     channels = await effective_force_join_channels(database, settings) if force_cfg.get("enabled", False) else []
     animation_enabled = bool(animation_cfg.get("enabled"))
-    animation_mode = animation_cfg.get("mode", "force_join_poster")
+    animation_mode = animation_cfg.get("mode", "poster")
     animation_post = None
 
     # In poster mode, the configured Force Join media must remain visible during
     # verification. Editing a text-only old post would otherwise silently skip it.
     if old_post and animation_enabled:
-        if animation_mode == "new_message":
+        if animation_mode == "message":
             await _start_gate_animation(
                 bot, user_id, payload, old_post, "",
                 InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg,
             )
         else:
-            frames_enabled = animation_cfg.get("frames_enabled", True)
             frames = animation_cfg.get("frames")
-            if not isinstance(frames, list) or len(frames) != 5:
-                frames = [".", "..", "...", "....", "....."]
-            if not frames_enabled:
-                frames = [""]
-            prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
-            prefix_value = str(animation_cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
-            if prefix_value == "Checking..":
-                prefix_value = "Checking"
-            first = animation_frame_text(prefix_value, frames[0])
+            if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+            first = animation_frame_text(frames[0])
             empty_markup = InlineKeyboardMarkup(inline_keyboard=[])
             try:
                 if force_cfg.get("poster_file_id"):
@@ -1051,7 +992,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 else:
                     animation_post = None
                 # Use a separate text animation while the poster remains untouched.
-                text_animation_cfg = {**animation_cfg, "mode": "new_message"}
+                text_animation_cfg = {**animation_cfg, "mode": "message"}
                 await _start_gate_animation(
                     bot, user_id, payload, animation_post or old_post, "", empty_markup,
                     text_animation_cfg, animation_only=True,
@@ -1088,13 +1029,13 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
 
         # Stop the animation, then edit its poster in place with the current
         # remaining-channel buttons and configured Force Join message.
-        if animation_mode == "new_message":
+        if animation_mode == "message":
             separate_animation_id = await _cancel_gate_animation(
                 bot, user_id, payload, delete_separate=False
             )
         else:
             separate_animation_id = await _cancel_gate_animation(bot, user_id, payload)
-        if animation_enabled and animation_mode == "force_join_poster" and animation_post:
+        if animation_enabled and animation_mode == "poster" and animation_post:
             # Final media is a new message; neither the temporary poster nor its caption is edited.
             new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)
             for temporary_post in (animation_post, old_post):
@@ -1105,7 +1046,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                         pass
             return
 
-        if animation_enabled and animation_mode == "new_message":
+        if animation_enabled and animation_mode == "message":
             # Final Force Join prompt is fresh, so the animation never gains an Edited tag.
             new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)
             if separate_animation_id:
