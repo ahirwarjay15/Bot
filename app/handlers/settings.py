@@ -188,7 +188,7 @@ def format_settings_page(text: str) -> str:
     while lines and (not lines[0].strip() or re.fullmatch(r"[_—\-\s]+", lines[0])):
         lines.pop(0)
     body = "\n".join(lines).rstrip()
-    title = f"<b><u>{heading}</u></b>"
+    title = f"<u><b>{heading}</b></u>"
     if body and "<i>" not in body and "</i>" not in body:
         body = f"<i>{body}</i>"
     return title + (f"\n\n{body}" if body else "")
