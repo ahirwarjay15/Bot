@@ -620,15 +620,15 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     return True
 
 async def send_file_animation(bot, db, user_id: int) -> None:
-    """Briefly show configured pre-delivery text; deletion failures never block delivery."""
-    cfg = await db.settings.find_one({"key": "animation"}) or {}
+    """Show the configured blink after delivery for one configured animation beat."""
+    cfg = await load_animation_config(db)
     text = str(cfg.get("file_animation_text") or "").strip()
     if not text:
         return
     msg = None
     try:
         msg = await bot.send_message(user_id, text, parse_mode="HTML")
-        await asyncio.sleep(0.08)
+        await asyncio.sleep(cfg["speed"])
     except TelegramAPIError:
         log.warning("Blink send failed; continuing delivery", exc_info=True)
     finally:
@@ -637,6 +637,16 @@ async def send_file_animation(bot, db, user_id: int) -> None:
                 await msg.delete()
             except TelegramAPIError:
                 log.debug("Blink delete failed; continuing delivery", exc_info=True)
+
+
+async def delete_start_command_after(message: Message, db) -> None:
+    """Let the destination post appear, then delete /start after one configured beat."""
+    try:
+        cfg = await load_animation_config(db)
+        await asyncio.sleep(cfg["speed"])
+        await message.delete()
+    except TelegramAPIError:
+        pass
 
 
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
@@ -648,11 +658,6 @@ async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:d
 async def start_command(message:Message,command:CommandObject,settings:Settings,database,bot):
     user=message.from_user
     if not user:return
-    # Remove the incoming /start command so repeated link opens do not clutter chat.
-    try:
-        await message.delete()
-    except TelegramAPIError:
-        pass
     repo=FileRepository(database.db);await repo.save_user(user)
     if await repo.is_banned(user.id):return
     payload=command.args or ""
@@ -671,13 +676,15 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             await message.answer("This link is invalid or expired.");return
         if not record:
             await message.answer("This link is invalid or expired.");return
-        if await gate_or_prompt(message,payload,settings,database,bot):return
+        if await gate_or_prompt(message,payload,settings,database,bot):
+            await delete_start_command_after(message, database.db)
+            return
         request_key = f"start:{user.id}:{message.message_id}"
         if not await claim_delivery_request(database.db, request_key, user.id, payload):
+            await delete_start_command_after(message, database.db)
             return
         success = False
         try:
-            await send_file_animation(bot, database.db, message.chat.id)
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
             if payload.startswith("batch_") and result[0]==0:
                 await message.answer("None of the batch files could be delivered. The source messages may be unavailable.")
@@ -692,12 +699,18 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             log.exception("Unexpected delivery failure for %s", payload)
             await message.answer("Delivery failed due to a temporary error. Please try the link again.")
         finally:
+            # The file/batch must be delivered before the configured blink appears.
+            await send_file_animation(bot, database.db, message.chat.id)
+            await delete_start_command_after(message, database.db)
             try: await finish_delivery_request(database.db, request_key, success)
             except Exception: log.exception("Could not update delivery request status")
         return
-    if await is_owner_or_moderator(database.db,user.id,settings):return
+    if await is_owner_or_moderator(database.db,user.id,settings):
+        await delete_start_command_after(message, database.db)
+        return
     # Plain /start checks Force Sub first; this prompt intentionally has no Verify button.
     if await gate_or_prompt(message, "", settings, database, bot, verify_button=False):
+        await delete_start_command_after(message, database.db)
         return
     cfg=await database.db.settings.find_one({"key":"start_message"}) or {}
     if cfg.get("enabled", True):
@@ -732,6 +745,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             await message.answer_photo(cfg["poster_photo_id"], caption=text, reply_markup=markup, parse_mode="HTML")
         else:
             await message.answer(text, reply_markup=markup, parse_mode="HTML")
+    await delete_start_command_after(message, database.db)
 
 @router.callback_query(F.data == "start:about")
 async def start_about(query: CallbackQuery, database):
