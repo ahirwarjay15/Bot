@@ -1,4 +1,4 @@
-"""Start command, Force Join gate, and single/batch deeplink delivery."""
+"""Start command, Force Sub gate, and single/batch deeplink delivery."""
 import logging
 import hashlib
 import html
@@ -164,7 +164,7 @@ async def _revoke_tracked_force_join_link(bot, db, record: dict) -> None:
             # Preserve the record so the background cleanup worker can retry.
             raise
         except TelegramAPIError:
-            log.debug("Force Join link already expired/revoked", exc_info=True)
+            log.debug("Force Sub link already expired/revoked", exc_info=True)
     await db.force_join_links.delete_one({"_id": record["_id"]})
 
 
@@ -178,7 +178,7 @@ async def cleanup_expired_force_join_links(bot, db, limit: int = 200) -> int:
             try:
                 await _revoke_tracked_force_join_link(bot, db, record)
             except Exception:
-                log.warning("Could not clean up an expired Force Join link; will retry", exc_info=True)
+                log.warning("Could not clean up an expired Force Sub link; will retry", exc_info=True)
 
     await asyncio.gather(*(cleanup_one(record) for record in records))
     return len(records)
@@ -191,7 +191,7 @@ async def run_force_join_link_cleanup_worker(bot, db, interval_seconds: int = 5)
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.warning("Force Join link cleanup failed", exc_info=True)
+            log.warning("Force Sub link cleanup failed", exc_info=True)
         await asyncio.sleep(interval_seconds)
 
 
@@ -210,7 +210,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
         chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
         chat = await bot.get_chat(chat_arg)
     except (ValueError, TelegramAPIError):
-        log.warning("Could not resolve Force Join chat %r", channel, exc_info=True)
+        log.warning("Could not resolve Force Sub chat %r", channel, exc_info=True)
         return None
 
     chat_id = int(chat.id)
@@ -221,7 +221,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
         mode = "normal" if getattr(chat, "username", None) else "join_request"
     links_collection = getattr(db, "force_join_links", None)
     if links_collection is None:
-        log.error("Force Join invite rotation requires the force_join_links collection")
+        log.error("Force Sub invite rotation requires the force_join_links collection")
         return None
 
     # Serialize cache-miss creation per chat/mode so concurrent users don't
@@ -243,7 +243,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
                 creates_join_request=(mode == "join_request"),
             )
         except TelegramAPIError:
-            log.exception("Could not create rotating Force Join link for %s", chat_id)
+            log.exception("Could not create rotating Force Sub link for %s", chat_id)
             return None
 
         created = datetime.now(timezone.utc)
@@ -268,7 +268,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
                 await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
             except TelegramAPIError:
                 log.warning("Could not revoke untracked rotating invite", exc_info=True)
-            log.exception("Could not persist rotating Force Join link")
+            log.exception("Could not persist rotating Force Sub link")
             return None
         return invite.invite_link
 
@@ -355,7 +355,7 @@ async def _cancel_gate_animation(bot, user_id: int, payload: str,
         except asyncio.CancelledError:
             pass
         except Exception:
-            log.debug("Force Join animation task ended during shutdown", exc_info=True)
+            log.debug("Force Sub animation task ended during shutdown", exc_info=True)
     latest = _gate_animation_tasks.get(key)
     if latest and latest[0] is task:
         separate_message_id = latest[1]
@@ -421,7 +421,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                             text=content, parse_mode="HTML", reply_markup=markup,
                         )
                     else:
-                        # Force Join Poster mode must animate the SAME poster.
+                        # Force Sub Poster mode must animate the SAME poster.
                         # Telegram's API does not let bots suppress its Edited label.
                         if gate_message.animation or gate_message.photo or gate_message.document:
                             await bot.edit_message_caption(
@@ -457,10 +457,10 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                     continue
                 except TelegramBadRequest as exc:
                     if "message is not modified" not in str(exc).lower():
-                        log.debug("Force Join animation edit rejected", exc_info=True)
+                        log.debug("Force Sub animation edit rejected", exc_info=True)
                         return
                 except TelegramAPIError:
-                    log.debug("Force Join animation stopped because its message could not be edited", exc_info=True)
+                    log.debug("Force Sub animation stopped because its message could not be edited", exc_info=True)
                     return
                 break
             # Keep a fixed beat when requests are fast; avoid catch-up bursts when
@@ -489,7 +489,7 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
             animation_message = await bot.send_message(user_id, first, parse_mode="HTML")
             separate_id = animation_message.message_id
         except TelegramAPIError:
-            log.warning("Could not send separate Force Join animation", exc_info=True)
+            log.warning("Could not send separate Force Sub animation", exc_info=True)
             return
     stop_event = asyncio.Event()
     cycle_event = asyncio.Event()
@@ -542,7 +542,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
                     animation_post = await bot.send_photo(user.id, cfg["poster_photo_id"])
                 else:
                     animation_post = None
-                # Animate a separate text message; the final Force Join post is sent fresh with its poster.
+                # Animate a separate text message; the final Force Sub post is sent fresh with its poster.
                 text_animation_cfg = {**animation_cfg, "mode": "message"}
                 await _start_gate_animation(
                     bot, user.id, payload, animation_post or message, "",
@@ -550,7 +550,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
                     animation_only=True,
                 )
             except TelegramAPIError:
-                log.warning("Could not create Force Join animation poster during deeplink check", exc_info=True)
+                log.warning("Could not create Force Sub animation poster during deeplink check", exc_info=True)
                 animation_post = None
 
     missing = await join_status(bot, user.id, channels, database.db)
@@ -603,7 +603,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
         return True
     if animation_enabled and animation_mode == "message":
         # A text message cannot be converted into media through the Bot API.
-        # Send the final Force Join post with its configured poster, then remove the last frame.
+        # Send the final Force Sub post with its configured poster, then remove the last frame.
         await _send_force_join_post(bot, user.id, cfg, rendered, markup)
         if separate_animation_id:
             try:
@@ -630,13 +630,13 @@ async def send_file_animation(bot, db, user_id: int) -> None:
         msg = await bot.send_message(user_id, text, parse_mode="HTML")
         await asyncio.sleep(0.08)
     except TelegramAPIError:
-        log.warning("File Animation send failed; continuing delivery", exc_info=True)
+        log.warning("Blink send failed; continuing delivery", exc_info=True)
     finally:
         if msg:
             try:
                 await msg.delete()
             except TelegramAPIError:
-                log.debug("File Animation delete failed; continuing delivery", exc_info=True)
+                log.debug("Blink delete failed; continuing delivery", exc_info=True)
 
 
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
@@ -696,7 +696,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             except Exception: log.exception("Could not update delivery request status")
         return
     if await is_owner_or_moderator(database.db,user.id,settings):return
-    # Plain /start checks Force Join first; this prompt intentionally has no Verify button.
+    # Plain /start checks Force Sub first; this prompt intentionally has no Verify button.
     if await gate_or_prompt(message, "", settings, database, bot, verify_button=False):
         return
     cfg=await database.db.settings.find_one({"key":"start_message"}) or {}
@@ -875,7 +875,7 @@ async def clear_accepted_private_join_request(event, database):
 
 
 async def _send_force_join_post(bot, user_id: int, cfg: dict, text: str, markup: InlineKeyboardMarkup):
-    """Send a replacement Force Join post before removing the previous one."""
+    """Send a replacement Force Sub post before removing the previous one."""
     try:
         if cfg.get("poster_file_id"):
             return await bot.send_animation(user_id, cfg["poster_file_id"], caption=text, reply_markup=markup, parse_mode="HTML")
@@ -883,7 +883,7 @@ async def _send_force_join_post(bot, user_id: int, cfg: dict, text: str, markup:
             return await bot.send_photo(user_id, cfg["poster_photo_id"], caption=text, reply_markup=markup, parse_mode="HTML")
         return await bot.send_message(user_id, text, reply_markup=markup, parse_mode="HTML")
     except TelegramAPIError:
-        log.warning("Configured Force Join poster could not be sent; using text post", exc_info=True)
+        log.warning("Configured Force Sub poster could not be sent; using text post", exc_info=True)
         return await bot.send_message(user_id, text, reply_markup=markup, parse_mode="HTML")
 
 
@@ -896,7 +896,7 @@ async def _edit_force_join_post(message: Message, text: str, markup: InlineKeybo
             await message.edit_text(text=text, reply_markup=markup, parse_mode="HTML")
         return True
     except TelegramAPIError:
-        log.warning("Could not edit animation poster into Force Join prompt", exc_info=True)
+        log.warning("Could not edit animation poster into Force Sub prompt", exc_info=True)
         return False
 
 @router.callback_query(F.data.startswith("forcejoin:repair:"))
@@ -923,7 +923,7 @@ async def forcejoin_repair_link(query: CallbackQuery, database):
         try:
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
         except TelegramAPIError:
-            log.warning("Could not replace repaired Force Join URL button", exc_info=True)
+            log.warning("Could not replace repaired Force Sub URL button", exc_info=True)
     await query.answer()
 
 
@@ -967,7 +967,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
     animation_mode = animation_cfg.get("mode", "poster")
     animation_post = None
 
-    # In poster mode, the configured Force Join media must remain visible during
+    # In poster mode, the configured Force Sub media must remain visible during
     # verification. Editing a text-only old post would otherwise silently skip it.
     if old_post and animation_enabled:
         if animation_mode == "message":
@@ -995,7 +995,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                     text_animation_cfg, animation_only=True,
                 )
             except TelegramAPIError:
-                log.warning("Could not create Force Join animation poster", exc_info=True)
+                log.warning("Could not create Force Sub animation poster", exc_info=True)
                 animation_post = None
 
     missing = [] if await is_owner_or_moderator(database.db, user_id, settings) else await join_status(
@@ -1025,7 +1025,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
         # Stop the animation, then edit its poster in place with the current
-        # remaining-channel buttons and configured Force Join message.
+        # remaining-channel buttons and configured Force Sub message.
         if animation_mode == "message":
             separate_animation_id = await _cancel_gate_animation(
                 bot, user_id, payload, delete_separate=False
@@ -1044,7 +1044,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             return
 
         if animation_enabled and animation_mode == "message":
-            # Final Force Join prompt is fresh, so the animation never gains an Edited tag.
+            # Final Force Sub prompt is fresh, so the animation never gains an Edited tag.
             new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)
             if separate_animation_id:
                 try:
@@ -1076,7 +1076,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 pass
         return
 
-    # Verification succeeded: stop the animation and remove the Force Join
+    # Verification succeeded: stop the animation and remove the Force Sub
     # prompt before sending any requested file or batch item.
     separate_animation_id = await _cancel_gate_animation(
         bot, user_id, payload, delete_separate=False
@@ -1085,7 +1085,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         try:
             await animation_post.delete()
         except TelegramAPIError:
-            log.info("Could not remove Force Join verification animation")
+            log.info("Could not remove Force Sub verification animation")
     repo=FileRepository(database.db)
     if payload.startswith("file_"):record=await repo.get_file(payload[5:][:5])
     elif payload.startswith("batch_"):record=await repo.get_batch(payload[6:][:5])
@@ -1101,13 +1101,13 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
     if not await claim_delivery_request(database.db, request_key, user_id, payload):
         return
     await _mark_verified(database.db, user_id, channels)
-    # Delete the Force Join post first. Await this API call before beginning delivery,
+    # Delete the Force Sub post first. Await this API call before beginning delivery,
     # so the verification prompt cannot appear after the file in normal operation.
     if old_post:
         try:
             await old_post.delete()
         except TelegramAPIError:
-            log.warning("Could not remove Force Join post before delivery", exc_info=True)
+            log.warning("Could not remove Force Sub post before delivery", exc_info=True)
     if separate_animation_id:
         try:
             await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)
@@ -1122,12 +1122,12 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             await bot.send_message(user_id,"This file is currently unavailable. The source message may have been deleted or become inaccessible.")
         success = result[0] > 0
     except TelegramAPIError:
-        log.exception("Delivery after Force Join failed")
+        log.exception("Delivery after Force Sub failed")
         await bot.send_message(user_id,"File delivery failed. Contact the owner.")
     except Exception:
-        log.exception("Unexpected delivery failure after Force Join")
+        log.exception("Unexpected delivery failure after Force Sub")
         await bot.send_message(user_id,"Delivery failed due to a temporary error.")
     finally:
         try: await finish_delivery_request(database.db, request_key, success)
-        except Exception: log.exception("Could not update Force Join delivery request status")
+        except Exception: log.exception("Could not update Force Sub delivery request status")
 
