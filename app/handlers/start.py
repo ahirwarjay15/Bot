@@ -450,39 +450,39 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             while True:
                 try:
                     content = animated if animation_only else f"{base_text}\n\n{animated}"
-                    # Never edit a Telegram message: edits always display the
-                    # "Edited" label. Replace the current frame in BOTH modes.
-                    previous_id = target_id
-                    if mode != "new_message" and gate_message.animation:
-                        frame_message = await bot.send_animation(
-                            chat_id=user_id, animation=gate_message.animation.file_id,
-                            caption=content, parse_mode="HTML", reply_markup=markup,
-                        )
-                    elif mode != "new_message" and gate_message.photo:
-                        frame_message = await bot.send_photo(
-                            chat_id=user_id, photo=gate_message.photo[-1].file_id,
-                            caption=content, parse_mode="HTML", reply_markup=markup,
-                        )
-                    elif mode != "new_message" and gate_message.document:
-                        frame_message = await bot.send_document(
-                            chat_id=user_id, document=gate_message.document.file_id,
-                            caption=content, parse_mode="HTML", reply_markup=markup,
-                        )
-                    else:
+                    if mode == "new_message":
+                        # This mode deliberately uses fresh messages to avoid
+                        # Telegram's Edited label; remove the previous frame.
+                        previous_id = target_id
                         frame_message = await bot.send_message(
                             chat_id=user_id, text=content, parse_mode="HTML",
                             reply_markup=markup,
                         )
-                    target_id = frame_message.message_id
-                    if previous_id is not None:
-                        try:
-                            await bot.delete_message(chat_id=user_id, message_id=previous_id)
-                        except TelegramAPIError:
-                            log.debug("Could not delete the previous animation frame")
+                        target_id = frame_message.message_id
+                        if previous_id is not None:
+                            try:
+                                await bot.delete_message(chat_id=user_id, message_id=previous_id)
+                            except TelegramAPIError:
+                                log.debug("Could not delete the previous animation frame")
+                    else:
+                        # Force Join Poster mode must animate the SAME poster.
+                        # Telegram's API does not let bots suppress its Edited label.
+                        if gate_message.animation or gate_message.photo or gate_message.document:
+                            await bot.edit_message_caption(
+                                chat_id=user_id, message_id=target_id,
+                                caption=content, parse_mode="HTML", reply_markup=markup,
+                            )
+                        else:
+                            await bot.edit_message_text(
+                                chat_id=user_id, message_id=target_id,
+                                text=content, parse_mode="HTML", reply_markup=markup,
+                            )
                     current = _gate_animation_tasks.get(key)
                     running_task = asyncio.current_task()
                     if current and current[0] is running_task:
-                        _gate_animation_tasks[key] = (running_task, target_id)
+                        _gate_animation_tasks[key] = (
+                            running_task, target_id if mode == "new_message" else None
+                        )
                     frame_updates += 1
                 except TelegramRetryAfter as exc:
                     retry_delay = max(speed, float(exc.retry_after))
