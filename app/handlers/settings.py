@@ -550,6 +550,7 @@ async def refresh_settings_panel(bot, chat_id, message_id, text, keyboard):
         pass
     return replacement.message_id
 
+
 async def refresh_animation_panel(bot, chat_id, message_id, db):
     """Refresh the Animation panel, replacing it if Telegram refuses an edit."""
     if not chat_id or not message_id:
@@ -1604,9 +1605,88 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 )
             except TelegramBadRequest as exc:
                 if "message is not modified" not in str(exc).lower():
+                    try:
+                        replacement = await message.bot.send_message(
+                            chat_id=panel_chat_id, text=format_settings_page(panel_text),
+                            parse_mode="HTML", reply_markup=panel_markup,
+                            link_preview_options={"is_disabled": True},
+                        )
+                    except TelegramAPIError:
+                        replacement = None
+                    if replacement:
+                        try:
+                            await message.bot.delete_message(chat_id=panel_chat_id, message_id=panel_message_id)
+                        except TelegramAPIError:
+                            pass
+            except TelegramAPIError:
+                try:
+                    replacement = await message.bot.send_message(
+                        chat_id=panel_chat_id, text=format_settings_page(panel_text),
+                        parse_mode="HTML", reply_markup=panel_markup,
+                        link_preview_options={"is_disabled": True},
+                    )
+                except TelegramAPIError:
+                    replacement = None
+                if replacement:
+                    try:
+                        await message.bot.delete_message(chat_id=panel_chat_id, message_id=panel_message_id)
+                    except TelegramAPIError:
+                        pass
+        return
+
+    if field == "custom_button_text":
+        if not value or len(value) > 64:
+            await tracked_answer(message, state, "Button text must be between 1 and 64 characters.")
+            return
+        data = await state.get_data()
+        await state.update_data(custom_button_pending_text=value, field="custom_button_url")
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        await remove_input_prompt(message.bot, data)
+        prompt = await tracked_answer(message, state, "Now send the button URL (https://... or t.me/...).")
+        await state.update_data(
+            input_prompt_chat_id=prompt.chat.id,
+            input_prompt_message_id=prompt.message_id,
+        )
+        return
+    if field == "custom_button_url":
+        normalized = normalize_http_url(value)
+        if not normalized:
+            await tracked_answer(message, state, "Please send a valid http/https URL.")
+            return
+        prev = await state.get_data()
+        cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
+        buttons = list(cfg.get("buttons", []))
+        if len(buttons) >= 2:
+            await tracked_answer(message, state, "Maximum 2 custom buttons allowed.")
+            await clear_state_preserving_prompts(state)
+            return
+        buttons.append({"text": prev.get("custom_button_pending_text", ""), "url": normalized})
+        await patch(db, "custom_buttons", {"buttons": buttons})
+        await remove_input_prompt(message.bot, prev)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        # Refresh the original Custom Button panel in place after saving.
+        panel_chat = prev.get("custom_panel_chat_id")
+        panel_message = prev.get("custom_panel_message_id")
+        if panel_chat and panel_message:
+            current = buttons[:2]
+            rows = []
+            for i, item in enumerate(current):
+                rows.append([
+                    InlineKeyboardButton(text=str(item.get("text", f"Button {i+1}"))[:64], url=item.get("url")),
+                    InlineKeyboardButton(text="✖", callback_data=f"settings:custom_button_remove:{i}"),
+                ])
+            if len(current) < 2:
+                rows.append([InlineKeyboardButton(text="✚", callback_data="settings:custom_button_add")])
+            rows.append([InlineKeyboardButton(text="《 BACK", callback_data="settings:home")])
             await refresh_settings_panel(
                 message.bot, panel_chat, panel_message,
-                "Custom Button:\\n\\nYou can add a custom buttons to your files.",
+                "Custom Button:\n\nYou can add a custom buttons to your files.",
                 InlineKeyboardMarkup(inline_keyboard=rows),
             )
         await clear_state_preserving_prompts(state)
