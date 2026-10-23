@@ -113,6 +113,11 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     frames = normalized.get("frames")
     if not isinstance(frames, list) or len(frames) != 3:
         normalized["frames"] = [".", "..", "..."]
+    # Persist explicit switches for legacy records so the settings panel and
+    # runtime use the same defaults instead of interpreting a missing field
+    # independently.
+    normalized.setdefault("frames_enabled", True)
+    normalized.setdefault("prefix_enabled", bool(normalized.get("prefix")))
     try:
         speed = float(normalized.get("speed", 0.25))
     except (TypeError, ValueError):
@@ -127,10 +132,11 @@ async def load_animation_config(db) -> dict:
     """Load and persist the corrected legacy defaults once, so old saved values do not flash."""
     raw = await db.settings.find_one({"key": "animation"}) or {}
     normalized = normalize_animation_config(raw)
-    if any(raw.get(key) != normalized.get(key) for key in ("prefix", "frames", "speed", "mode")):
+    persisted_keys = ("prefix", "frames", "speed", "mode", "frames_enabled", "prefix_enabled")
+    if any(raw.get(key) != normalized.get(key) for key in persisted_keys):
         await db.settings.update_one(
             {"key": "animation"},
-            {"$set": {key: normalized[key] for key in ("prefix", "frames", "speed", "mode")}},
+            {"$set": {key: normalized[key] for key in persisted_keys}},
             upsert=True,
         )
     return normalized
