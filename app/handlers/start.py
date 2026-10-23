@@ -233,19 +233,23 @@ def _schedule_used_force_join_link_cleanup(bot, db, chat_id: int, invite_link) -
 
 
 async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
-    if user_id is None:
-        return None
     try:
         chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
         chat = await bot.get_chat(chat_arg)
     except (ValueError, TelegramAPIError):
         log.warning("Could not resolve Force Join chat %r", channel, exc_info=True)
         return None
-    now = datetime.now(timezone.utc)
     chat_id = int(chat.id)
-    mode = "normal" if getattr(chat, "username", None) else channel_cfg.get("mode", "join_request")
+    username = getattr(chat, "username", None)
+    # Public chats already have a stable direct join URL; avoid creating and
+    # persisting unnecessary temporary invites for them.
+    if username:
+        return f"https://t.me/{username}"
+    now = datetime.now(timezone.utc)
+    mode = channel_cfg.get("mode", "join_request")
     if mode not in {"normal", "join_request"}:
         mode = "join_request"
+    tracking_user_id = int(user_id) if user_id is not None else 0
     legacy = channel_cfg.get("button_url")
     if legacy:
         async def revoke_legacy_link():
@@ -267,7 +271,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
         log.exception("Could not create temporary Force Join link for %s", chat_id)
         return None
     created = datetime.now(timezone.utc)
-    record = {"user_id": int(user_id), "chat_id": chat_id, "invite_link": invite.invite_link,
+    record = {"user_id": tracking_user_id, "chat_id": chat_id, "invite_link": invite.invite_link,
         "mode": mode, "created_at": created, "refresh_at": created + timedelta(seconds=240),
         "expires_at": created + timedelta(seconds=300), "cleanup_at": created + timedelta(seconds=360)}
     try:
@@ -840,7 +844,9 @@ async def run_pending_join_request_cleanup_worker(db, interval_seconds: int = 36
 
 @router.chat_join_request()
 async def remember_pending_join_request(event, database):
-    _schedule_used_force_join_link_cleanup(event.bot, database.db, event.chat.id, getattr(event, "invite_link", None))
+    bot = getattr(event, "bot", None)
+    if bot is not None:
+        _schedule_used_force_join_link_cleanup(bot, database.db, event.chat.id, getattr(event, "invite_link", None))
     # Telegram emits this only when the bot has the appropriate channel admin rights.
     await database.db.pending_join_requests.update_one(
         {"chat_id": event.chat.id, "user_id": event.from_user.id},
