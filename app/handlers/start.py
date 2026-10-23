@@ -1,4 +1,4 @@
-"""Start command, Force Join gate, and single/batch deeplink delivery."""
+"""Start command, Force Sub gate, and single/batch deeplink delivery."""
 import logging
 import hashlib
 import html
@@ -80,83 +80,47 @@ async def effective_force_join_channels(database, settings) -> list[str]:
             channels.append(channel)
     return channels
 
-def normalize_animation_prefix(value: str | None) -> str:
-    """Remove markup syntax from a user-supplied prefix before rendering it as plain text."""
+DEFAULT_ANIMATION_FRAMES = ["Checking.", "Checking..", "Checking...", "Checking....", "Checking....."]
+
+def animation_frame_text(frame: str) -> str:
+    """Render a saved frame while preserving Telegram HTML formatting."""
     import re
-
-    text = html.unescape(str(value or ""))
-    # Remove Markdown code fences/backticks and common formatting markers.
-    text = text.replace("```", "").replace("`", "")
-    text = re.sub(r"</?(?:b|strong|i|em|u|s|strike|del|code|pre|blockquote|tg-spoiler)(?:\\s[^>]*)?>", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<!\\w)[*_~]{1,3}|[*_~]{1,3}(?!\\w)", "", text)
-    return " ".join(text.split()).strip()
-
-
-def animation_frame_text(prefix: str, frame: str) -> str:
-    """Render a plain prefix and preserve each frame's saved Telegram HTML formatting."""
-    import re
-
     frame_text = str(frame or "")
-    # New frames are stored from Message.html_text, which safely escapes literal
-    # angle brackets and represents Telegram entities as HTML tags. Escape legacy
-    # plain-text frames, but keep saved formatting tags intact.
-    if not re.search(
-        r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote|tg-spoiler|tg-emoji|a)\b|&(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);",
-        frame_text,
-        flags=re.IGNORECASE,
-    ):
+    if not re.search(r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote|tg-spoiler|tg-emoji|a)\b|&(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);", frame_text, flags=re.IGNORECASE):
         frame_text = html.escape(frame_text)
-    return f"{html.escape(normalize_animation_prefix(prefix))}{frame_text}"
-
+    return frame_text
 
 def normalize_animation_config(cfg: dict | None) -> dict:
-    """Normalize legacy defaults and clamp the timer for both animation modes."""
+    """Migrate legacy settings and enforce current frame and speed rules."""
     normalized = dict(cfg or {})
-    legacy_default = "prefix_enabled" not in normalized and (not normalized.get("prefix") or normalized.get("prefix") == "Checking..")
-    if legacy_default:
-        normalized["prefix"] = "Checking"
-        # Older configs may still have the legacy prefix but already contain
-        # custom frames. Only seed defaults when no valid five-frame sequence
-        # exists; otherwise every runtime load silently discards the user's frames.
-        frames = normalized.get("frames")
-        if isinstance(frames, list) and len(frames) == 3:
-            normalized["frames"] = [*frames, "....", "....."]
-        elif not isinstance(frames, list) or len(frames) != 5:
-            normalized["frames"] = [".", "..", "...", "....", "....."]
-        normalized["speed"] = 0.15
     frames = normalized.get("frames")
-    if isinstance(frames, list) and len(frames) == 3:
-        normalized["frames"] = [*frames, "....", "....."]
-    elif not isinstance(frames, list) or len(frames) != 5:
-        normalized["frames"] = [".", "..", "...", "....", "....."]
-    # Persist explicit switches for legacy records so the settings panel and
-    # runtime use the same defaults instead of interpreting a missing field
-    # independently.
-    normalized.setdefault("frames_enabled", True)
-    normalized.setdefault("prefix_enabled", bool(normalized.get("prefix")))
-    try:
-        speed = float(normalized.get("speed", 0.25))
-    except (TypeError, ValueError):
-        speed = 1.0
-    normalized["speed"] = min(1.0, max(0.15, speed))
-    if normalized.get("mode") not in ("force_join_poster", "new_message"):
-        normalized["mode"] = "force_join_poster"
+    frames = [str(frame) for frame in frames if str(frame).strip()] if isinstance(frames, list) else []
+    if not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    normalized["frames"] = frames[:6]
+    mode = normalized.get("mode")
+    if mode in ("new_message", "message"): mode = "message"
+    elif mode in ("force_join_poster", "poster"): mode = "poster"
+    elif mode != "disabled": mode = "poster" if normalized.get("enabled", False) else "disabled"
+    if normalized.get("enabled") is False: mode = "disabled"
+    normalized["mode"] = mode
+    normalized["enabled"] = mode != "disabled"
+    try: speed = float(normalized.get("speed", 0.25))
+    except (TypeError, ValueError): speed = 0.25
+    normalized["speed"] = min(1.0, max(0.20, speed))
+    normalized.pop("prefix", None)
+    normalized.pop("prefix_enabled", None)
+    normalized.pop("frames_enabled", None)
     return normalized
-
 
 async def load_animation_config(db) -> dict:
-    """Load and persist the corrected legacy defaults once, so old saved values do not flash."""
+    """Load and persist migrated animation defaults once."""
     raw = await db.settings.find_one({"key": "animation"}) or {}
     normalized = normalize_animation_config(raw)
-    persisted_keys = ("prefix", "frames", "speed", "mode", "frames_enabled", "prefix_enabled")
-    if any(raw.get(key) != normalized.get(key) for key in persisted_keys):
-        await db.settings.update_one(
-            {"key": "animation"},
-            {"$set": {key: normalized[key] for key in persisted_keys}},
-            upsert=True,
-        )
+    persisted_keys = ("frames", "speed", "mode", "enabled")
+    legacy_keys = ("prefix", "prefix_enabled", "frames_enabled")
+    if any(raw.get(key) != normalized.get(key) for key in persisted_keys) or any(key in raw for key in legacy_keys):
+        await db.settings.update_one({"key": "animation"}, {"$set": {key: normalized[key] for key in persisted_keys}, "$unset": {key: "" for key in legacy_keys}}, upsert=True)
     return normalized
-
 
 def _join_signature(channels: list[str]) -> str:
     return hashlib.sha256(",".join(sorted(c.strip() for c in channels if c.strip())).encode()).hexdigest()
@@ -200,7 +164,7 @@ async def _revoke_tracked_force_join_link(bot, db, record: dict) -> None:
             # Preserve the record so the background cleanup worker can retry.
             raise
         except TelegramAPIError:
-            log.debug("Force Join link already expired/revoked", exc_info=True)
+            log.debug("Force Sub link already expired/revoked", exc_info=True)
     await db.force_join_links.delete_one({"_id": record["_id"]})
 
 
@@ -214,7 +178,7 @@ async def cleanup_expired_force_join_links(bot, db, limit: int = 200) -> int:
             try:
                 await _revoke_tracked_force_join_link(bot, db, record)
             except Exception:
-                log.warning("Could not clean up an expired Force Join link; will retry", exc_info=True)
+                log.warning("Could not clean up an expired Force Sub link; will retry", exc_info=True)
 
     await asyncio.gather(*(cleanup_one(record) for record in records))
     return len(records)
@@ -227,7 +191,7 @@ async def run_force_join_link_cleanup_worker(bot, db, interval_seconds: int = 5)
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.warning("Force Join link cleanup failed", exc_info=True)
+            log.warning("Force Sub link cleanup failed", exc_info=True)
         await asyncio.sleep(interval_seconds)
 
 
@@ -246,7 +210,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
         chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
         chat = await bot.get_chat(chat_arg)
     except (ValueError, TelegramAPIError):
-        log.warning("Could not resolve Force Join chat %r", channel, exc_info=True)
+        log.warning("Could not resolve Force Sub chat %r", channel, exc_info=True)
         return None
 
     chat_id = int(chat.id)
@@ -257,7 +221,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
         mode = "normal" if getattr(chat, "username", None) else "join_request"
     links_collection = getattr(db, "force_join_links", None)
     if links_collection is None:
-        log.error("Force Join invite rotation requires the force_join_links collection")
+        log.error("Force Sub invite rotation requires the force_join_links collection")
         return None
 
     # Serialize cache-miss creation per chat/mode so concurrent users don't
@@ -279,7 +243,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
                 creates_join_request=(mode == "join_request"),
             )
         except TelegramAPIError:
-            log.exception("Could not create rotating Force Join link for %s", chat_id)
+            log.exception("Could not create rotating Force Sub link for %s", chat_id)
             return None
 
         created = datetime.now(timezone.utc)
@@ -304,7 +268,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
                 await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
             except TelegramAPIError:
                 log.warning("Could not revoke untracked rotating invite", exc_info=True)
-            log.exception("Could not persist rotating Force Join link")
+            log.exception("Could not persist rotating Force Sub link")
             return None
         return invite.invite_link
 
@@ -391,7 +355,7 @@ async def _cancel_gate_animation(bot, user_id: int, payload: str,
         except asyncio.CancelledError:
             pass
         except Exception:
-            log.debug("Force Join animation task ended during shutdown", exc_info=True)
+            log.debug("Force Sub animation task ended during shutdown", exc_info=True)
     latest = _gate_animation_tasks.get(key)
     if latest and latest[0] is task:
         separate_message_id = latest[1]
@@ -410,31 +374,19 @@ async def _cancel_gate_animation(bot, user_id: int, payload: str,
 async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                         base_text: str, markup: InlineKeyboardMarkup, cfg: dict,
                         separate_message_id: int | None, animation_only: bool = False,
-                        stop_event: asyncio.Event | None = None):
-    frames_enabled = cfg.get("frames_enabled", True)
-    prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
+                        stop_event: asyncio.Event | None = None,
+                        cycle_event: asyncio.Event | None = None):
     frames = cfg.get("frames")
-    if isinstance(frames, list) and len(frames) == 3:
-        frames = [*frames, "....", "....."]
-    elif not isinstance(frames, list) or len(frames) != 5:
-        frames = [".", "..", "...", "....", "....."]
-    if not frames_enabled:
-        frames = [""]
-    prefix_value = normalize_animation_prefix(cfg.get("prefix") or "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...") if prefix_enabled else ""
-    if prefix_value == "Checking..":
-        prefix_value = "Checking"
-    try:
-        speed = float(cfg.get("speed", 0.25))
-    except (TypeError, ValueError):
-        speed = 1.0
-    speed = min(1.0, max(0.08, speed))
-    mode = cfg.get("mode", "force_join_poster")
-    target_id = separate_message_id if mode == "new_message" else gate_message.message_id
-    frame_index = 0  # The first frame is already visible.
+    if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    frames = [str(frame) for frame in frames]
+    try: speed = float(cfg.get("speed", 0.25))
+    except (TypeError, ValueError): speed = 0.25
+    speed = min(1.0, max(0.20, speed))
+    mode = cfg.get("mode", "poster")
+    target_id = separate_message_id if mode == "message" else gate_message.message_id
+    frame_index = 0
     frame_updates = 0
-    # New Message mode keeps one text message and edits it for each frame.
-    # This matches the panel-style animation and avoids delete/send gaps.
-    # Telegram clients may show "Edited" for edits; the Bot API cannot suppress it.
+    key = (user_id, payload)
     next_beat = time.monotonic() + speed
     key = (user_id, payload)
     try:
@@ -457,11 +409,11 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
             if stop_event and stop_event.is_set():
                 break
             frame_index = (frame_index + 1) % len(frames)
-            animated = animation_frame_text(prefix_value, frames[frame_index])
+            animated = animation_frame_text(frames[frame_index])
             while True:
                 try:
                     content = animated if animation_only else f"{base_text}\n\n{animated}"
-                    if mode == "new_message":
+                    if mode == "message":
                         # New Message mode also edits the same frame message;
                         # both animation modes must update frames in place.
                         await bot.edit_message_text(
@@ -469,7 +421,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                             text=content, parse_mode="HTML", reply_markup=markup,
                         )
                     else:
-                        # Force Join Poster mode must animate the SAME poster.
+                        # Force Sub Poster mode must animate the SAME poster.
                         # Telegram's API does not let bots suppress its Edited label.
                         if gate_message.animation or gate_message.photo or gate_message.document:
                             await bot.edit_message_caption(
@@ -485,9 +437,11 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                     running_task = asyncio.current_task()
                     if current and current[0] is running_task:
                         _gate_animation_tasks[key] = (
-                            running_task, target_id if mode == "new_message" else None
+                            running_task, target_id if mode == "message" else None
                         )
                     frame_updates += 1
+                    if cycle_event and frame_updates >= len(frames):
+                        cycle_event.set()
                 except TelegramRetryAfter as exc:
                     retry_delay = max(speed, float(exc.retry_after))
                     if stop_event:
@@ -503,10 +457,10 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                     continue
                 except TelegramBadRequest as exc:
                     if "message is not modified" not in str(exc).lower():
-                        log.debug("Force Join animation edit rejected", exc_info=True)
+                        log.debug("Force Sub animation edit rejected", exc_info=True)
                         return
                 except TelegramAPIError:
-                    log.debug("Force Join animation stopped because its message could not be edited", exc_info=True)
+                    log.debug("Force Sub animation stopped because its message could not be edited", exc_info=True)
                     return
                 break
             # Keep a fixed beat when requests are fast; avoid catch-up bursts when
@@ -521,40 +475,40 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
 
 async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: Message,
                                 base_text: str, markup: InlineKeyboardMarkup, cfg: dict,
-                                animation_only: bool = False):
-    if not cfg.get("enabled") or not (cfg.get("frames_enabled", True) or cfg.get("prefix_enabled", bool(cfg.get("prefix")))):
+                                animation_only: bool = False, wait_for_cycle: bool = False):
+    if not cfg.get("enabled") or cfg.get("mode") == "disabled":
         return
     await _cancel_gate_animation(bot, user_id, payload)
-    mode = cfg.get("mode", "force_join_poster")
+    mode = cfg.get("mode", "poster")
     separate_id = None
-    if mode == "new_message":
-        prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
-        prefix_value = str(cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
-        if prefix_value == "Checking..":
-            prefix_value = "Checking"
-        frames_enabled = cfg.get("frames_enabled", True)
+    if mode == "message":
         frames = cfg.get("frames")
-        if not isinstance(frames, list) or len(frames) != 5:
-            frames = [".", "..", "...", "....", "....."]
-        if not frames_enabled:
-            frames = [""]
-        first = animation_frame_text(prefix_value, frames[0])
+        if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+        first = animation_frame_text(frames[0])
         try:
             animation_message = await bot.send_message(user_id, first, parse_mode="HTML")
             separate_id = animation_message.message_id
         except TelegramAPIError:
-            log.warning("Could not send separate Force Join animation", exc_info=True)
+            log.warning("Could not send separate Force Sub animation", exc_info=True)
             return
     stop_event = asyncio.Event()
+    cycle_event = asyncio.Event()
     task = asyncio.create_task(
         _animate_gate(
             bot, user_id, payload, gate_message, base_text, markup, cfg,
-            separate_id, animation_only, stop_event,
+            separate_id, animation_only, stop_event, cycle_event,
         )
     )
     key = (user_id, payload)
     _gate_animation_stop_events[key] = stop_event
     _gate_animation_tasks[key] = (task, separate_id)
+    if wait_for_cycle and mode == "message":
+        try:
+            frames = cfg.get("frames") or DEFAULT_ANIMATION_FRAMES
+            speed = float(cfg.get("speed", 0.25))
+            await asyncio.wait_for(cycle_event.wait(), timeout=max(2.0, speed * len(frames) + 5.0))
+        except asyncio.TimeoutError:
+            log.warning("Message animation did not complete its first cycle in time")
 
 
 async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, verify_button: bool = True)->bool:
@@ -568,26 +522,18 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
 
     animation_cfg = await load_animation_config(database.db)
     animation_enabled = bool(animation_cfg.get("enabled"))
-    animation_mode = animation_cfg.get("mode", "force_join_poster")
+    animation_mode = animation_cfg.get("mode", "poster")
     animation_post = None
 
     # Deeplink entry performs a membership check too, so show the configured
     # animation during that check rather than only after the user taps Verify.
     if animation_enabled:
-        if animation_mode == "new_message":
-            await _start_gate_animation(bot, user.id, payload, message, "", InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg)
+        if animation_mode == "message":
+            await _start_gate_animation(bot, user.id, payload, message, "", InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg, wait_for_cycle=True)
         else:
-            frames_enabled = animation_cfg.get("frames_enabled", True)
             frames = animation_cfg.get("frames")
-            if not isinstance(frames, list) or len(frames) != 5:
-                frames = [".", "..", "...", "....", "....."]
-            if not frames_enabled:
-                frames = [""]
-            prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
-            prefix_value = str(animation_cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
-            if prefix_value == "Checking..":
-                prefix_value = "Checking"
-            first = animation_frame_text(prefix_value, frames[0])
+            if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+            first = animation_frame_text(frames[0])
             try:
                 if cfg.get("poster_file_id"):
                     # Keep media immutable during animation: caption edits add Telegram's Edited label.
@@ -596,15 +542,15 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
                     animation_post = await bot.send_photo(user.id, cfg["poster_photo_id"])
                 else:
                     animation_post = None
-                # Animate a separate text message; the final Force Join post is sent fresh with its poster.
-                text_animation_cfg = {**animation_cfg, "mode": "new_message"}
+                # Animate a separate text message; the final Force Sub post is sent fresh with its poster.
+                text_animation_cfg = {**animation_cfg, "mode": "message"}
                 await _start_gate_animation(
                     bot, user.id, payload, animation_post or message, "",
                     InlineKeyboardMarkup(inline_keyboard=[]), text_animation_cfg,
                     animation_only=True,
                 )
             except TelegramAPIError:
-                log.warning("Could not create Force Join animation poster during deeplink check", exc_info=True)
+                log.warning("Could not create Force Sub animation poster during deeplink check", exc_info=True)
                 animation_post = None
 
     missing = await join_status(bot, user.id, channels, database.db)
@@ -644,9 +590,9 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     separate_animation_id = None
     if animation_enabled:
         separate_animation_id = await _cancel_gate_animation(
-            bot, user.id, payload, delete_separate=(animation_mode != "new_message")
+            bot, user.id, payload, delete_separate=(animation_mode != "message")
         )
-    if animation_enabled and animation_mode == "force_join_poster" and animation_post:
+    if animation_enabled and animation_mode == "poster" and animation_post:
         # Never edit media captions: Telegram marks edited media messages as Edited.
         # Send the final poster+prompt as a new post, then remove the temporary poster.
         await _send_force_join_post(bot, user.id, cfg, rendered, markup)
@@ -655,9 +601,9 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
         except TelegramAPIError:
             pass
         return True
-    if animation_enabled and animation_mode == "new_message":
+    if animation_enabled and animation_mode == "message":
         # A text message cannot be converted into media through the Bot API.
-        # Send the final Force Join post with its configured poster, then remove the last frame.
+        # Send the final Force Sub post with its configured poster, then remove the last frame.
         await _send_force_join_post(bot, user.id, cfg, rendered, markup)
         if separate_animation_id:
             try:
@@ -684,13 +630,13 @@ async def send_file_animation(bot, db, user_id: int) -> None:
         msg = await bot.send_message(user_id, text, parse_mode="HTML")
         await asyncio.sleep(0.08)
     except TelegramAPIError:
-        log.warning("File Animation send failed; continuing delivery", exc_info=True)
+        log.warning("Blink send failed; continuing delivery", exc_info=True)
     finally:
         if msg:
             try:
                 await msg.delete()
             except TelegramAPIError:
-                log.debug("File Animation delete failed; continuing delivery", exc_info=True)
+                log.debug("Blink delete failed; continuing delivery", exc_info=True)
 
 
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
@@ -750,7 +696,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             except Exception: log.exception("Could not update delivery request status")
         return
     if await is_owner_or_moderator(database.db,user.id,settings):return
-    # Plain /start checks Force Join first; this prompt intentionally has no Verify button.
+    # Plain /start checks Force Sub first; this prompt intentionally has no Verify button.
     if await gate_or_prompt(message, "", settings, database, bot, verify_button=False):
         return
     cfg=await database.db.settings.find_one({"key":"start_message"}) or {}
@@ -929,7 +875,7 @@ async def clear_accepted_private_join_request(event, database):
 
 
 async def _send_force_join_post(bot, user_id: int, cfg: dict, text: str, markup: InlineKeyboardMarkup):
-    """Send a replacement Force Join post before removing the previous one."""
+    """Send a replacement Force Sub post before removing the previous one."""
     try:
         if cfg.get("poster_file_id"):
             return await bot.send_animation(user_id, cfg["poster_file_id"], caption=text, reply_markup=markup, parse_mode="HTML")
@@ -937,7 +883,7 @@ async def _send_force_join_post(bot, user_id: int, cfg: dict, text: str, markup:
             return await bot.send_photo(user_id, cfg["poster_photo_id"], caption=text, reply_markup=markup, parse_mode="HTML")
         return await bot.send_message(user_id, text, reply_markup=markup, parse_mode="HTML")
     except TelegramAPIError:
-        log.warning("Configured Force Join poster could not be sent; using text post", exc_info=True)
+        log.warning("Configured Force Sub poster could not be sent; using text post", exc_info=True)
         return await bot.send_message(user_id, text, reply_markup=markup, parse_mode="HTML")
 
 
@@ -950,7 +896,7 @@ async def _edit_force_join_post(message: Message, text: str, markup: InlineKeybo
             await message.edit_text(text=text, reply_markup=markup, parse_mode="HTML")
         return True
     except TelegramAPIError:
-        log.warning("Could not edit animation poster into Force Join prompt", exc_info=True)
+        log.warning("Could not edit animation poster into Force Sub prompt", exc_info=True)
         return False
 
 @router.callback_query(F.data.startswith("forcejoin:repair:"))
@@ -977,7 +923,7 @@ async def forcejoin_repair_link(query: CallbackQuery, database):
         try:
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
         except TelegramAPIError:
-            log.warning("Could not replace repaired Force Join URL button", exc_info=True)
+            log.warning("Could not replace repaired Force Sub URL button", exc_info=True)
     await query.answer()
 
 
@@ -1018,29 +964,21 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
     force_cfg = force_cfg_result or {}
     channels = await effective_force_join_channels(database, settings) if force_cfg.get("enabled", False) else []
     animation_enabled = bool(animation_cfg.get("enabled"))
-    animation_mode = animation_cfg.get("mode", "force_join_poster")
+    animation_mode = animation_cfg.get("mode", "poster")
     animation_post = None
 
-    # In poster mode, the configured Force Join media must remain visible during
+    # In poster mode, the configured Force Sub media must remain visible during
     # verification. Editing a text-only old post would otherwise silently skip it.
     if old_post and animation_enabled:
-        if animation_mode == "new_message":
+        if animation_mode == "message":
             await _start_gate_animation(
                 bot, user_id, payload, old_post, "",
-                InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg,
+                InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg, wait_for_cycle=True,
             )
         else:
-            frames_enabled = animation_cfg.get("frames_enabled", True)
             frames = animation_cfg.get("frames")
-            if not isinstance(frames, list) or len(frames) != 5:
-                frames = [".", "..", "...", "....", "....."]
-            if not frames_enabled:
-                frames = [""]
-            prefix_enabled = animation_cfg.get("prefix_enabled", bool(animation_cfg.get("prefix")))
-            prefix_value = str(animation_cfg.get("prefix") or "```\nᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...\n```") if prefix_enabled else ""
-            if prefix_value == "Checking..":
-                prefix_value = "Checking"
-            first = animation_frame_text(prefix_value, frames[0])
+            if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+            first = animation_frame_text(frames[0])
             empty_markup = InlineKeyboardMarkup(inline_keyboard=[])
             try:
                 if force_cfg.get("poster_file_id"):
@@ -1051,13 +989,13 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 else:
                     animation_post = None
                 # Use a separate text animation while the poster remains untouched.
-                text_animation_cfg = {**animation_cfg, "mode": "new_message"}
+                text_animation_cfg = {**animation_cfg, "mode": "message"}
                 await _start_gate_animation(
                     bot, user_id, payload, animation_post or old_post, "", empty_markup,
                     text_animation_cfg, animation_only=True,
                 )
             except TelegramAPIError:
-                log.warning("Could not create Force Join animation poster", exc_info=True)
+                log.warning("Could not create Force Sub animation poster", exc_info=True)
                 animation_post = None
 
     missing = [] if await is_owner_or_moderator(database.db, user_id, settings) else await join_status(
@@ -1087,14 +1025,14 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
         # Stop the animation, then edit its poster in place with the current
-        # remaining-channel buttons and configured Force Join message.
-        if animation_mode == "new_message":
+        # remaining-channel buttons and configured Force Sub message.
+        if animation_mode == "message":
             separate_animation_id = await _cancel_gate_animation(
                 bot, user_id, payload, delete_separate=False
             )
         else:
             separate_animation_id = await _cancel_gate_animation(bot, user_id, payload)
-        if animation_enabled and animation_mode == "force_join_poster" and animation_post:
+        if animation_enabled and animation_mode == "poster" and animation_post:
             # Final media is a new message; neither the temporary poster nor its caption is edited.
             new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)
             for temporary_post in (animation_post, old_post):
@@ -1105,8 +1043,8 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                         pass
             return
 
-        if animation_enabled and animation_mode == "new_message":
-            # Final Force Join prompt is fresh, so the animation never gains an Edited tag.
+        if animation_enabled and animation_mode == "message":
+            # Final Force Sub prompt is fresh, so the animation never gains an Edited tag.
             new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)
             if separate_animation_id:
                 try:
@@ -1138,7 +1076,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 pass
         return
 
-    # Verification succeeded: stop the animation and remove the Force Join
+    # Verification succeeded: stop the animation and remove the Force Sub
     # prompt before sending any requested file or batch item.
     separate_animation_id = await _cancel_gate_animation(
         bot, user_id, payload, delete_separate=False
@@ -1147,7 +1085,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         try:
             await animation_post.delete()
         except TelegramAPIError:
-            log.info("Could not remove Force Join verification animation")
+            log.info("Could not remove Force Sub verification animation")
     repo=FileRepository(database.db)
     if payload.startswith("file_"):record=await repo.get_file(payload[5:][:5])
     elif payload.startswith("batch_"):record=await repo.get_batch(payload[6:][:5])
@@ -1163,13 +1101,13 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
     if not await claim_delivery_request(database.db, request_key, user_id, payload):
         return
     await _mark_verified(database.db, user_id, channels)
-    # Delete the Force Join post first. Await this API call before beginning delivery,
+    # Delete the Force Sub post first. Await this API call before beginning delivery,
     # so the verification prompt cannot appear after the file in normal operation.
     if old_post:
         try:
             await old_post.delete()
         except TelegramAPIError:
-            log.warning("Could not remove Force Join post before delivery", exc_info=True)
+            log.warning("Could not remove Force Sub post before delivery", exc_info=True)
     if separate_animation_id:
         try:
             await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)
@@ -1184,12 +1122,12 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             await bot.send_message(user_id,"This file is currently unavailable. The source message may have been deleted or become inaccessible.")
         success = result[0] > 0
     except TelegramAPIError:
-        log.exception("Delivery after Force Join failed")
+        log.exception("Delivery after Force Sub failed")
         await bot.send_message(user_id,"File delivery failed. Contact the owner.")
     except Exception:
-        log.exception("Unexpected delivery failure after Force Join")
+        log.exception("Unexpected delivery failure after Force Sub")
         await bot.send_message(user_id,"Delivery failed due to a temporary error.")
     finally:
         try: await finish_delivery_request(database.db, request_key, success)
-        except Exception: log.exception("Could not update Force Join delivery request status")
+        except Exception: log.exception("Could not update Force Sub delivery request status")
 

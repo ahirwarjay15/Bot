@@ -13,7 +13,7 @@ from app.config import Settings
 from app.services.permissions import is_owner_or_moderator
 from app.services.text_format import normalize_telegram_text
 from app.services.links import shorten_url
-from app.handlers.start import effective_force_join_channels, normalize_animation_prefix
+from app.handlers.start import effective_force_join_channels, normalize_animation_config
 
 router = Router(name="settings")
 
@@ -311,8 +311,8 @@ async def render_home(query):
     import html
     name = f'<a href="https://t.me/{me.username}">{html.escape(me.full_name)}</a>' if me.username else html.escape(me.full_name)
     await edit_page(query, f"CUSTOMIZE\n<i>✰ Name: {name}</i>\n\nConfigure Bot Settings Using the Buttons Below.", kb([
-        [("START MSG", "settings:start"), ("FORCE JOIN", "settings:forcejoin")],
-        [("ANIMATION", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
+        [("START", "settings:start"), ("FORCE SUB", "settings:forcejoin")],
+        [("ANIM", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
         [("INVALID", "settings:invalid"), ("SHORTENER", "settings:shortener")],
         [("MODERATORS", "settings:mods"), ("STATS", "settings:stats")],
         [("CUSTOM BUTTON", "settings:custom_button")],
@@ -335,7 +335,7 @@ async def build_forcejoin_page(bot, db, settings):
     rows = [channel_buttons[i:i+2] for i in range(0, len(channel_buttons), 2)]
     if len(channels) < 10:
         rows.append([("✚ ADD", "settings:forcejoin_add")])
-    # Force Join is active exactly while at least one channel is configured.
+    # Force Sub is active exactly while at least one channel is configured.
     enabled = bool(channels)
     if cfg.get("enabled") != enabled:
         await db.settings.update_one(
@@ -348,10 +348,10 @@ async def build_forcejoin_page(bot, db, settings):
         [("VERIFY", "settings:forcejoin_verify_text"), ("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")],
         [("《 BACK", "settings:home")],
     ])
-    text = ("FORCE JOIN\n\n"
+    text = ("FORCE SUB\n\n"
             f"Status: {'ENABLED ✅' if enabled else 'DISABLED ❌'}\n\n"
             "Users must verify the required channels before receiving files.\n\n"
-            "You can add up to 10 force-join channels.")
+            "You can add up to 10 force-sub channels.")
     return text, kb(rows)
 
 
@@ -360,7 +360,7 @@ async def render_forcejoin(query, db, settings):
     await edit_page(query, text, markup)
 
 async def render_forcejoin_message(query):
-    await edit_page(query, "FORCE JOIN MESSAGE\nCustomize the message shown to users who still need to join required channels.", kb([
+    await edit_page(query, "FORCE SUB MESSAGE\nCustomize the message shown to users who still need to join required channels.", kb([
         [("EDIT", "settings:forcejoin_message_edit"), ("SEE", "settings:forcejoin_message_see")],
         [("DEFAULT", "settings:forcejoin_message_default")],
         [("《 BACK", "settings:forcejoin")],
@@ -368,7 +368,7 @@ async def render_forcejoin_message(query):
 
 
 async def render_invalid_text(query):
-    await edit_page(query, "INVALID POST TEXT\nCustomize the reply shown when users send messages instead of a valid file link.", kb([
+    await edit_page(query, "CAPTION\nCustomize the reply shown when users send messages instead of a valid file link.", kb([
         [("EDIT", "settings:invalid_text_edit"), ("SEE", "settings:invalid_text_see")],
         [("DEFAULT", "settings:invalid_text_default")],
         [("《 BACK", "settings:invalid")],
@@ -378,15 +378,15 @@ async def render_invalid_text(query):
 async def render_start(query, db):
     cfg = await db.settings.find_one({"key": "start_message"}) or {}
     about_enabled = bool(cfg.get("about_enabled", True))
-    await edit_page(query, f"START MESSAGE\n\nCustomize your bot's start message using the following options.\n\nStatus: {'ENABLED ✅' if cfg.get('enabled', True) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
+    await edit_page(query, f"START\n\nCustomize your bot's start message using the following options.\n\nStatus: {'ENABLED ✅' if cfg.get('enabled', True) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
         [("DISABLE" if cfg.get("enabled", True) else "ENABLE", "settings:start_toggle")],
-        [("BUTTON", "settings:start_button"), ("START TEXT", "settings:start_text")],
-        [("START POSTER", "settings:start_poster"), ("ABOUT", "settings:start_about_toggle")],
+        [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
+        [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about_toggle")],
         [("《 BACK", "settings:home")],
     ]))
 
 async def render_start_text(query):
-    await edit_page(query, "START TEXT\n\nCustomize your bot's start message.", kb([
+    await edit_page(query, "CAPTION\n\nCustomize your bot's start message.", kb([
         [("EDIT", "settings:start_text_edit"), ("SEE", "settings:start_text_see")],
         [("DEFAULT", "settings:start_text_default")],
         [("《 BACK", "settings:start")],
@@ -398,7 +398,7 @@ async def render_start_button(query, db):
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
-    text = f"START MESSAGE BUTTONS\nCustomize buttons shown with your start message.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
+    text = f"START BUTTONS\nCustomize buttons shown with your start message.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
     await edit_page(query, text, kb([
         [(f"1 {status1}", "settings:start_button_toggle:1"), (f"2 {status2}", "settings:start_button_toggle:2")],
         [(f"3 {status3}", "settings:start_button_toggle:3"), (f"4 {status4}", "settings:start_button_toggle:4")],
@@ -417,11 +417,11 @@ async def refresh_button_panel(bot, chat_id, message_id, db, kind):
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
-    title = "START MESSAGE BUTTONS" if is_start else "INVALID POST BUTTONS"
+    title = "START BUTTONS" if is_start else "INVALID BUTTONS"
     back = "settings:start" if is_start else "settings:invalid"
     prefix = "start" if is_start else "invalid"
     page_text = format_settings_page(
-        f"{title}\nCustomize buttons shown with {'your start message' if is_start else 'invalid posts'}.\n\n"
+        f"{title}\nCustomize buttons shown with {'your start message' if is_start else 'invalid items'}.\n\n"
         f"Button 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
     )
     keyboard = kb([
@@ -444,7 +444,7 @@ async def refresh_button_panel(bot, chat_id, message_id, db, kind):
         pass
 
 async def render_start_poster(query):
-    await edit_page(query, "START MEDIA\n\nInclude an image or GIF with your start message.", kb([
+    await edit_page(query, "MEDIA\n\nInclude an image or GIF with your start message.", kb([
         [("✚ ADD", "settings:start_poster_add"), ("REMOVE", "settings:start_poster_remove")],
         [("《 BACK", "settings:start")],
     ]))
@@ -454,75 +454,34 @@ async def render_start_about(query, db):
     await render_start(query, db)
 
 def _animation_mode_for_action(action: str) -> str:
-    """Translate the two explicit mode buttons to their persisted values."""
-    return "new_message" if action == "animation_mode_new" else "force_join_poster"
-
-
+    """Translate legacy animation mode action names to canonical values."""
 def build_animation_page(cfg):
-    """Build the animation page text and status-bearing buttons from the latest saved config."""
-    frames_enabled = cfg.get("frames_enabled", True)
-    prefix_enabled = cfg.get("prefix_enabled", bool(cfg.get("prefix")))
-    frames = cfg.get("frames")
-    if isinstance(frames, list) and len(frames) == 3:
-        frames = [*frames, "....", "....."]
-    elif not isinstance(frames, list) or len(frames) != 5:
-        frames = [".", "..", "...", "....", "....."]
-    frames_text = " | ".join(str(frame) for frame in frames) if frames_enabled else "OFF"
-    prefix = html.escape(normalize_animation_prefix(cfg.get("prefix") or "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...")) if prefix_enabled else "OFF"
-    mode = cfg.get("mode", "force_join_poster")
-    mode_label = "NEW MESSAGE" if mode == "new_message" else "FORCE JOIN POSTER"
-    file_animation_enabled = bool(cfg.get("file_animation_text"))
-    try:
-        speed = float(cfg.get("speed", 0.25))
-    except (TypeError, ValueError):
-        speed = 1.0
-    speed = min(1.0, max(0.25, speed))
-    text = (
-        f"ANIMATION\n\nAdd a custom animation for the verification process.\n\n"
-        f"Prefix: {prefix}\nFrames: {frames_text}\n"
-        f"Prefix Status: {'ENABLED ✅' if prefix_enabled else 'DISABLED ❌'}\n"
-        f"Frames Status: {'ENABLED ✅' if frames_enabled else 'DISABLED ❌'}\n"
-        f"Speed: {speed:.2f}s per frame\nMode: {mode_label}\n"
-        f"Status: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\n"
-        f"File Animation: {'ENABLED ✅' if file_animation_enabled else 'DISABLED ❌'}"
-    )
+    """Render compact animation status and the remaining controls."""
+    normalized = normalize_animation_config(cfg)
+    frames_text = ", ".join(html.escape(str(frame)) for frame in normalized["frames"])
+    speed = normalized["speed"]
+    mode = normalized["mode"]
+    status = {"disabled": "Disabled", "message": "Message", "poster": "Poster"}.get(mode, "Disabled")
+    blink_status = "Enabled" if normalized.get("file_animation_text") else "Disabled"
+    text = f"ANIM\n\nStatus: {status}\nFrames: {frames_text}\nSpeed: {speed:.2f}s per frame\nBlink: {blink_status}"
     markup = kb([
-        [("PREFIX" + (" 🟢" if prefix_enabled else " 🔴"), "settings:animation_prefix"),
-         ("FRAMES" + (" 🟢" if frames_enabled else " 🔴"), "settings:animation_frames")],
-        [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:animation_toggle"),
-         ("SPEED", "settings:animation_speed")],
-        [("MODE", "settings:animation_mode_toggle"),
-         ("FILE ANIMATION " + ("🟢" if file_animation_enabled else "🔴"), "settings:file_animation")],
+        [("FRAMES", "settings:animation_frames"), ("SPEED", "settings:animation_speed")],
+        [("MODE", "settings:animation_mode_toggle"), ("BLINK", "settings:file_animation")],
         [("《 BACK", "settings:home")],
     ])
     return text, markup
 
-
 async def render_animation(query, db):
-    cfg = await db.settings.find_one({"key": "animation"}) or {}
-    # Preserve valid custom frames in legacy configs; only seed defaults when
-    # the saved frame sequence is absent or malformed.
-    legacy_default = "frames_enabled" not in cfg and (not cfg.get("prefix") or cfg.get("prefix") == "Checking..")
-    if legacy_default:
-        frames = cfg.get("frames")
-        updates = {"prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "speed": 0.25}
-        if isinstance(frames, list) and len(frames) == 3:
-            updates["frames"] = [*frames, "....", "....."]
-        elif not isinstance(frames, list) or len(frames) != 5:
-            updates["frames"] = [".", "..", "...", "....", "....."]
-        cfg.update(updates)
-        await db.settings.update_one({"key": "animation"}, {"$set": updates}, upsert=True)
-    try:
-        speed = float(cfg.get("speed", 0.25))
-    except (TypeError, ValueError):
-        speed = 1.0
-    speed = min(1.0, max(0.25, speed))
-    if speed != cfg.get("speed"):
-        cfg["speed"] = speed
-        await db.settings.update_one({"key": "animation"}, {"$set": {"speed": speed}}, upsert=True)
+    raw = await db.settings.find_one({"key": "animation"}) or {}
+    cfg = normalize_animation_config(raw)
+    await db.settings.update_one(
+        {"key": "animation"},
+        {"$set": {key: cfg[key] for key in ("frames", "speed", "mode", "enabled")},
+         "$unset": {"prefix": "", "prefix_enabled": "", "frames_enabled": ""}},
+        upsert=True,
+    )
     text, markup = build_animation_page(cfg)
     await edit_page(query, text, markup)
-
 
 async def refresh_settings_panel(bot, chat_id, message_id, text, keyboard):
     """Refresh a saved settings panel or replace a stale/uneditable message."""
@@ -605,7 +564,7 @@ async def render_auto(query, db):
     await edit_page(query, f"AUTO DELETE\nAutomatically delete delivered files and the auto-delete message after {time_label(minutes)}.\nStatus: {status}", kb([
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:auto_toggle")],
         [("TIME", "settings:auto_time"), ("MESSAGE", "settings:auto_message")],
-        [(f"AFTER DELETE ({after_status})", "settings:after")],
+        [("AFTER DELETE", "settings:after")],
         [("《 BACK", "settings:home")],
     ]))
 
@@ -677,7 +636,7 @@ async def render_after_text(query):
 async def render_invalid(query, db):
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
     about_enabled = bool(cfg.get("about_enabled", False))
-    await edit_page(query, f"INVALID POST\nSet a response for users who send normal messages to the bot.\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
+    await edit_page(query, f"INVALID\nSet a response for users who send normal messages to the bot.\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:invalid_toggle")],
         [("TEXT", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
         [("POSTER", "settings:invalid_poster"), ("ABOUT" if about_enabled else "ABOUT", "settings:invalid_about_toggle")],
@@ -690,7 +649,7 @@ async def render_invalid_button(query, db):
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
-    text = f"INVALID POST BUTTONS\nCustomize buttons shown with invalid posts.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
+    text = f"INVALID BUTTONS\nCustomize buttons shown with invalid items.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
     await edit_page(query, text, kb([
         [(f"1 {status1}", "settings:invalid_button_toggle:1"), (f"2 {status2}", "settings:invalid_button_toggle:2")],
         [(f"3 {status3}", "settings:invalid_button_toggle:3"), (f"4 {status4}", "settings:invalid_button_toggle:4")],
@@ -700,14 +659,14 @@ async def render_invalid_button(query, db):
 
 
 async def render_poster(query):
-    await edit_page(query, "INVALID POSTER\nAdd an image or GIF to your invalid post.", kb([
+    await edit_page(query, "MEDIA\nAdd an image or GIF to your invalid item.", kb([
         [("✚ ADD", "settings:poster_add"), ("REMOVE", "settings:poster_remove")],
         [("《 BACK", "settings:invalid")],
     ]))
 
 async def render_about(query, db):
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
-    await edit_page(query, f"ABOUT BUTTON\n\nChoose whether to show the About button with invalid posts.\n\nStatus: {'ENABLED ✅' if cfg.get('about_enabled', False) else 'DISABLED ❌'}", kb([
+    await edit_page(query, f"ABOUT BUTTON\n\nChoose whether to show the About button with invalid items.\n\nStatus: {'ENABLED ✅' if cfg.get('about_enabled', False) else 'DISABLED ❌'}", kb([
         [("DISABLE" if cfg.get("about_enabled", False) else "ENABLE", "settings:invalid_about_toggle")],
         [("《 BACK", "settings:invalid")],
     ]))
@@ -755,8 +714,8 @@ async def settings_command(message: Message, settings: Settings, database):
     me = await message.bot.get_me()
     name = f'<a href="https://t.me/{me.username}">{__import__("html").escape(me.full_name)}</a>' if me.username else __import__("html").escape(me.full_name)
     panel = await message.answer(f"<b><u>CUSTOMIZE</u></b>\n\n<i>✰ Name: {name}</i>\n\n<i>Configure Bot Settings Using the Buttons Below.</i>", parse_mode="HTML", link_preview_options={"is_disabled": True}, reply_markup=kb([
-        [("START MSG", "settings:start"), ("FORCE JOIN", "settings:forcejoin")],
-        [("ANIMATION", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
+        [("START", "settings:start"), ("FORCE SUB", "settings:forcejoin")],
+        [("ANIM", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
         [("INVALID", "settings:invalid"), ("SHORTENER", "settings:shortener")],
         [("MODERATORS", "settings:mods"), ("STATS", "settings:stats")],
         [("CUSTOM BUTTON", "settings:custom_button")],
@@ -859,7 +818,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await patch(db, "force_join", {"enabled": not cfg.get("enabled", False)}, {"channels": [], "message": "Hey {mention}\nPlease Join My {remaining_count} Channel's To Use Me!"})
         await render_forcejoin(query, db, settings)
     elif action == "forcejoin_add":
-        panel_message = await edit_page(query, "ADD FORCE JOIN\n\nChoose Group or Channel from the keyboard below. Public chats use Normal Mode automatically; private chats use Join Request Mode automatically.", kb([
+        panel_message = await edit_page(query, "ADD FORCE SUB\n\nChoose Group or Channel from the keyboard below. Public chats use Normal Mode automatically; private chats use Join Request Mode automatically.", kb([
             [("《 BACK", "settings:forcejoin")],
         ]))
         if panel_message:
@@ -907,7 +866,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         index = int(action.split(":", 1)[1])
         if index < len(channels):
             await state.set_state(SettingInput.waiting); await state.update_data(field="forcejoin_label", channel=channels[index])
-            if query.message: await tracked_answer(query.message, state, "Send new button text for force-join channel button.")
+            if query.message: await tracked_answer(query.message, state, "Send new button text for force-sub channel button.")
     elif action.startswith("forcejoin_remove_one:"):
         channels = await effective_force_join_channels(database, settings)
         index = int(action.split(":", 1)[1])
@@ -919,7 +878,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "forcejoin_message": await render_forcejoin_message(query)
     elif action == "forcejoin_message_edit":
         await show_input_prompt(query, state, "forcejoin_message",
-            "Send the Force Join message. Telegram bold, italic, quotes and monospace formatting will be preserved.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — owner link\n<code>{hindi_anime}</code> — Lexi Anime Hindi link\n<code>{remaining_count}</code> — remaining channels count",
+            "Send the Force Sub message. Telegram bold, italic, quotes and monospace formatting will be preserved.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — owner link\n<code>{hindi_anime}</code> — Lexi Anime Hindi link\n<code>{remaining_count}</code> — remaining channels count",
             "forcejoin")
     elif action == "forcejoin_message_see":
         cfg = await db.settings.find_one({"key": "force_join"}) or {}
@@ -939,17 +898,17 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         me = await query.bot.get_me()
         preview = DEFAULT_FORCE_JOIN_MESSAGE.replace("{mention}", query.from_user.full_name if query.from_user else "User").replace("{remaining_count}", "3")
         preview = preview.replace("{bot_mention}", me.full_name or me.username or "Bot")
-        await query.answer("✅ Force Join message restored to the recommended default.\n\n" + plain_preview(preview)[:130], show_alert=True)
+        await query.answer("✅ Force Sub message restored to the recommended default.\n\n" + plain_preview(preview)[:130], show_alert=True)
         await render_forcejoin_message(query)
         return
     elif action == "forcejoin_media":
-        await edit_page(query, "FORCE JOIN MEDIA\n\nAdd or remove the image/GIF shown with the Force Join message.", kb([
+        await edit_page(query, "FORCE SUB MEDIA\n\nAdd or remove the image/GIF shown with the Force Sub message.", kb([
             [("✚ ADD", "settings:forcejoin_media_add"), ("REMOVE", "settings:forcejoin_media_remove")],
             [("《 BACK", "settings:forcejoin")],
         ]))
     elif action == "forcejoin_media_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="forcejoin_media")
-        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new force-join poster here.")
+        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new force-sub poster here.")
     elif action == "forcejoin_media_remove":
         await db.settings.update_one({"key": "force_join"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
         if query.message: await tracked_answer(query.message, state, "✨ Force-join poster removed successfully.")
@@ -961,7 +920,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         channels = await effective_force_join_channels(database, settings)
         rows = [[(channel, f"settings:forcejoin_del:{i}")] for i, channel in enumerate(channels)]
         rows.append([("《 BACK", "settings:forcejoin")])
-        await edit_page(query, "REMOVE FORCE JOIN CHANNEL\nSelect a channel to remove.", kb(rows))
+        await edit_page(query, "REMOVE FORCE SUB CHANNEL\nSelect a channel to remove.", kb(rows))
     elif action.startswith("forcejoin_del:"):
         channels = await effective_force_join_channels(database, settings)
         index = int(action.split(":", 1)[1])
@@ -1000,7 +959,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start_text": await render_start_text(query)
     elif action == "start_text_edit":
         await show_input_prompt(query, state, "start_text",
-            "Send the new Start Message text.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — link to the owner\n<code>{hindi_anime}</code> — link to Lexi Anime Hindi",
+            "Send the new Caption text.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — link to the owner\n<code>{hindi_anime}</code> — link to Lexi Anime Hindi",
             "start_text")
     elif action == "start_text_see":
         import re
@@ -1024,7 +983,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start_text_default":
         await patch(db, "start_message", {"text": DEFAULT_START_TEXT}, {"enabled": True})
         preview = plain_preview(DEFAULT_START_TEXT).replace("{user_mention}", query.from_user.full_name if query.from_user else "User")
-        await query.answer("✅ Start message restored to the recommended default.\n\n" + preview[:130], show_alert=True)
+        await query.answer("✅ Start caption restored to the recommended default.\n\n" + preview[:130], show_alert=True)
         await render_start_text(query)
         return
     elif action == "start_button":
@@ -1057,7 +1016,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start_poster": await render_start_poster(query)
     elif action == "start_poster_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="start_poster")
-        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new start message poster here.")
+        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new start media here.")
     elif action == "start_poster_remove":
         await db.settings.update_one({"key": "start_message"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
         if query.message: await tracked_answer(query.message, state, "✨ Successfully removed your bot start poster.")
@@ -1152,7 +1111,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "invalid_text": await render_invalid_text(query)
     elif action == "invalid_text_edit":
         await show_input_prompt(query, state, "invalid_text",
-            "Send the new Invalid Message text. Telegram bold, italic, quotes and monospace formatting will be preserved.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — owner link\n<code>{hindi_anime}</code> — Lexi Anime Hindi link",
+            "Send the new Invalid Caption text. Telegram bold, italic, quotes and monospace formatting will be preserved.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — owner link\n<code>{hindi_anime}</code> — Lexi Anime Hindi link",
             "invalid")
     elif action == "invalid_text_see":
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
@@ -1205,10 +1164,10 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "invalid_poster": await render_poster(query)
     elif action == "poster_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="poster")
-        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new invalid-post poster here.")
+        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new invalid itemer here.")
     elif action == "poster_remove":
         await db.settings.update_one({"key": "invalid_post"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
-        if query.message: await tracked_answer(query.message, state, "✨ Invalid-post poster removed successfully.")
+        if query.message: await tracked_answer(query.message, state, "✨ Invalid itemer removed successfully.")
         await render_poster(query)
     elif action == "invalid_about": await render_about(query, db)
     elif action == "invalid_about_toggle":
@@ -1226,68 +1185,27 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await state.set_state(SettingInput.waiting)
             await state.update_data(field="file_animation_text", animation_panel_chat_id=query.message.chat.id if query.message else None, animation_panel_message_id=query.message.message_id if query.message else None)
             if query.message:
-                await tracked_answer(query.message, state, "Send the File Animation text. It will briefly appear before each file or batch delivery.")
-    elif action == "animation_prefix":
-        cfg = await db.settings.find_one({"key": "animation"}) or {}
-        if cfg.get("prefix_enabled", bool(cfg.get("prefix"))):
-            await db.settings.update_one(
-                {"key": "animation"},
-                {"$set": {"key": "animation", "prefix_enabled": False, "prefix": ""}},
-                upsert=True,
-            )
-            await render_animation(query, db)
-        else:
-            await state.set_state(SettingInput.waiting)
-            await state.update_data(
-                field="animation_prefix",
-                animation_panel_chat_id=query.message.chat.id if query.message else None,
-                animation_panel_message_id=query.message.message_id if query.message else None,
-            )
-            if query.message: await tracked_answer(query.message, state, "Send the prefix text to enable Prefix.")
+                await tracked_answer(query.message, state, "Send the Blink text. It will briefly appear before each file or batch delivery.")
     elif action == "animation_frames":
-        cfg = await db.settings.find_one({"key": "animation"}) or {}
-        if cfg.get("frames_enabled", True):
-            await db.settings.update_one(
-                {"key": "animation"},
-                {"$set": {"key": "animation", "frames_enabled": False},
-                 "$unset": {"frames": ""}},
-                upsert=True,
-            )
-            await render_animation(query, db)
-        else:
-            await state.set_state(SettingInput.waiting)
-            await state.update_data(
-                field="animation_frame_1",
-                pending_frames=[],
-                animation_panel_chat_id=query.message.chat.id if query.message else None,
-                animation_panel_message_id=query.message.message_id if query.message else None,
-            )
-            if query.message: await tracked_answer(query.message, state, "Send frame 1 of 5 for the loop animation.")
-    elif action == "animation_toggle":
-        cfg = await db.settings.find_one({"key": "animation"}) or {}
-        await patch(db, "animation", {"enabled": not cfg.get("enabled", False)}, {"prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "frames": [".", "..", "...", "....", "....."], "speed": 0.25, "mode": "force_join_poster"})
+        await state.set_state(SettingInput.waiting)
+        await state.update_data(field="animation_frames_collect", pending_frames=[], animation_panel_chat_id=query.message.chat.id if query.message else None, animation_panel_message_id=query.message.message_id if query.message else None)
+        if query.message:
+            await tracked_answer(query.message, state, "Send frame 1 of 6. Send at least 4 frames, then /done to save (maximum 6).")
+    elif action == "animation_mode_toggle":
+        cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
+        order = ("message", "poster", "disabled")
+        current = cfg.get("mode", "disabled")
+        next_mode = order[(order.index(current) + 1) % len(order)] if current in order else "message"
+        await db.settings.update_one({"key": "animation"}, {"$set": {"mode": next_mode, "enabled": next_mode != "disabled"}, "$unset": {"prefix": "", "prefix_enabled": "", "frames_enabled": ""}}, upsert=True)
         await render_animation(query, db)
     elif action == "animation_speed":
-        cfg = await db.settings.find_one({"key": "animation"}) or {}
-        speed = float(cfg.get("speed", 1.0))
-        speed = min(1.0, max(0.25, speed))
-        next_speed = round(0.25 + ((round((speed - 0.25) / 0.05) + 1) % 16) * 0.05, 2)
-        await patch(db, "animation", {"speed": next_speed}, {"enabled": False, "prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "frames": [".", "..", "...", "....", "....."], "mode": "force_join_poster"})
-        await render_animation(query, db)
-    elif action == "animation_mode_toggle":
-        cfg = await db.settings.find_one({"key": "animation"}) or {}
-        current = cfg.get("mode", "force_join_poster")
-        await patch(db, "animation", {"mode": "new_message" if current != "new_message" else "force_join_poster"}, {"enabled": False, "prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "frames": [".", "..", "...", "....", "....."], "speed": 0.25})
+        cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
+        speed = float(cfg.get("speed", 0.25))
+        steps = int(round((speed - 0.20) / 0.05))
+        next_speed = round(0.20 + ((steps + 1) % 17) * 0.05, 2)
+        await db.settings.update_one({"key": "animation"}, {"$set": {"speed": next_speed}}, upsert=True)
         await render_animation(query, db)
     elif action == "animation_mode":
-        cfg = await db.settings.find_one({"key": "animation"}) or {}
-        await edit_page(query, f"MODE\n\nNew Message: Run the animation in a separate message.\n\nForce Join Poster: Run the animation on the force-join poster.\n\nCurrent mode: {cfg.get('mode', 'force_join_poster')}", kb([
-            [("NEW MESSAGE", "settings:animation_mode_new"), ("FORCE JOIN POSTER", "settings:animation_mode_poster")],
-            [("《 BACK", "settings:forcejoin_animation")],
-        ]))
-    elif action in ("animation_mode_new", "animation_mode_poster"):
-        mode = _animation_mode_for_action(action)
-        await patch(db, "animation", {"mode": mode}, {"enabled": False, "prefix": "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ...", "frames": [".", "..", "...", "....", "....."], "speed": 0.25})
         await render_animation(query, db)
     elif action == "shortener": await render_shortener(query, db)
     elif action == "shortener_add":
@@ -1338,13 +1256,13 @@ async def handle_button_settings_reply_keyboard(message: Message, state: FSMCont
         await clear_state_preserving_prompts(state)
         # Return directly to the parent settings page while removing the reply keyboard.
         if kind == "start":
-            parent_text = format_settings_page("START MESSAGE\nCustomize your bot's start message using the following options.")
+            parent_text = format_settings_page("START\nCustomize your bot's start message using the following options.")
             parent_kb = kb([
-                [("DISABLE/ENABLE", "settings:start_toggle")], [("BUTTON", "settings:start_button"), ("START TEXT", "settings:start_text")],
-                [("START POSTER", "settings:start_poster"), ("ABOUT BUTTON", "settings:start_about")], [("《 BACK", "settings:home")],
+                [("DISABLE/ENABLE", "settings:start_toggle")], [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
+                [("MEDIA", "settings:start_poster"), ("ABOUT BUTTON", "settings:start_about")], [("《 BACK", "settings:home")],
             ])
         else:
-            parent_text = format_settings_page("INVALID POST\nSet a response for users who send normal messages to the bot.")
+            parent_text = format_settings_page("INVALID\nSet a response for users who send normal messages to the bot.")
             parent_kb = kb([
                 [("DISABLE/ENABLE", "settings:invalid_toggle")], [("TEXT", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
                 [("POSTER", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")], [("《 BACK", "settings:home")],
@@ -1387,8 +1305,8 @@ async def send_button_settings_reply_panel(message: Message, db, kind: str, pane
     status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", True) if is_start else bool(cfg.get("button_text") and cfg.get("button_url"))) else "OFF ❌"
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
-    title = "START MESSAGE BUTTONS" if is_start else "INVALID POST BUTTONS"
-    body = "Customize buttons shown with your start message." if is_start else "Customize buttons shown with invalid posts."
+    title = "START BUTTONS" if is_start else "INVALID BUTTONS"
+    body = "Customize buttons shown with your start message." if is_start else "Customize buttons shown with invalid items."
     markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=f"1 {status1}"), KeyboardButton(text=f"2 {status2}")], [KeyboardButton(text=f"3 {status3}")], [KeyboardButton(text="《 BACK")]], resize_keyboard=True)
     page_text = format_settings_page(f"{title}\n{body}\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}")
     edited = False
@@ -1423,12 +1341,12 @@ async def cancel_setting_input(message: Message, state: FSMContext):
 
 @router.message(SettingInput.waiting)
 async def receive_setting_input(message: Message, state: FSMContext, settings: Settings, database):
-    if message.text and message.text.startswith("/"):
+    data = await state.get_data()
+    field = data.get("field")
+    if message.text and message.text.startswith("/") and not (field == "animation_frames_collect" and message.text.split()[0].lower() == "/done"):
         raise SkipHandler
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
-    data = await state.get_data()
-    field = data.get("field")
     db = database.db
     value = (message.text or "").strip()
 
@@ -1466,7 +1384,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             panel_text, panel_markup = await build_forcejoin_page(message.bot, db, settings)
             try:
                 # The Add page is the existing settings panel: turn it back into
-                # the Force Join page so the newly added chat appears immediately.
+                # the Force Sub page so the newly added chat appears immediately.
                 await message.bot.edit_message_text(
                     chat_id=panel_chat_id,
                     message_id=panel_message_id,
@@ -1506,7 +1424,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         except TelegramAPIError:
             pass
         if shared.request_id not in (5101, 5102):
-            await tracked_answer(message, state, "That chat selection expired. Open /settings → Force Join → Add again.")
+            await tracked_answer(message, state, "That chat selection expired. Open /settings → Force Sub → Add again.")
             await clear_state_preserving_prompts(state)
             return
         expected_type = "channel" if shared.request_id == 5102 else "group"
@@ -1544,12 +1462,12 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         if channel_id in channels or (chat.username and "@" + chat.username in channels):
             await remove_temporary_prompts(message.bot, data)
             await clear_state_preserving_prompts(state)
-            await tracked_answer(message, state, "That Force Join chat is already configured.", reply_markup=ReplyKeyboardRemove())
+            await tracked_answer(message, state, "That Force Sub chat is already configured.", reply_markup=ReplyKeyboardRemove())
             return
         if len(channels) >= 10:
             await remove_temporary_prompts(message.bot, data)
             await clear_state_preserving_prompts(state)
-            await tracked_answer(message, state, "Maximum 10 Force Join channels/groups are allowed.", reply_markup=ReplyKeyboardRemove())
+            await tracked_answer(message, state, "Maximum 10 Force Sub channels/groups are allowed.", reply_markup=ReplyKeyboardRemove())
             return
         # Public chats can always use their stable username URL. Private chats
         # require an explicit mode choice after selection.
@@ -1697,84 +1615,50 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         return
     if field == "file_animation_text":
         if not message.text or not value:
-            await tracked_answer(message, state, "Please send non-empty File Animation text.")
+            await tracked_answer(message, state, "Please send non-empty Blink text.")
             return
         panel_chat_id = data.get("animation_panel_chat_id")
         panel_message_id = data.get("animation_panel_message_id")
         await db.settings.update_one({"key": "animation"}, {"$set": {"file_animation_text": formatted_input_text(message, value)}}, upsert=True)
         await clear_state_preserving_prompts(state)
         await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
-        await tracked_answer(message, state, "✨ File Animation text saved and enabled.")
+        await tracked_answer(message, state, "✨ Blink text saved and enabled.")
         return
-    if field == "animation_prefix":
-        panel_chat_id = data.get("animation_panel_chat_id")
-        panel_message_id = data.get("animation_panel_message_id")
-        await patch(db, "animation", {"prefix": normalize_animation_prefix(value), "prefix_enabled": True}, {"enabled": False, "frames": [".", "..", "...", "....", "....."], "speed": 0.25, "mode": "force_join_poster"})
-        await clear_state_preserving_prompts(state)
-        await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
-        await tracked_answer(message, state, "✨ Animation prefix enabled and saved successfully.")
-        return
-    if field in ("animation_frame_1", "animation_frame_2", "animation_frame_3", "animation_frame_4", "animation_frame_5"):
+    if field == "animation_frames_collect":
+        frames = list(data.get("pending_frames", []))
+        if value.lower() == "/done":
+            if len(frames) < 4:
+                await tracked_answer(message, state, f"At least 4 frames are required. You have {len(frames)}; send more or /cancel.")
+                return
+            animation_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
+            await db.settings.update_one(
+                {"key": "animation"},
+                {"$set": {"key": "animation", "frames": frames, "speed": animation_cfg["speed"], "mode": animation_cfg["mode"], "enabled": animation_cfg["enabled"]},
+                 "$unset": {"prefix": "", "prefix_enabled": "", "frames_enabled": ""}},
+                upsert=True,
+            )
+            saved_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
+            if saved_cfg.get("frames") != frames:
+                await tracked_answer(message, state, "❌ Frames could not be verified in the database. Please retry.")
+                return
+            panel_chat_id = data.get("animation_panel_chat_id")
+            panel_message_id = data.get("animation_panel_message_id")
+            await clear_state_preserving_prompts(state)
+            refreshed_id = await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
+            if not refreshed_id and panel_chat_id:
+                text, markup = build_animation_page(saved_cfg)
+                await message.bot.send_message(chat_id=panel_chat_id, text=format_settings_page(text), parse_mode="HTML", reply_markup=markup, link_preview_options={"is_disabled": True})
+            await tracked_answer(message, state, f"✨ Saved {len(frames)} animation frames.")
+            return
         if not message.text or not value:
             await tracked_answer(message, state, "Please send a non-empty text frame.")
             return
-        frames = list(data.get("pending_frames", []))
-        # Each input corresponds to exactly one numbered step. Recover from
-        # stale FSM data instead of appending duplicate/skipped frames.
-        expected_index = int(str(field).rsplit("_", 1)[1]) - 1
-        if len(frames) != expected_index:
-            frames = frames[:expected_index]
-            if len(frames) != expected_index:
-                await state.update_data(field="animation_frame_1", pending_frames=[])
-                await tracked_answer(message, state, "Frame session reset. Send frame 1 of 5 again.")
-                return
-        # Store Telegram's HTML representation, not plain message.text, so
-        # bold/italic/underline/mono/spoiler/link entities survive delivery.
-        frame_value = formatted_input_text(message, value)
-        frames.append(frame_value)
-        if len(frames) < 5:
-            next_field = f"animation_frame_{len(frames)+1}"
-            await state.update_data(field=next_field, pending_frames=frames)
-            prompts = {1: "Send frame 2 of 5.", 2: "Send frame 3 of 5.", 3: "Send frame 4 of 5.", 4: "Send frame 5 of 5."}
-            await tracked_answer(message, state, prompts[len(frames)])
+        if len(frames) >= 6:
+            await tracked_answer(message, state, "Maximum 6 frames reached. Send /done to save them.")
             return
-
-        animation_cfg = await db.settings.find_one({"key": "animation"}) or {}
-        frame_values = {"frames": frames, "frames_enabled": True, "enabled": True}
-        if not animation_cfg.get("prefix"):
-            frame_values["prefix"] = "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ..."
-            frame_values["prefix_enabled"] = False
-
-        # Write the complete five-frame sequence atomically, then read it back
-        # before reporting success or refreshing the status panel.
-        await db.settings.update_one(
-            {"key": "animation"},
-            {"$set": {"key": "animation", **frame_values}},
-            upsert=True,
-        )
-        saved_cfg = await db.settings.find_one({"key": "animation"}) or {}
-        if saved_cfg.get("frames") != frames or saved_cfg.get("frames_enabled") is not True:
-            await tracked_answer(message, state, "❌ Frames could not be verified in the database. Please retry.")
-            return
-
-        panel_chat_id = data.get("animation_panel_chat_id")
-        panel_message_id = data.get("animation_panel_message_id")
-        await clear_state_preserving_prompts(state)
-        refreshed_id = await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
-        if not refreshed_id and panel_chat_id:
-            # Keep status visible even if the original settings panel is stale.
-            text, markup = build_animation_page(saved_cfg)
-            replacement = await message.bot.send_message(
-                chat_id=panel_chat_id, text=format_settings_page(text),
-                parse_mode="HTML", reply_markup=markup,
-                link_preview_options={"is_disabled": True},
-            )
-            if panel_message_id:
-                try:
-                    await message.bot.delete_message(chat_id=panel_chat_id, message_id=panel_message_id)
-                except TelegramAPIError:
-                    pass
-        await tracked_answer(message, state, "✨ All 5 animation frames were saved and the status panel was refreshed.")
+        frames.append(formatted_input_text(message, value))
+        await state.update_data(field="animation_frames_collect", pending_frames=frames)
+        await tracked_answer(message, state, f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 4 frames.")
         return
     if field == "forcejoin_label":
         if not value or len(value) > 64:
@@ -1788,12 +1672,12 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             return
         await save_force_join_channel_label(message.bot, db, channel, value)
         await clear_state_preserving_prompts(state)
-        await tracked_answer(message, state, f"✨ Successfully updated button text for {channel} force-join button.")
+        await tracked_answer(message, state, f"✨ Successfully updated button text for {channel} force-sub button.")
         return
     if field == "forcejoin_message":
         value = formatted_input_text(message, value)
         await patch(db, "force_join", {"message": value})
-        await finish_input_panel(message, state, "FORCE JOIN MESSAGE", "forcejoin")
+        await finish_input_panel(message, state, "FORCE SUB MESSAGE", "forcejoin")
         await clear_state_preserving_prompts(state)
         return
     if field == "forcejoin_verify_text":
@@ -1814,7 +1698,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         return
     if field == "forcejoin_channel":
         await clear_state_preserving_prompts(state)
-        await tracked_answer(message, state, "Please add a Group or Channel using the chat-selection keyboard from /settings → Force Join → Add.")
+        await tracked_answer(message, state, "Please add a Group or Channel using the chat-selection keyboard from /settings → Force Sub → Add.")
         return
     if field == "start_poster":
         if message.animation:
@@ -1833,7 +1717,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         else:
             await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
             return
-        await clear_state_preserving_prompts(state); await tracked_answer(message, state, "✨ Invalid-post poster updated successfully."); return
+        await clear_state_preserving_prompts(state); await tracked_answer(message, state, "✨ Invalid itemer updated successfully."); return
     if not value:
         await tracked_answer(message, state, "Please send a non-empty value.")
         return
@@ -1891,7 +1775,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     if field == "start_text":
         value = formatted_input_text(message, value)
         await patch(db, "start_message", {"text": value}, {"enabled": True})
-        await finish_input_panel(message, state, "START MESSAGE TEXT", "start_text")
+        await finish_input_panel(message, state, "CAPTION", "start_text")
         await clear_state_preserving_prompts(state)
         return
     elif field == "start_button_text":
@@ -1929,12 +1813,12 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     elif field == "invalid_text":
         value = formatted_input_text(message, value)
         await patch(db, "invalid_post", {"text": value}, {"enabled": False, "about_enabled": False})
-        await finish_input_panel(message, state, "INVALID MESSAGE TEXT", "invalid")
+        await finish_input_panel(message, state, "INVALID TEXT", "invalid")
         await clear_state_preserving_prompts(state)
         return
     elif field == "invalid_button_text":
         await state.update_data(button_text=value, field="invalid_button_link")
-        await tracked_answer(message, state, "Send new button link for the invalid post.")
+        await tracked_answer(message, state, "Send new button link for the invalid item.")
         return
     elif field == "invalid_button_link":
         parsed = urlparse(value)
@@ -1945,7 +1829,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         values = {"button_url": value}
         if prev.get("button_text"): values["button_text"] = prev["button_text"]
         await patch(db, "invalid_post", values, {"enabled": False})
-        await tracked_answer(message, state, "✨ Successfully updated invalid post button link.")
+        await tracked_answer(message, state, "✨ Successfully updated invalid item button link.")
     elif field == "shortener_url":
         normalized_url = normalize_http_url(value)
         if not normalized_url:
@@ -1995,7 +1879,7 @@ async def setstart(m: Message, settings: Settings, database):
     p=(m.text or "").split(maxsplit=1)
     if len(p)!=2 or p[1].lower() not in ("on","off"): await m.answer("Usage: /setstart on|off"); return
     await patch(database.db, "start_message", {"enabled": p[1].lower()=="on"}, {"text": DEFAULT_START_TEXT, "button_enabled": True, "button_text": "📟 UPDATE CHANNEL", "button_url": "http://t.me/lexiAnime", "about_enabled": True})
-    await m.answer("Start message setting updated.")
+    await m.answer("Start setting updated.")
 
 @router.message(Command("setstarttext"))
 async def setstarttext(m: Message, settings: Settings, database):
@@ -2011,7 +1895,7 @@ async def setinvalid(m: Message, settings: Settings, database):
     p=(m.text or "").split(maxsplit=1)
     if len(p)!=2 or p[1].lower() not in ("on","off"): await m.answer("Usage: /setinvalid on|off"); return
     await patch(database.db, "invalid_post", {"enabled":p[1].lower()=="on"}, {"text":DEFAULT_INVALID, "about_enabled": False})
-    await m.answer("Invalid-post setting updated.")
+    await m.answer("Invalid setting updated.")
 
 @router.message(Command("setinvalidtext"))
 async def setinvalidtext(m: Message, settings: Settings, database):
