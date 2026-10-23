@@ -86,7 +86,7 @@ def animation_frame_text(frame: str) -> str:
     """Render a saved frame while preserving Telegram HTML formatting."""
     import re
     frame_text = str(frame or "")
-    if not re.search(r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote|tg-spoiler|tg-emoji|a)\\b|&(?:amp|lt|gt|quot|#\\d+|#x[0-9a-f]+);", frame_text, flags=re.IGNORECASE):
+    if not re.search(r"</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote|tg-spoiler|tg-emoji|a)\b|&(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);", frame_text, flags=re.IGNORECASE):
         frame_text = html.escape(frame_text)
     return frame_text
 
