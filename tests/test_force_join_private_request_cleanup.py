@@ -303,32 +303,39 @@ async def test_stale_private_force_join_invite_is_recreated_when_channel_metadat
 
 
 @pytest.mark.asyncio
-async def test_public_force_join_url_is_canonical_without_unneeded_database_write():
+async def test_public_force_join_also_uses_temporary_rotating_invites():
     from app.handlers.start import resolve_force_join_button_target
 
-    class SettingsCollection:
+    class LinksCollection:
         def __init__(self):
-            self.updates = []
+            self.records = []
 
-        async def update_one(self, query, update, upsert=False):
-            self.updates.append((query, update, upsert))
+        async def find_one(self, query):
+            return None
+
+        async def update_many(self, query, update):
+            pass
+
+        async def insert_one(self, record):
+            self.records.append(record)
 
     class FakeBot:
         async def get_chat(self, chat_id):
             return SimpleNamespace(id=-100123, title="Public Channel", type="channel", username="public_channel")
 
-    settings = SettingsCollection()
+        async def create_chat_invite_link(self, **kwargs):
+            assert kwargs["chat_id"] == -100123
+            assert kwargs["creates_join_request"] is False
+            return SimpleNamespace(invite_link="https://t.me/+temporary_public_invite")
+
+    links = LinksCollection()
     target = await resolve_force_join_button_target(
         FakeBot(),
-        SimpleNamespace(settings=settings),
+        SimpleNamespace(settings=SimpleNamespace(), force_join_links=links),
         "-100123",
-        {
-            "button_url": "https://t.me/public_channel",
-            "channel_title": "Public Channel",
-            "chat_type": "channel",
-            "mode": "normal",
-        },
+        {"mode": "normal"},
     )
 
-    assert target == "https://t.me/public_channel"
-    assert settings.updates == []
+    assert target == "https://t.me/+temporary_public_invite"
+    assert links.records[0]["mode"] == "normal"
+    assert links.records[0]["expires_at"] - links.records[0]["created_at"] == timedelta(minutes=10)
