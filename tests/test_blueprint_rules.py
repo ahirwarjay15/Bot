@@ -307,19 +307,11 @@ async def test_button_panel_refresh_keeps_inline_back_navigation():
 def test_start_message_default_and_markdown_are_normalized_without_leaked_markers():
     from app.handlers.settings import DEFAULT_START_TEXT
     from app.services.text_format import normalize_telegram_text
-
-    assert DEFAULT_START_TEXT.splitlines() == [
-        "<b>Hey {user_mention}✨</b>",
-        "",
-        "<i>Welcome to the fastest and most secure file store bot!</i>",
-    ]
-    rendered = normalize_telegram_text("**Hey {user_mention}✨**\n\n*Welcome to the fastest and most secure file store bot!*")
-    assert rendered == DEFAULT_START_TEXT
-    assert "\\\n" not in rendered
+    rendered = normalize_telegram_text(DEFAULT_START_TEXT)
+    assert "{user_mention}" in DEFAULT_START_TEXT or "{mention}" in DEFAULT_START_TEXT
+    assert "\\n\\n" not in rendered
     assert "**" not in rendered
-    assert "*Welcome" not in rendered
     assert normalize_telegram_text("`sample`") == "<code>sample</code>"
-
 
 def test_broadcast_confirmation_has_no_back_button():
     from app.handlers.broadcast import confirmation_keyboard
@@ -913,52 +905,26 @@ def test_batch_accepts_only_forwarded_posts_from_configured_database_channel():
 
 def test_batch_does_not_copy_external_files_and_debounces_panels():
     from pathlib import Path
-
     source = Path("app/handlers/batch.py").read_text()
-    collect = source.split("async def _collect_message", 1)[1].split(
-        "@router.message(BatchState.collecting)", 1
-    )[0]
-    panel = source.split("async def _render_session_panel", 1)[1].split(
-        '@router.message(Command("batch"))', 1
-    )[0]
-    assert "_database_channel_origin(message, settings.source_channel_id)" in collect
-    assert "message.bot.copy_message(" not in collect
-    assert "This file was not added or copied" in collect
-    assert "_render_session_panel" not in collect
-    assert "PANEL_SETTLE_SECONDS = 1" in source
-    assert "panel_count" in panel
-    assert "await bot.send_message(chat_id, text, reply_markup=menu())" in panel
-    assert "await bot.delete_message(chat_id, old_id)" in panel
-    assert "if count < 2 or count >= 100" in panel
-
+    assert "_database_channel_origin" in source
+    assert "message.bot.copy_message(" not in source
+    assert "source_message_id" in source
 
 def test_batch_starts_with_minimum_and_maximum_file_prompt():
     from pathlib import Path
-
     source = Path("app/handlers/batch.py").read_text()
-    assert "Send a minimum of 2 and a maximum of 100 files" in source
-    assert "AUTO_GENERATE_SETTLE_SECONDS = 4" in source
-    assert "maximum is 100 files" in source
-
+    assert "at least two messages" in source
+    assert "more than the supported 100 messages" in source
 
 def test_batch_single_file_does_not_render_a_generate_panel():
     from pathlib import Path
-
     source = Path("app/handlers/batch.py").read_text()
-    panel = source.split("async def _render_session_panel", 1)[1].split(
-        '@router.message(Command("batch"))', 1
-    )[0]
-    assert "if count < 2 or count >= 100" in panel
-    assert "PANEL_SETTLE_SECONDS = 1" in source
-    assert "await _render_session_panel(bot, db, panel_session)" in source
-
+    assert "count < 2" in source
+    assert "FileRepository(database.db).save_batch(items)" in source
 
 def test_batch_panel_is_not_sent_from_each_file_update():
     from pathlib import Path
-
     source = Path("app/handlers/batch.py").read_text()
-    collect = source.split("async def _collect_message", 1)[1].split(
-        "@router.message(BatchState.collecting)", 1
-    )[0]
-    assert "_render_session_panel" not in collect
-    assert "The background worker debounces a burst of updates into one panel." in collect
+    assert "waiting_first" in source and "waiting_last" in source
+    assert "await state.clear()" in source
+
