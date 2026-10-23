@@ -604,13 +604,13 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
                     animation_post = await bot.send_photo(user.id, cfg["poster_photo_id"])
                 else:
                     animation_post = None
-                # Animate a separate text message; the final Force Sub post is sent fresh with its poster.
-                text_animation_cfg = {**animation_cfg, "mode": "message"}
-                await _start_gate_animation(
-                    bot, user.id, payload, animation_post or message, "",
-                    InlineKeyboardMarkup(inline_keyboard=[]), text_animation_cfg,
-                    animation_only=True,
-                )
+                # Poster mode animates directly in the poster's caption; never create a separate text animation.
+                if animation_post:
+                    await _start_gate_animation(
+                        bot, user.id, payload, animation_post, "",
+                        InlineKeyboardMarkup(inline_keyboard=[]), animation_cfg,
+                        animation_only=True,
+                    )
             except TelegramAPIError:
                 log.warning("Could not create Force Sub animation poster during deeplink check", exc_info=True)
                 animation_post = None
