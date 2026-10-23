@@ -58,7 +58,7 @@ def test_animation_modes_use_message_poster_disabled_cycle():
     text, markup = build_animation_page({"mode": "message", "enabled": True, "frames": ["1", "2", "3", "4"], "speed": 0.25})
     assert "Status: Message" in text
     mode_button = next(button for row in markup.inline_keyboard for button in row if button.callback_data == "settings:animation_mode_toggle")
-    assert mode_button.text == "MODE"
+    assert mode_button.text == "ᴍᴏᴅᴇ"
 def test_settings_buttons_use_small_caps_with_required_exceptions():
     from app.handlers.settings import unicode_buttons
 
@@ -384,8 +384,8 @@ async def test_force_sub_settings_page_uses_real_line_breaks():
     class Database:
         settings = SettingsCollection()
     text, _ = await build_forcejoin_page(FakeBot(), Database(), SimpleNamespace(force_join_channels=[]))
-    assert "FORCE SUB\\n\\n" in text
-    assert r"FORCE SUB\\n\\n" not in text
+    assert "FORCE SUB\n\n" in text
+    assert r"FORCE SUB\n\n" not in text
 def test_message_animation_is_removed_only_after_replacement_post():
     from pathlib import Path
     source = Path("app/handlers/start.py").read_text()
