@@ -1343,12 +1343,12 @@ async def cancel_setting_input(message: Message, state: FSMContext):
 
 @router.message(SettingInput.waiting)
 async def receive_setting_input(message: Message, state: FSMContext, settings: Settings, database):
-    if message.text and message.text.startswith("/"):
+    data = await state.get_data()
+    field = data.get("field")
+    if message.text and message.text.startswith("/") and not (field == "animation_frames_collect" and message.text.split()[0].lower() == "/done"):
         raise SkipHandler
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
-    data = await state.get_data()
-    field = data.get("field")
     db = database.db
     value = (message.text or "").strip()
 
@@ -1626,75 +1626,41 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
         await tracked_answer(message, state, "✨ Blink text saved and enabled.")
         return
-    if field == "animation_prefix":
-        panel_chat_id = data.get("animation_panel_chat_id")
-        panel_message_id = data.get("animation_panel_message_id")
-        await patch(db, "animation", {"prefix": normalize_animation_prefix(value), "prefix_enabled": True}, {"enabled": False, "frames": [".", "..", "...", "....", "....."], "speed": 0.25, "mode": "force_join_poster"})
-        await clear_state_preserving_prompts(state)
-        await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
-        await tracked_answer(message, state, "✨ Animation prefix enabled and saved successfully.")
-        return
-    if field in ("animation_frame_1", "animation_frame_2", "animation_frame_3", "animation_frame_4", "animation_frame_5"):
+    if field == "animation_frames_collect":
+        frames = list(data.get("pending_frames", []))
+        if value.lower() == "/done":
+            if len(frames) < 4:
+                await tracked_answer(message, state, f"At least 4 frames are required. You have {len(frames)}; send more or /cancel.")
+                return
+            animation_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
+            await db.settings.update_one(
+                {"key": "animation"},
+                {"$set": {"key": "animation", "frames": frames, "speed": animation_cfg["speed"], "mode": animation_cfg["mode"], "enabled": animation_cfg["enabled"]},
+                 "$unset": {"prefix": "", "prefix_enabled": "", "frames_enabled": ""}},
+                upsert=True,
+            )
+            saved_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
+            if saved_cfg.get("frames") != frames:
+                await tracked_answer(message, state, "❌ Frames could not be verified in the database. Please retry.")
+                return
+            panel_chat_id = data.get("animation_panel_chat_id")
+            panel_message_id = data.get("animation_panel_message_id")
+            await clear_state_preserving_prompts(state)
+            refreshed_id = await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
+            if not refreshed_id and panel_chat_id:
+                text, markup = build_animation_page(saved_cfg)
+                await message.bot.send_message(chat_id=panel_chat_id, text=format_settings_page(text), parse_mode="HTML", reply_markup=markup, link_preview_options={"is_disabled": True})
+            await tracked_answer(message, state, f"✨ Saved {len(frames)} animation frames.")
+            return
         if not message.text or not value:
             await tracked_answer(message, state, "Please send a non-empty text frame.")
             return
-        frames = list(data.get("pending_frames", []))
-        # Each input corresponds to exactly one numbered step. Recover from
-        # stale FSM data instead of appending duplicate/skipped frames.
-        expected_index = int(str(field).rsplit("_", 1)[1]) - 1
-        if len(frames) != expected_index:
-            frames = frames[:expected_index]
-            if len(frames) != expected_index:
-                await state.update_data(field="animation_frame_1", pending_frames=[])
-                await tracked_answer(message, state, "Frame session reset. Send frame 1 of 5 again.")
-                return
-        # Store Telegram's HTML representation, not plain message.text, so
-        # bold/italic/underline/mono/spoiler/link entities survive delivery.
-        frame_value = formatted_input_text(message, value)
-        frames.append(frame_value)
-        if len(frames) < 5:
-            next_field = f"animation_frame_{len(frames)+1}"
-            await state.update_data(field=next_field, pending_frames=frames)
-            prompts = {1: "Send frame 2 of 5.", 2: "Send frame 3 of 5.", 3: "Send frame 4 of 5.", 4: "Send frame 5 of 5."}
-            await tracked_answer(message, state, prompts[len(frames)])
+        if len(frames) >= 6:
+            await tracked_answer(message, state, "Maximum 6 frames reached. Send /done to save them.")
             return
-
-        animation_cfg = await db.settings.find_one({"key": "animation"}) or {}
-        frame_values = {"frames": frames, "frames_enabled": True, "enabled": True}
-        if not animation_cfg.get("prefix"):
-            frame_values["prefix"] = "ᴄʜᴇᴄᴋɪɴɢ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ..."
-            frame_values["prefix_enabled"] = False
-
-        # Write the complete five-frame sequence atomically, then read it back
-        # before reporting success or refreshing the status panel.
-        await db.settings.update_one(
-            {"key": "animation"},
-            {"$set": {"key": "animation", **frame_values}},
-            upsert=True,
-        )
-        saved_cfg = await db.settings.find_one({"key": "animation"}) or {}
-        if saved_cfg.get("frames") != frames or saved_cfg.get("frames_enabled") is not True:
-            await tracked_answer(message, state, "❌ Frames could not be verified in the database. Please retry.")
-            return
-
-        panel_chat_id = data.get("animation_panel_chat_id")
-        panel_message_id = data.get("animation_panel_message_id")
-        await clear_state_preserving_prompts(state)
-        refreshed_id = await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
-        if not refreshed_id and panel_chat_id:
-            # Keep status visible even if the original settings panel is stale.
-            text, markup = build_animation_page(saved_cfg)
-            replacement = await message.bot.send_message(
-                chat_id=panel_chat_id, text=format_settings_page(text),
-                parse_mode="HTML", reply_markup=markup,
-                link_preview_options={"is_disabled": True},
-            )
-            if panel_message_id:
-                try:
-                    await message.bot.delete_message(chat_id=panel_chat_id, message_id=panel_message_id)
-                except TelegramAPIError:
-                    pass
-        await tracked_answer(message, state, "✨ All 5 animation frames were saved and the status panel was refreshed.")
+        frames.append(formatted_input_text(message, value))
+        await state.update_data(field="animation_frames_collect", pending_frames=frames)
+        await tracked_answer(message, state, f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 4 frames.")
         return
     if field == "forcejoin_label":
         if not value or len(value) > 64:
