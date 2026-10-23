@@ -267,7 +267,8 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> 
     except TelegramAPIError:
         log.warning("Could not pre-generate Force Sub link for %s; retaining old link until expiry", channel, exc_info=True)
         return False
-    created = datetime.now(timezone.utc)
+    # Anchor DB timestamps to the exact expiry timestamp sent to Telegram.
+    created = now
     record = {
         "channel": channel,
         "chat_id": chat_id,
