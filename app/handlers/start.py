@@ -621,12 +621,12 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
 
 async def send_file_animation(bot, db, user_id: int) -> None:
     """Show the configured blink after delivery for one configured animation beat."""
-    cfg = await load_animation_config(db)
-    text = str(cfg.get("file_animation_text") or "").strip()
-    if not text:
-        return
     msg = None
     try:
+        cfg = await load_animation_config(db)
+        text = str(cfg.get("file_animation_text") or "").strip()
+        if not text:
+            return
         msg = await bot.send_message(user_id, text, parse_mode="HTML")
         await asyncio.sleep(cfg["speed"])
     except TelegramAPIError:
@@ -645,8 +645,8 @@ async def delete_start_command_after(message: Message, db) -> None:
         cfg = await load_animation_config(db)
         await asyncio.sleep(cfg["speed"])
         await message.delete()
-    except TelegramAPIError:
-        pass
+    except Exception:
+        log.debug("Could not delay/delete the incoming /start command", exc_info=True)
 
 
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
@@ -673,9 +673,13 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             code = token[:5]
             record = await repo.get_batch(code) if len(token) in (5, 20) else None
         else:
-            await message.answer("This link is invalid or expired.");return
+            await message.answer("This link is invalid or expired.")
+            await delete_start_command_after(message, database.db)
+            return
         if not record:
-            await message.answer("This link is invalid or expired.");return
+            await message.answer("This link is invalid or expired.")
+            await delete_start_command_after(message, database.db)
+            return
         if await gate_or_prompt(message,payload,settings,database,bot):
             await delete_start_command_after(message, database.db)
             return
