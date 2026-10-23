@@ -421,7 +421,7 @@ async def refresh_button_panel(bot, chat_id, message_id, db, kind):
     back = "settings:start" if is_start else "settings:invalid"
     prefix = "start" if is_start else "invalid"
     page_text = format_settings_page(
-        f"{title}\nCustomize buttons shown with {'your start message' if is_start else 'invalid posts'}.\n\n"
+        f"{title}\nCustomize buttons shown with {'your start message' if is_start else 'invalid items'}.\n\n"
         f"Button 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
     )
     keyboard = kb([
@@ -649,7 +649,7 @@ async def render_invalid_button(query, db):
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
-    text = f"INVALID BUTTONS\nCustomize buttons shown with invalid posts.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
+    text = f"INVALID BUTTONS\nCustomize buttons shown with invalid items.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
     await edit_page(query, text, kb([
         [(f"1 {status1}", "settings:invalid_button_toggle:1"), (f"2 {status2}", "settings:invalid_button_toggle:2")],
         [(f"3 {status3}", "settings:invalid_button_toggle:3"), (f"4 {status4}", "settings:invalid_button_toggle:4")],
@@ -659,14 +659,14 @@ async def render_invalid_button(query, db):
 
 
 async def render_poster(query):
-    await edit_page(query, "MEDIA\nAdd an image or GIF to your invalid post.", kb([
+    await edit_page(query, "MEDIA\nAdd an image or GIF to your invalid item.", kb([
         [("✚ ADD", "settings:poster_add"), ("REMOVE", "settings:poster_remove")],
         [("《 BACK", "settings:invalid")],
     ]))
 
 async def render_about(query, db):
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
-    await edit_page(query, f"ABOUT BUTTON\n\nChoose whether to show the About button with invalid posts.\n\nStatus: {'ENABLED ✅' if cfg.get('about_enabled', False) else 'DISABLED ❌'}", kb([
+    await edit_page(query, f"ABOUT BUTTON\n\nChoose whether to show the About button with invalid items.\n\nStatus: {'ENABLED ✅' if cfg.get('about_enabled', False) else 'DISABLED ❌'}", kb([
         [("DISABLE" if cfg.get("about_enabled", False) else "ENABLE", "settings:invalid_about_toggle")],
         [("《 BACK", "settings:invalid")],
     ]))
@@ -1016,7 +1016,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start_poster": await render_start_poster(query)
     elif action == "start_poster_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="start_poster")
-        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new start message poster here.")
+        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new start media here.")
     elif action == "start_poster_remove":
         await db.settings.update_one({"key": "start_message"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
         if query.message: await tracked_answer(query.message, state, "✨ Successfully removed your bot start poster.")
@@ -1164,10 +1164,10 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "invalid_poster": await render_poster(query)
     elif action == "poster_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="poster")
-        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new invalid poster here.")
+        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new invalid itemer here.")
     elif action == "poster_remove":
         await db.settings.update_one({"key": "invalid_post"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
-        if query.message: await tracked_answer(query.message, state, "✨ Invalid poster removed successfully.")
+        if query.message: await tracked_answer(query.message, state, "✨ Invalid itemer removed successfully.")
         await render_poster(query)
     elif action == "invalid_about": await render_about(query, db)
     elif action == "invalid_about_toggle":
@@ -1306,7 +1306,7 @@ async def send_button_settings_reply_panel(message: Message, db, kind: str, pane
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     title = "START BUTTONS" if is_start else "INVALID BUTTONS"
-    body = "Customize buttons shown with your start message." if is_start else "Customize buttons shown with invalid posts."
+    body = "Customize buttons shown with your start message." if is_start else "Customize buttons shown with invalid items."
     markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=f"1 {status1}"), KeyboardButton(text=f"2 {status2}")], [KeyboardButton(text=f"3 {status3}")], [KeyboardButton(text="《 BACK")]], resize_keyboard=True)
     page_text = format_settings_page(f"{title}\n{body}\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}")
     edited = False
@@ -1717,7 +1717,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         else:
             await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
             return
-        await clear_state_preserving_prompts(state); await tracked_answer(message, state, "✨ Invalid poster updated successfully."); return
+        await clear_state_preserving_prompts(state); await tracked_answer(message, state, "✨ Invalid itemer updated successfully."); return
     if not value:
         await tracked_answer(message, state, "Please send a non-empty value.")
         return
@@ -1818,7 +1818,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         return
     elif field == "invalid_button_text":
         await state.update_data(button_text=value, field="invalid_button_link")
-        await tracked_answer(message, state, "Send new button link for the invalid post.")
+        await tracked_answer(message, state, "Send new button link for the invalid item.")
         return
     elif field == "invalid_button_link":
         parsed = urlparse(value)
@@ -1829,7 +1829,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         values = {"button_url": value}
         if prev.get("button_text"): values["button_text"] = prev["button_text"]
         await patch(db, "invalid_post", values, {"enabled": False})
-        await tracked_answer(message, state, "✨ Successfully updated invalid post button link.")
+        await tracked_answer(message, state, "✨ Successfully updated invalid item button link.")
     elif field == "shortener_url":
         normalized_url = normalize_http_url(value)
         if not normalized_url:
