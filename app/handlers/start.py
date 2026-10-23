@@ -250,36 +250,45 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     if mode not in {"normal", "join_request"}:
         mode = "join_request"
     tracking_user_id = int(user_id) if user_id is not None else 0
-    # Channel metadata is saved when the admin configures Force Join. Avoid
-    # extra MongoDB writes (and legacy-link revocation) on every user request:
-    # all private-channel link creations run concurrently in the caller.
-    # Never revoke old links in the interactive Force Join path. Create a fresh
-    # link now; expiry/join cleanup workers revoke older links asynchronously.
+    links_collection = getattr(db, "force_join_links", None)
+    # Reuse one shared link for this chat/mode for five minutes. Telegram's
+    # expiry is ten minutes, giving the replacement period a safe overlap.
+    if links_collection is not None:
+        cached = await links_collection.find_one({
+            "chat_id": chat_id, "mode": mode, "is_rotation_current": True,
+            "refresh_at": {"$gt": now}, "expires_at": {"$gt": now},
+        })
+        if cached and cached.get("invite_link"):
+            return cached["invite_link"]
     try:
-        invite = await bot.create_chat_invite_link(chat_id=chat_id, expire_date=int(now.timestamp()) + 300,
-            creates_join_request=(mode == "join_request"))
+        invite = await bot.create_chat_invite_link(
+            chat_id=chat_id, expire_date=int(now.timestamp()) + 600,
+            creates_join_request=(mode == "join_request"),
+        )
     except TelegramAPIError:
-        log.exception("Could not create temporary Force Join link for %s", chat_id)
+        log.exception("Could not create rotating Force Join link for %s", chat_id)
         return None
     created = datetime.now(timezone.utc)
-    record = {"user_id": tracking_user_id, "chat_id": chat_id, "invite_link": invite.invite_link,
-        "mode": mode, "created_at": created, "refresh_at": created + timedelta(seconds=240),
-        "expires_at": created + timedelta(seconds=300), "cleanup_at": created + timedelta(seconds=360)}
-    links_collection = getattr(db, "force_join_links", None)
+    record = {
+        "user_id": tracking_user_id, "chat_id": chat_id, "invite_link": invite.invite_link,
+        "mode": mode, "created_at": created, "refresh_at": created + timedelta(seconds=300),
+        "expires_at": created + timedelta(seconds=600), "cleanup_at": created + timedelta(seconds=600),
+        "is_rotation_current": True,
+    }
     if links_collection is None:
-        # Lightweight callers that only resolve a button target may not expose
-        # the tracking collection. Production Database always does.
         return invite.invite_link
     try:
+        await links_collection.update_many(
+            {"chat_id": chat_id, "mode": mode, "is_rotation_current": True},
+            {"$set": {"is_rotation_current": False}},
+        )
         await links_collection.insert_one(record)
     except Exception:
-        # If the short-lived link cannot be tracked for cleanup, revoke it rather
-        # than leave an unmanaged invite active.
         try:
             await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
         except TelegramAPIError:
-            log.warning("Could not revoke untracked temporary invite", exc_info=True)
-        log.exception("Could not persist temporary Force Join link")
+            log.warning("Could not revoke untracked rotating invite", exc_info=True)
+        log.exception("Could not persist rotating Force Join link")
         return None
     return invite.invite_link
 
