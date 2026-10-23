@@ -250,18 +250,9 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     if mode not in {"normal", "join_request"}:
         mode = "join_request"
     tracking_user_id = int(user_id) if user_id is not None else 0
-    legacy = channel_cfg.get("button_url")
-    if legacy:
-        async def revoke_legacy_link():
-            try:
-                await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=legacy)
-            except TelegramAPIError:
-                log.debug("Legacy Force Join link already invalid", exc_info=True)
-        asyncio.create_task(revoke_legacy_link())
-        await db.settings.update_one({"key": "force_join_channel", "channel": channel}, {"$unset": {"button_url": ""}})
-    await db.settings.update_one({"key": "force_join_channel", "channel": channel}, {"$set": {
-        "key": "force_join_channel", "channel": channel, "channel_title": chat.title or str(chat_id),
-        "chat_type": chat.type, "mode": mode}}, upsert=True)
+    # Channel metadata is saved when the admin configures Force Join. Avoid
+    # extra MongoDB writes (and legacy-link revocation) on every user request:
+    # all private-channel link creations run concurrently in the caller.
     # Never revoke old links in the interactive Force Join path. Create a fresh
     # link now; expiry/join cleanup workers revoke older links asynchronously.
     try:
