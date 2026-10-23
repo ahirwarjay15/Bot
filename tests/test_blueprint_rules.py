@@ -545,6 +545,8 @@ def test_animation_legacy_defaults_are_migrated_and_frames_are_bold():
     assert cfg["speed"] == 0.15
     assert cfg["mode"] == "new_message"
     assert cfg["enabled"] is True
+    assert cfg["frames_enabled"] is True
+    assert cfg["prefix_enabled"] is True
     assert animation_frame_text(cfg["prefix"], cfg["frames"][0]) == "Checking<b>OLD</b>"
 
 
