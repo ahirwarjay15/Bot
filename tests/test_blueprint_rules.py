@@ -940,7 +940,7 @@ def test_settings_refresh_falls_back_when_telegram_rejects_edit():
 
     source = Path("app/handlers/settings.py").read_text()
     refresh = source.split("async def refresh_settings_panel", 1)[1].split(
-        "\\nasync def refresh_animation_panel", 1
+        "\nasync def refresh_animation_panel", 1
     )[0]
     assert "await bot.send_message(" in refresh
     assert "await bot.delete_message(chat_id=chat_id, message_id=message_id)" in refresh
@@ -964,7 +964,7 @@ def test_animation_uses_five_frames_and_respects_configured_speed_in_both_modes(
 
     source = Path("app/handlers/start.py").read_text()
     animation_loop = source.split("async def _animate_gate", 1)[1].split(
-        "\\nasync def _start_gate_animation", 1
+        "\nasync def _start_gate_animation", 1
     )[0]
     assert 'speed = max(speed, 1.0)' not in animation_loop
     assert 'await bot.edit_message_text(' not in animation_loop
