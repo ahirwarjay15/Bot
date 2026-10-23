@@ -35,12 +35,12 @@ async def test_health_reports_starting_until_service_is_ready(monkeypatch):
     monkeypatch.setattr(main, "SERVICE_READY", False)
     starting = await main.health(None)
     assert starting.status == 503
-    assert json.loads(starting.text) == {"status": "starting", "service": "Titania"}
+    assert json.loads(starting.text) == {"status": "starting", "service": "Telegram File Bot"}
 
     monkeypatch.setattr(main, "SERVICE_READY", True)
     ready = await main.health(None)
     assert ready.status == 200
-    assert json.loads(ready.text) == {"status": "ok", "service": "Titania"}
+    assert json.loads(ready.text) == {"status": "ok", "service": "Telegram File Bot"}
 
 
 @pytest.mark.asyncio
