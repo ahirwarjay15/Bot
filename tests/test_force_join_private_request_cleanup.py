@@ -219,12 +219,19 @@ async def test_private_channel_expired_pending_request_does_not_pass():
 async def test_missing_private_force_join_url_is_repaired_for_existing_channel():
     from app.handlers.start import resolve_force_join_button_target
 
-    class SettingsCollection:
+    class LinksCollection:
         def __init__(self):
+            self.records = []
             self.updates = []
 
-        async def update_one(self, query, update, upsert=False):
-            self.updates.append((query, update, upsert))
+        async def find_one(self, query):
+            return None
+
+        async def update_many(self, query, update):
+            self.updates.append((query, update))
+
+        async def insert_one(self, record):
+            self.records.append(record)
 
     class FakeBot:
         async def get_chat(self, chat_id):
@@ -234,47 +241,53 @@ async def test_missing_private_force_join_url_is_repaired_for_existing_channel()
         async def create_chat_invite_link(self, **kwargs):
             assert kwargs["chat_id"] == -100123
             assert kwargs["creates_join_request"] is True
+            assert kwargs["expire_date"] > int(datetime.now(timezone.utc).timestamp())
             return SimpleNamespace(invite_link="https://t.me/+repaired_invite")
 
-    settings = SettingsCollection()
-    db = SimpleNamespace(settings=settings)
+    links = LinksCollection()
+    settings = SimpleNamespace(updates=[])
+    db = SimpleNamespace(settings=settings, force_join_links=links)
     target = await resolve_force_join_button_target(FakeBot(), db, "-100123", {})
 
     assert target == "https://t.me/+repaired_invite"
-    assert settings.updates == [(
-        {"key": "force_join_channel", "channel": "-100123"},
-        {"$set": {
-            "key": "force_join_channel", "channel": "-100123",
-            "button_url": "https://t.me/+repaired_invite",
-            "channel_title": "Private Channel", "chat_type": "channel",
-            "mode": "join_request",
-        }},
-        True,
-    )]
+    assert settings.updates == []
+    assert len(links.records) == 1
+    record = links.records[0]
+    assert record["mode"] == "join_request"
+    assert record["expires_at"] - record["created_at"] == timedelta(minutes=10)
+    assert record["refresh_at"] - record["created_at"] == timedelta(minutes=5)
 
 
 @pytest.mark.asyncio
 async def test_stale_private_force_join_invite_is_recreated_when_channel_metadata_differs():
     from app.handlers.start import resolve_force_join_button_target
 
-    class SettingsCollection:
+    class LinksCollection:
         def __init__(self):
-            self.updates = []
+            self.records = []
 
-        async def update_one(self, query, update, upsert=False):
-            self.updates.append((query, update, upsert))
+        async def find_one(self, query):
+            return None
+
+        async def update_many(self, query, update):
+            pass
+
+        async def insert_one(self, record):
+            self.records.append(record)
 
     class FakeBot:
         async def get_chat(self, chat_id):
             return SimpleNamespace(id=-100123, title="Correct Channel", type="channel", username=None)
 
         async def create_chat_invite_link(self, **kwargs):
+            assert kwargs["creates_join_request"] is True
             return SimpleNamespace(invite_link="https://t.me/+new_correct_invite")
 
-    settings = SettingsCollection()
+    links = LinksCollection()
+    db = SimpleNamespace(settings=SimpleNamespace(), force_join_links=links)
     target = await resolve_force_join_button_target(
         FakeBot(),
-        SimpleNamespace(settings=settings),
+        db,
         "-100123",
         {
             "button_url": "https://t.me/+wrong_channel_invite",
@@ -285,7 +298,8 @@ async def test_stale_private_force_join_invite_is_recreated_when_channel_metadat
     )
 
     assert target == "https://t.me/+new_correct_invite"
-    assert settings.updates[0][1]["$set"]["button_url"] == target
+    assert links.records[0]["invite_link"] == target
+    assert "button_url" not in links.records[0]
 
 
 @pytest.mark.asyncio
