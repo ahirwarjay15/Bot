@@ -598,13 +598,18 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
             first = animation_frame_text(frames[0])
             try:
                 if cfg.get("poster_file_id"):
-                    # Keep media immutable during animation: caption edits add Telegram's Edited label.
-                    animation_post = await bot.send_animation(user.id, cfg["poster_file_id"])
+                    animation_post = await bot.send_animation(
+                        user.id, cfg["poster_file_id"],
+                        caption=first, parse_mode="HTML",
+                    )
                 elif cfg.get("poster_photo_id"):
-                    animation_post = await bot.send_photo(user.id, cfg["poster_photo_id"])
+                    animation_post = await bot.send_photo(
+                        user.id, cfg["poster_photo_id"],
+                        caption=first, parse_mode="HTML",
+                    )
                 else:
                     animation_post = None
-                # Poster mode animates directly in the poster's caption; never create a separate text animation.
+                # Poster mode updates frames in the configured poster caption, never a separate text message.
                 if animation_post:
                     await _start_gate_animation(
                         bot, user.id, payload, animation_post, "",
@@ -1069,18 +1074,23 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             empty_markup = InlineKeyboardMarkup(inline_keyboard=[])
             try:
                 if force_cfg.get("poster_file_id"):
-                    # Do not edit the media caption; that is what creates the Edited label.
-                    animation_post = await bot.send_animation(user_id, force_cfg["poster_file_id"])
+                    animation_post = await bot.send_animation(
+                        user_id, force_cfg["poster_file_id"],
+                        caption=first, parse_mode="HTML",
+                    )
                 elif force_cfg.get("poster_photo_id"):
-                    animation_post = await bot.send_photo(user_id, force_cfg["poster_photo_id"])
+                    animation_post = await bot.send_photo(
+                        user_id, force_cfg["poster_photo_id"],
+                        caption=first, parse_mode="HTML",
+                    )
                 else:
                     animation_post = None
-                # Use a separate text animation while the poster remains untouched.
-                text_animation_cfg = {**animation_cfg, "mode": "message"}
-                await _start_gate_animation(
-                    bot, user_id, payload, animation_post or old_post, "", empty_markup,
-                    text_animation_cfg, animation_only=True,
-                )
+                # Poster mode updates frames in this same media caption, never a separate text message.
+                if animation_post:
+                    await _start_gate_animation(
+                        bot, user_id, payload, animation_post, "", empty_markup,
+                        animation_cfg, animation_only=True,
+                    )
             except TelegramAPIError:
                 log.warning("Could not create Force Sub animation poster", exc_info=True)
                 animation_post = None
