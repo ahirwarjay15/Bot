@@ -512,12 +512,10 @@ async def _start_gate_animation(bot, user_id: int, payload: str, gate_message: M
     _gate_animation_stop_events[key] = stop_event
     _gate_animation_tasks[key] = (task, separate_id)
     if wait_for_cycle and mode == "message":
-        try:
-            frames = cfg.get("frames") or DEFAULT_ANIMATION_FRAMES
-            speed = float(cfg.get("speed", 0.25))
-            await asyncio.wait_for(cycle_event.wait(), timeout=max(2.0, speed * len(frames) + 5.0))
-        except asyncio.TimeoutError:
-            log.warning("Message animation did not complete its first cycle in time")
+        # Enforce a minimum of one complete animation cycle without imposing
+        # an arbitrary maximum timeout. _animate_gate always signals this event
+        # when the cycle completes or the animation exits early.
+        await cycle_event.wait()
 
 
 async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, verify_button: bool = True)->bool:
