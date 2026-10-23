@@ -44,6 +44,25 @@ def _origin(message: Message, configured_chat_id):
         return None
 
 
+
+def _database_channel_origin(message: Message, configured_chat_id):
+    """Compatibility name for the strict forwarded-origin validator."""
+    return _origin(message, configured_chat_id)
+
+
+def is_batch_file(message) -> bool:
+    """Return whether a Telegram message contains a supported file/media item."""
+    return any(getattr(message, field, None) for field in (
+        "document", "photo", "video", "audio", "animation",
+        "voice", "video_note", "sticker",
+    ))
+
+
+def ordered_batch_items(items):
+    """Order batch source references by their original channel message IDs."""
+    return sorted(items, key=lambda item: int(item.get("source_message_id", 0)))
+
+
 async def _parse_message_reference(message: Message, bot, configured_chat_id):
     """Accept a forwarded post or a t.me/<channel>/<id> / t.me/c/<id>/<id> link."""
     origin = _origin(message, configured_chat_id)
