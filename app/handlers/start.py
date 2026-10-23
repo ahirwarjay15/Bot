@@ -206,72 +206,118 @@ def _schedule_used_force_join_link_cleanup(bot, db, chat_id: int, invite_link) -
 
 
 async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
-    try:
-        chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
-        chat = await bot.get_chat(chat_arg)
-    except (ValueError, TelegramAPIError):
-        log.warning("Could not resolve Force Sub chat %r", channel, exc_info=True)
-        return None
-
-    chat_id = int(chat.id)
-    # All chats use temporary rotating invite links, including public chats.
-    # Public chats default to normal mode; private chats default to join requests.
-    mode = channel_cfg.get("mode", "normal" if getattr(chat, "username", None) else "join_request")
-    if mode not in {"normal", "join_request"}:
-        mode = "normal" if getattr(chat, "username", None) else "join_request"
+    """Read a prepared shared link only; never call Telegram invite creation in a user request."""
     links_collection = getattr(db, "force_join_links", None)
     if links_collection is None:
         log.error("Force Sub invite rotation requires the force_join_links collection")
         return None
+    now = datetime.now(timezone.utc)
+    mode = channel_cfg.get("mode")
+    query = {
+        "channel": channel,
+        "is_rotation_current": True,
+        "refresh_at": {"$gt": now},
+        "expires_at": {"$gt": now},
+    }
+    if mode in {"normal", "join_request"}:
+        query["mode"] = mode
+    cached = await links_collection.find_one(query)
+    if cached and cached.get("invite_link"):
+        return cached["invite_link"]
+    # During an API outage, keep using the previous shared link until its real
+    # Telegram expiry, even if its 25-minute rotation point has passed.
+    fallback_query = {"channel": channel, "expires_at": {"$gt": now}}
+    if mode in {"normal", "join_request"}:
+        fallback_query["mode"] = mode
+    fallback = await links_collection.find_one(
+        fallback_query, sort=[("created_at", -1)]
+    )
+    if fallback and fallback.get("invite_link"):
+        return fallback["invite_link"]
+    log.warning("No pre-generated Force Sub link is currently available for %s", channel)
+    return None
 
-    # Serialize cache-miss creation per chat/mode so concurrent users don't
-    # create multiple links for the same rotation window in this process.
-    lock = _forcejoin_locks.setdefault((chat_id, mode), asyncio.Lock())
-    async with lock:
-        now = datetime.now(timezone.utc)
-        cached = await links_collection.find_one({
-            "chat_id": chat_id, "mode": mode, "is_rotation_current": True,
-            "refresh_at": {"$gt": now}, "expires_at": {"$gt": now},
-        })
-        if cached and cached.get("invite_link"):
-            return cached["invite_link"]
 
+async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bool:
+    """Create and persist a shared 30-minute link in the background rotation worker."""
+    links = db.force_join_links
+    try:
+        chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
+        chat = await bot.get_chat(chat_arg)
+    except (ValueError, TelegramAPIError):
+        log.warning("Could not resolve Force Sub chat %r for background link rotation", channel, exc_info=True)
+        return False
+    chat_id = int(chat.id)
+    mode = channel_cfg.get("mode", "normal" if getattr(chat, "username", None) else "join_request")
+    if mode not in {"normal", "join_request"}:
+        mode = "normal" if getattr(chat, "username", None) else "join_request"
+    now = datetime.now(timezone.utc)
+    current = await links.find_one({
+        "channel": channel, "chat_id": chat_id, "mode": mode,
+        "is_rotation_current": True, "expires_at": {"$gt": now},
+    }, sort=[("created_at", -1)])
+    if current and current.get("refresh_at") and current["refresh_at"] > now:
+        return True
+    try:
+        invite = await bot.create_chat_invite_link(
+            chat_id=chat_id,
+            expire_date=int(now.timestamp()) + 1800,
+            creates_join_request=(mode == "join_request"),
+        )
+    except TelegramAPIError:
+        log.warning("Could not pre-generate Force Sub link for %s; retaining old link until expiry", channel, exc_info=True)
+        return False
+    created = datetime.now(timezone.utc)
+    record = {
+        "channel": channel,
+        "chat_id": chat_id,
+        "invite_link": invite.invite_link,
+        "mode": mode,
+        "created_at": created,
+        "refresh_at": created + timedelta(seconds=1500),
+        "expires_at": created + timedelta(seconds=1800),
+        "cleanup_at": created + timedelta(seconds=1800),
+        "is_rotation_current": True,
+    }
+    try:
+        await links.insert_one(record)
+        await links.update_many(
+            {"channel": channel, "chat_id": chat_id, "mode": mode,
+             "is_rotation_current": True, "_id": {"$ne": record.get("_id")}},
+            {"$set": {"is_rotation_current": False}},
+        )
+    except Exception:
         try:
-            invite = await bot.create_chat_invite_link(
-                chat_id=chat_id,
-                expire_date=int(now.timestamp()) + 600,
-                creates_join_request=(mode == "join_request"),
-            )
+            await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
         except TelegramAPIError:
-            log.exception("Could not create rotating Force Sub link for %s", chat_id)
-            return None
+            log.warning("Could not revoke untracked Force Sub invite", exc_info=True)
+        log.exception("Could not persist pre-generated Force Sub link for %s", channel)
+        return False
+    return True
 
-        created = datetime.now(timezone.utc)
-        record = {
-            "chat_id": chat_id,
-            "invite_link": invite.invite_link,
-            "mode": mode,
-            "created_at": created,
-            "refresh_at": created + timedelta(seconds=300),
-            "expires_at": created + timedelta(seconds=600),
-            "cleanup_at": created + timedelta(seconds=600),
-            "is_rotation_current": True,
-        }
+
+async def run_force_join_link_rotation_worker(bot, db, settings, interval_seconds: int = 30):
+    """Warm missing links and rotate shared links at 25 minutes, before 30-minute expiry."""
+    while True:
         try:
-            await links_collection.update_many(
-                {"chat_id": chat_id, "mode": mode, "is_rotation_current": True},
-                {"$set": {"is_rotation_current": False}},
-            )
-            await links_collection.insert_one(record)
+            channels = await effective_force_join_channels(type("DatabaseProxy", (), {"db": db})(), settings)
+            cfg = await db.settings.find_one({"key": "force_join"}) or {}
+            if cfg.get("enabled", False):
+                channel_cfgs = await asyncio.gather(*(
+                    db.settings.find_one({"key": "force_join_channel", "channel": channel})
+                    for channel in channels
+                ))
+                semaphore = asyncio.Semaphore(5)
+                async def prepare(channel, channel_cfg):
+                    async with semaphore:
+                        await _prepare_force_join_link(bot, db, channel, channel_cfg or {})
+                await asyncio.gather(*(prepare(channel, channel_cfg) for channel, channel_cfg in zip(channels, channel_cfgs)))
+            # Expired links are revoked by the existing cleanup worker.
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            try:
-                await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
-            except TelegramAPIError:
-                log.warning("Could not revoke untracked rotating invite", exc_info=True)
-            log.exception("Could not persist rotating Force Sub link")
-            return None
-        return invite.invite_link
-
+            log.warning("Force Sub link rotation worker failed", exc_info=True)
+        await asyncio.sleep(interval_seconds)
 
 def _is_private_chat(chat) -> bool:
     """Return true for private channels and groups without a public username."""
@@ -446,7 +492,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                             running_task, target_id if mode == "message" else None
                         )
                     frame_updates += 1
-                    if cycle_event and frame_updates >= len(frames):
+                    if cycle_event and frame_updates >= len(frames) - 1:
                         cycle_event.set()
                 except TelegramRetryAfter as exc:
                     retry_delay = max(speed, float(exc.retry_after))
@@ -976,7 +1022,7 @@ async def forcejoin_check(query: CallbackQuery, settings: Settings, database, bo
     key = (query.from_user.id, payload)
     lock = _forcejoin_locks.setdefault(key, asyncio.Lock())
     if lock.locked():
-        await query.answer("Verification is already running.", show_alert=False)
+        await query.answer("ᴠᴇʀɪꜰʏɪɴɢ...", show_alert=False)
         return
     async with lock:
         try:
