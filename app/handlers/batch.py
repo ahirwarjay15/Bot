@@ -292,7 +292,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     try:
         batch = await FileRepository(database.db).save_batch(items)
         me = await message.bot.get_me()
-        link = f"https://t.me/{me.username}?start=deepcode_{build_deeplink_token(batch['file_key'])}"
+        link = f"https://t.me/{me.username}?start={build_deeplink_token(batch['file_key'])}"
         keyboard = _link_keyboard(link)
         link_send_attempted = True
         sent_link = await message.answer(link, reply_markup=keyboard)
