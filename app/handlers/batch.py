@@ -33,6 +33,38 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+BATCH_SESSION_TIMEOUT = 10 * 60
+
+
+async def _expire_batch_session(state: FSMContext, session_token: str):
+    await asyncio.sleep(BATCH_SESSION_TIMEOUT)
+    data = await state.get_data()
+    if data.get("session_token") != session_token:
+        return
+    try:
+        last_activity = float(data.get("last_activity_at", 0))
+    except (TypeError, ValueError):
+        last_activity = 0
+    if time.time() - last_activity >= BATCH_SESSION_TIMEOUT:
+        await state.clear()
+
+
+async def _touch_batch_session(message: Message, state: FSMContext) -> bool:
+    data = await state.get_data()
+    session_token = data.get("session_token")
+    try:
+        last_activity = float(data.get("last_activity_at", 0))
+    except (TypeError, ValueError):
+        last_activity = 0
+    if not session_token or time.time() - last_activity >= BATCH_SESSION_TIMEOUT:
+        await state.clear()
+        await message.answer("Batch session timed out after 10 minutes. Start again with /batch.")
+        return False
+    await state.update_data(last_activity_at=time.time())
+    asyncio.create_task(_expire_batch_session(state, session_token))
+    return True
+
+
 def _origin(message: Message, configured_chat_id):
     origin = getattr(message, "forward_origin", None)
     chat = getattr(origin, "chat", None)
