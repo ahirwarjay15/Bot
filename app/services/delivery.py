@@ -108,23 +108,6 @@ def _notice(cfg, minutes):
     return format_notice(cfg, minutes)[0]
 
 
-async def _save_expiry_task(db, user_id, message_ids, deadline, deeplink, request_key=None, notice_message_id=None):
-    task = {
-        "kind": "delete_delivery", "user_id": user_id,
-        "message_ids": list(message_ids), "notice_message_id": notice_message_id, "deadline": deadline,
-        "deeplink": deeplink, "status": "pending",
-        "created_at": _now(), "messages_deleted": False,
-        "after_delete_attempted": False,
-    }
-    if request_key:
-        task["request_key"] = request_key
-        await db.tasks.update_one(
-            {"request_key": request_key}, {"$setOnInsert": task}, upsert=True
-        )
-    else:
-        await db.tasks.insert_one(task)
-
-
 async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: dict, deeplink: str, request_key: str | None = None):
     """Use the durable per-item queue for a single-file delivery as well."""
     item = {
