@@ -22,21 +22,6 @@ async def _backfill_code_collection(source, target, field: str, batch_size: int 
         await target.bulk_write(operations, ordered=False)
 
 
-async def backfill_deeplink_codes(db, batch_size: int = 500) -> bool:
-    """Run the legacy-code backfill once, in bulk, instead of N round trips on every boot."""
-    migration_id = "deeplink_code_backfill_v1"
-    if await db.system_migrations.find_one({"_id": migration_id}):
-        return False
-    await _backfill_code_collection(db.files, db.deeplink_codes, "file_key", batch_size)
-    await _backfill_code_collection(db.batches, db.deeplink_codes, "batch_id", batch_size)
-    await db.system_migrations.update_one(
-        {"_id": migration_id},
-        {"$setOnInsert": {"completed": True}},
-        upsert=True,
-    )
-    return True
-
-
 async def unify_file_batch_records(db) -> int:
     """Move legacy batch records into files and remove the obsolete kind discriminator."""
     moved = 0
@@ -53,7 +38,6 @@ async def unify_file_batch_records(db) -> int:
         elif isinstance(existing.get("items"), list):
             await db.batches.delete_one({"_id": batch["_id"]})
     await db.files.update_many({}, {"$unset": {"kind": ""}})
-    await db.deeplink_codes.update_many({}, {"$unset": {"kind": ""}})
     return moved
 
 
@@ -125,10 +109,12 @@ class Database:
             await self.db.tasks.create_index([("request_key", ASCENDING)], unique=True, sparse=True)
             await self.db.delivery_requests.create_index([("request_key", ASCENDING)], unique=True)
             await self.db.delivery_requests.create_index([("status", ASCENDING), ("updated_at", ASCENDING)])
-            await self.db.batches.create_index([("batch_id", ASCENDING)], unique=True, sparse=True)
-            await self.db.deeplink_codes.create_index([("code", ASCENDING)], unique=True)
             moved_batches = await unify_file_batch_records(self.db)
             logger.info("Unified file/batch records; legacy batches moved=%s", moved_batches)
+            await self.db.batches.delete_many({})
+            await self.db.batch_sessions.drop()
+            await self.db.batch_deliveries.drop()
+            await self.db.deeplink_codes.drop()
             # Keep multiple short-lived links per user/chat so issuing a fresh
             # link never has to revoke an older one in the interactive request path.
             force_join_indexes = await self.db.force_join_links.index_information()
@@ -144,16 +130,11 @@ class Database:
             await self.db.force_join_links.create_index([("cleanup_at", ASCENDING)], expireAfterSeconds=0, name="temporary_link_cleanup_ttl")
             await self.db.force_join_links.create_index([("invite_link", ASCENDING)], unique=True, name="invite_link_unique")
             await remove_legacy_external_force_join_links(self.db)
-            await backfill_deeplink_codes(self.db)
             await self.db.broadcast_drafts.create_index([("admin_id", ASCENDING)], unique=True)
             await self.db.broadcast_jobs.create_index([("draft_id", ASCENDING)], unique=True)
             await self.db.broadcast_jobs.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
             await self.db.broadcast_recipients.create_index([("job_id", ASCENDING), ("user_id", ASCENDING)], unique=True)
             await self.db.broadcast_recipients.create_index([("job_id", ASCENDING), ("status", ASCENDING)])
-            await self.db.batch_sessions.create_index([("admin_id", ASCENDING)], unique=True)
-            await self.db.batch_deliveries.create_index([("request_key", ASCENDING)], unique=True)
-            await self.db.batch_deliveries.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
-            await self.db.batch_sessions.create_index([("status", ASCENDING), ("last_activity_ts", ASCENDING)])
             await self.db.users.create_index([("blocked", ASCENDING)])
             if self.recover_interrupted_jobs:
                 # Never reset jobs just because a second worker started. Only reclaim
@@ -174,13 +155,9 @@ class Database:
                     {"status": "processing", **stale_claim},
                     {"$set": {"status": "pending", "recovered_at": datetime.now(timezone.utc)}},
                 )
-                batch_result = await self.db.batch_deliveries.update_many(
-                    {"status": "processing", **stale_claim},
-                    {"$set": {"status": "pending", "recovered_at": datetime.now(timezone.utc)}},
-                )
-                logger.info(
+                    logger.info(
                     "Stale job recovery complete: %s expiry tasks, %s batch deliveries",
-                    task_result.modified_count, batch_result.modified_count,
+                    task_result.modified_count,
                 )
             else:
                 logger.info("Worker-owned job recovery skipped for this process role")
