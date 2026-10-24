@@ -37,6 +37,25 @@ async def backfill_deeplink_codes(db, batch_size: int = 500) -> bool:
     return True
 
 
+async def unify_file_batch_records(db) -> int:
+    """Move legacy batch records into files and remove the obsolete kind discriminator."""
+    moved = 0
+    async for batch in db.batches.find({}):
+        code = batch.get("batch_id")
+        items = batch.get("items")
+        if not code or not isinstance(items, list):
+            continue
+        existing = await db.files.find_one({"file_key": code}, {"_id": 1, "items": 1})
+        if existing is None:
+            await db.files.insert_one({"file_key": code, "items": items})
+            moved += 1
+            await db.batches.delete_one({"_id": batch["_id"]})
+        elif isinstance(existing.get("items"), list):
+            await db.batches.delete_one({"_id": batch["_id"]})
+    await db.files.update_many({}, {"$unset": {"kind": ""}})
+    return moved
+
+
 async def remove_legacy_external_force_join_links(db) -> bool:
     """Remove the retired external Force Join setting from legacy deployments."""
     migration_id = "remove_external_force_join_links_v1"
@@ -107,6 +126,8 @@ class Database:
             await self.db.delivery_requests.create_index([("status", ASCENDING), ("updated_at", ASCENDING)])
             await self.db.batches.create_index([("batch_id", ASCENDING)], unique=True, sparse=True)
             await self.db.deeplink_codes.create_index([("code", ASCENDING)], unique=True)
+            moved_batches = await unify_file_batch_records(self.db)
+            logger.info("Unified file/batch records; legacy batches moved=%s", moved_batches)
             # Keep multiple short-lived links per user/chat so issuing a fresh
             # link never has to revoke an older one in the interactive request path.
             force_join_indexes = await self.db.force_join_links.index_information()
