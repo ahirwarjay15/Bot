@@ -779,14 +779,10 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
     if await repo.is_banned(user.id):return
     payload=command.args or ""
     if payload:
-        if payload.startswith("deepcode_"):
-            token = payload[len("deepcode_"):]
-            code = token[:5]
-            record = await repo.get_file(code) if len(token) == 20 else None
-        else:
-            await message.answer("This link is invalid or expired.")
-            await delete_start_command_after(message, database.db)
-            return
+        # Public start links contain only the 20-character token. The first five
+        # characters are the Deepcode; the remaining characters keep the URL
+        # opaque without adding visible file/batch/deepcode prefixes.
+        record = await repo.get_file(payload[:5]) if len(payload) == 20 and payload.isalnum() else None
         if not record:
             await message.answer("This link is invalid or expired.")
             await delete_start_command_after(message, database.db)
@@ -1233,10 +1229,9 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             await animation_post.delete()
         except TelegramAPIError:
             log.info("Could not remove Force Sub verification animation")
-    repo=FileRepository(database.db)
-    if payload.startswith("file_"):record=await repo.get_file(payload[5:][:5])
-    elif payload.startswith("batch_"):record=await repo.get_batch(payload[6:][:5])
-    else:return
+    repo = FileRepository(database.db)
+    # Files and batches share the same collection and Deepcode lookup.
+    record = await repo.get_file(payload[:5]) if len(payload) == 20 and payload.isalnum() else None
     if not record:
         if old_post:
             try: await old_post.delete()
@@ -1265,9 +1260,10 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         # Show and clear the blink before the file/batch is sent.
         await send_file_animation(bot, database.db, user_id)
         result=await deliver_payload(bot,database,settings,user_id,payload,record,request_key=request_key)
-        if payload.startswith("batch_") and result[0]==0:
+        is_batch = isinstance(record.get("items"), list)
+        if is_batch and result[0]==0:
             await bot.send_message(user_id,"None of the batch files could be delivered.")
-        elif payload.startswith("file_") and result[0] == 0:
+        elif not is_batch and result[0] == 0:
             await bot.send_message(user_id,"This file is currently unavailable. The source message may have been deleted or become inaccessible.")
         success = result[0] > 0
     except TelegramAPIError:
