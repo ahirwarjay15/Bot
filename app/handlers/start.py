@@ -254,7 +254,12 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> 
         "channel": channel, "chat_id": chat_id, "mode": mode,
         "is_rotation_current": True, "expires_at": {"$gt": now},
     })
-    if current and current.get("refresh_at") and current["refresh_at"] > now:
+    refresh_at = current.get("refresh_at") if current else None
+    # MongoDB datetime decoding may return naive UTC datetimes when tz_aware is disabled.
+    # Normalize to UTC-aware before comparing with the aware UTC clock.
+    if refresh_at is not None and refresh_at.tzinfo is None:
+        refresh_at = refresh_at.replace(tzinfo=timezone.utc)
+    if current and refresh_at and refresh_at > now:
         return True
     try:
         invite = await bot.create_chat_invite_link(
