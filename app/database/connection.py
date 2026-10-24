@@ -1,25 +1,9 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from pymongo import ASCENDING, AsyncMongoClient, UpdateOne
+from pymongo import ASCENDING, AsyncMongoClient
 from app.config import Settings
 
 logger = logging.getLogger(__name__)
-
-
-async def _backfill_code_collection(source, target, field: str, batch_size: int = 500):
-    operations = []
-    async for record in source.find({field: {"$type": "string"}}, {field: 1}):
-        code = record[field]
-        operations.append(UpdateOne(
-            {"code": code},
-            {"$setOnInsert": {"code": code}},
-            upsert=True,
-        ))
-        if len(operations) >= batch_size:
-            await target.bulk_write(operations, ordered=False)
-            operations = []
-    if operations:
-        await target.bulk_write(operations, ordered=False)
 
 
 async def unify_file_batch_records(db) -> int:
@@ -115,6 +99,19 @@ class Database:
             await self.db.batch_sessions.drop()
             await self.db.batch_deliveries.drop()
             await self.db.deeplink_codes.drop()
+            # Keep active Auto Delete timers but normalize their minimal schema.
+            await self.db.tasks.update_many(
+                {"chat_id": {"$exists": False}, "user_id": {"$exists": True}},
+                {"$rename": {"user_id": "chat_id"}, "$unset": {"kind": "", "notice": "", "notice_entities": ""}},
+            )
+            await self.db.tasks.update_many(
+                {},
+                {"$unset": {
+                    "notice": "", "notice_entities": "", "button1_text": "",
+                    "button1_url": "", "button1_enabled": "", "button2_text": "",
+                    "button2_url": "", "button2_enabled": "",
+                }},
+            )
             # Keep multiple short-lived links per user/chat so issuing a fresh
             # link never has to revoke an older one in the interactive request path.
             force_join_indexes = await self.db.force_join_links.index_information()
