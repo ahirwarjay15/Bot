@@ -1,5 +1,8 @@
 """Create a batch deeplink from a first/last message range in the Database channel."""
+import asyncio
 import logging
+import time
+from secrets import token_urlsafe
 import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -28,6 +31,38 @@ class BatchState(StatesGroup):
 
 def _now():
     return datetime.now(timezone.utc)
+
+
+BATCH_SESSION_TIMEOUT = 10 * 60
+
+
+async def _expire_batch_session(state: FSMContext, session_token: str):
+    await asyncio.sleep(BATCH_SESSION_TIMEOUT)
+    data = await state.get_data()
+    if data.get("session_token") != session_token:
+        return
+    try:
+        last_activity = float(data.get("last_activity_at", 0))
+    except (TypeError, ValueError):
+        last_activity = 0
+    if time.time() - last_activity >= BATCH_SESSION_TIMEOUT:
+        await state.clear()
+
+
+async def _touch_batch_session(message: Message, state: FSMContext) -> bool:
+    data = await state.get_data()
+    session_token = data.get("session_token")
+    try:
+        last_activity = float(data.get("last_activity_at", 0))
+    except (TypeError, ValueError):
+        last_activity = 0
+    if not session_token or time.time() - last_activity >= BATCH_SESSION_TIMEOUT:
+        await state.clear()
+        await message.answer("Batch session timed out after 10 minutes. Start again with /batch.")
+        return False
+    await state.update_data(last_activity_at=time.time())
+    asyncio.create_task(_expire_batch_session(state, session_token))
+    return True
 
 
 def _origin(message: Message, configured_chat_id):
@@ -172,7 +207,14 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
         return
     await state.clear()
     await state.set_state(BatchState.waiting_first)
-    await state.update_data(admin_id=message.from_user.id, source_chat_id=int(settings.source_channel_id))
+    session_token = token_urlsafe(8)
+    await state.update_data(
+        admin_id=message.from_user.id,
+        source_chat_id=int(settings.source_channel_id),
+        session_token=session_token,
+        last_activity_at=time.time(),
+    )
+    asyncio.create_task(_expire_batch_session(state, session_token))
     await message.answer(
         "Forward The Batch First Message From Database Channel (With Forward Tag).. or Give Me Batch First Message link from Database channel"
     )
@@ -190,6 +232,8 @@ async def cancel_batch(message: Message, state: FSMContext):
 @router.message(BatchState.waiting_first)
 async def receive_first(message: Message, state: FSMContext, settings: Settings):
     if not message.from_user:
+        return
+    if not await _touch_batch_session(message, state):
         return
     if message.text and message.text.startswith("/"):
         raise SkipHandler
@@ -215,6 +259,8 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
 @router.message(BatchState.waiting_last)
 async def receive_last(message: Message, state: FSMContext, settings: Settings, database):
     if not message.from_user:
+        return
+    if not await _touch_batch_session(message, state):
         return
     if message.text and message.text.startswith("/"):
         raise SkipHandler

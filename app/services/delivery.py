@@ -108,23 +108,6 @@ def _notice(cfg, minutes):
     return format_notice(cfg, minutes)[0]
 
 
-async def _save_expiry_task(db, user_id, message_ids, deadline, deeplink, request_key=None, notice_message_id=None):
-    task = {
-        "kind": "delete_delivery", "user_id": user_id,
-        "message_ids": list(message_ids), "notice_message_id": notice_message_id, "deadline": deadline,
-        "deeplink": deeplink, "status": "pending",
-        "created_at": _now(), "messages_deleted": False,
-        "after_delete_attempted": False,
-    }
-    if request_key:
-        task["request_key"] = request_key
-        await db.tasks.update_one(
-            {"request_key": request_key}, {"$setOnInsert": task}, upsert=True
-        )
-    else:
-        await db.tasks.insert_one(task)
-
-
 async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: dict, deeplink: str, request_key: str | None = None):
     """Use the durable per-item queue for a single-file delivery as well."""
     item = {
@@ -136,194 +119,6 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
         bot, db, user_id=user_id, batch={"batch_id": None, "items": [item]},
         deeplink=deeplink, request_key=request_key,
     )
-
-async def _process_batch_delivery(bot: Bot, db, request_key: str):
-    """Resume a persisted batch at the next not-yet-attempted item."""
-    try:
-        doc = await db.batch_deliveries.find_one({"request_key": request_key})
-        if not doc or doc.get("status") == "done":
-            return (len((doc or {}).get("delivered_message_ids", [])), int((doc or {}).get("failed_count", 0)))
-        items = doc.get("items", [])
-        # Resolve the fallback keyboard once per batch instead of one DB read per file.
-        custom_buttons = []
-        if any(
-            not item.get("disable_buttons")
-            and not item.get("reply_markup") and not item.get("original_has_buttons")
-            for item in items
-        ):
-            custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
-            custom_buttons = custom_cfg.get("buttons", [])
-        while int(doc.get("next_index", 0)) < len(items):
-            index = int(doc.get("next_index", 0))
-            state = (doc.get("item_states") or [{} for _ in items])[index]
-            if state.get("status") == "sending":
-                # A second Worker may be looking at an item actively sent by the first.
-                # Wait while its claim is fresh; only stale claims become unknown after a crash.
-                started_at = _as_utc_aware(state.get("started_at"))
-                if started_at and _now() - started_at < timedelta(minutes=10):
-                    await asyncio.sleep(0.1)
-                    doc = await db.batch_deliveries.find_one({"request_key": request_key})
-                    if not doc or doc.get("status") != "processing":
-                        return (len((doc or {}).get("delivered_message_ids", [])),
-                                int((doc or {}).get("failed_count", 0)))
-                    continue
-                changed = await db.batch_deliveries.update_one(
-                    {"request_key": request_key, "status": "processing", "next_index": index,
-                     f"item_states.{index}.status": "sending",
-                     f"item_states.{index}.started_at": state.get("started_at")},
-                    {"$set": {f"item_states.{index}.status": "unknown",
-                              f"item_states.{index}.recovered_at": _now(),
-                              "next_index": index + 1},
-                     "$inc": {"failed_count": 1}},
-                )
-                if not changed.modified_count:
-                    doc = await db.batch_deliveries.find_one({"request_key": request_key})
-                    continue
-                doc = await db.batch_deliveries.find_one({"request_key": request_key})
-                continue
-            claim = await db.batch_deliveries.update_one(
-                {"request_key": request_key, "status": "processing", "next_index": index,
-                 f"item_states.{index}.status": "pending"},
-                {"$set": {f"item_states.{index}.status": "sending",
-                          f"item_states.{index}.started_at": _now()}},
-            )
-            if not claim.modified_count:
-                doc = await db.batch_deliveries.find_one({"request_key": request_key})
-                if not doc or doc.get("status") != "processing":
-                    return (len((doc or {}).get("delivered_message_ids", [])), int((doc or {}).get("failed_count", 0)))
-                continue
-            item = items[index]
-            try:
-                # Prepare the keyboard before copying so the file and its buttons
-                # arrive in one Telegram API request (instead of copy + edit).
-                markup_data = None if item.get("disable_buttons") else item.get("reply_markup")
-                has_original_buttons = item.get(
-                    "original_has_buttons", bool(markup_data)
-                )
-                if not item.get("disable_buttons") and not has_original_buttons and not markup_data:
-                    valid_buttons = [
-                        InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
-                        for button in custom_buttons[:2]
-                        if button.get("text") and button.get("url")
-                    ]
-                    if valid_buttons:
-                        markup_data = InlineKeyboardMarkup(inline_keyboard=[valid_buttons]).model_dump(
-                            mode="json", exclude_none=True
-                        )
-                markup = None
-                if markup_data:
-                    try:
-                        markup = InlineKeyboardMarkup.model_validate(markup_data)
-                    except (ValueError, TypeError):
-                        log.warning("Invalid inline buttons for source message %s",
-                                    item["source_message_id"], exc_info=True)
-                sent = await bot.copy_message(
-                    chat_id=doc["user_id"], from_chat_id=item["source_chat_id"],
-                    message_id=item["source_message_id"], reply_markup=markup,
-                )
-                deadline = doc.get("deadline")
-                if doc.get("auto_delete") and deadline is None:
-                    deadline = _now() + timedelta(minutes=int(doc["minutes"]))
-                fields = {
-                    f"item_states.{index}.status": "delivered",
-                    f"item_states.{index}.message_id": sent.message_id,
-                    f"item_states.{index}.finished_at": _now(),
-                    "next_index": index + 1,
-                }
-                if deadline is not None:
-                    fields["deadline"] = deadline
-                await db.batch_deliveries.update_one(
-                    {"request_key": request_key, "status": "processing", "next_index": index},
-                    {"$set": fields, "$push": {"delivered_message_ids": sent.message_id}},
-                )
-            except TelegramAPIError as exc:
-                await db.batch_deliveries.update_one(
-                    {"request_key": request_key, "status": "processing", "next_index": index},
-                    {"$set": {f"item_states.{index}.status": "failed",
-                              f"item_states.{index}.error": type(exc).__name__,
-                              f"item_states.{index}.finished_at": _now(),
-                              "next_index": index + 1},
-                     "$inc": {"failed_count": 1}},
-                )
-                log.warning("Batch item %s failed for user %s: %s", index, doc["user_id"], type(exc).__name__)
-            doc = await db.batch_deliveries.find_one({"request_key": request_key})
-
-        doc = await db.batch_deliveries.find_one({"request_key": request_key})
-        delivered_ids = list(doc.get("delivered_message_ids", []))
-        deadline = doc.get("deadline")
-        if doc.get("auto_delete") and deadline and _as_utc_aware(deadline) > _now() and doc.get("alert_status") == "pending":
-            claimed = await db.batch_deliveries.update_one(
-                {"request_key": request_key, "status": "processing", "alert_status": "pending"},
-                {"$set": {"alert_status": "sending", "alert_started_at": _now()}},
-            )
-            if claimed.modified_count:
-                try:
-                    # Notice formatting stays in settings; never duplicate it in delivery records.
-                    notice_cfg = await db.settings.find_one({"key": "auto_delete", "enabled": True}) or {}
-                    notice_text, notice_entities, custom_format = format_notice(notice_cfg, int(doc["minutes"]))
-                    notice_buttons = [
-                        InlineKeyboardButton(text=str(doc.get(f"button{i}_text", "")), url=str(doc.get(f"button{i}_url", "")))
-                        for i in (1, 2)
-                        if doc.get(f"button{i}_enabled", False)
-                        and doc.get(f"button{i}_text") and doc.get(f"button{i}_url")
-                        and str(doc.get(f"button{i}_url", "")).startswith(("http://", "https://"))
-                    ]
-                    notice_markup = InlineKeyboardMarkup(inline_keyboard=[notice_buttons]) if notice_buttons else None
-                    if custom_format:
-                        alert = await bot.send_message(
-                            doc["user_id"], notice_text, entities=notice_entities, parse_mode=None,
-                            reply_markup=notice_markup,
-                        )
-                    else:
-                        # Legacy/default notices use the built-in HTML template.
-                        alert = await bot.send_message(
-                            doc["user_id"], notice_text, parse_mode="HTML", reply_markup=notice_markup
-                        )
-                    await db.batch_deliveries.update_one(
-                        {"request_key": request_key, "status": "processing"},
-                        {"$set": {"alert_status": "sent", "alert_message_id": alert.message_id, "alert_sent_at": _now()}},
-                    )
-                except Exception as exc:
-                    # Never replace a user's formatted notice with plain text.
-                    # Notice failure must not undo successfully delivered files.
-                    log.exception("Auto-delete notice could not be sent in its saved format")
-                    await db.batch_deliveries.update_one(
-                        {"request_key": request_key, "status": "processing"},
-                        {"$set": {"alert_status": "failed", "alert_error": type(exc).__name__}},
-                    )
-        elif doc.get("alert_status") == "sending":
-            # Do not resend an alert with an ambiguous outcome after restart.
-            await db.batch_deliveries.update_one(
-                {"request_key": request_key, "status": "processing", "alert_status": "sending"},
-                {"$set": {"alert_status": "unknown"}},
-            )
-        doc = await db.batch_deliveries.find_one({"request_key": request_key})
-        if doc.get("auto_delete") and doc.get("deadline") and delivered_ids:
-            message_ids = list(doc.get("delivered_message_ids", []))
-            notice_message_id = doc.get("alert_message_id") if doc.get("alert_status") == "sent" else None
-            await _save_expiry_task(
-                db, doc["user_id"], message_ids, doc["deadline"], doc["deeplink"],
-                request_key=f"batch-expiry:{request_key}", notice_message_id=notice_message_id,
-            )
-        await db.batch_deliveries.update_one(
-            {"request_key": request_key, "status": "processing"},
-            {"$set": {"status": "done", "finished_at": _now()}},
-        )
-        final = await db.batch_deliveries.find_one({"request_key": request_key}) or doc
-        result = (len(final.get("delivered_message_ids", [])), int(final.get("failed_count", 0)))
-        # Delivery progress is temporary. The expiry task keeps only the IDs and
-        # deadline needed to delete delivered messages (plus the optional after-delete link).
-        await db.batch_deliveries.delete_one({"request_key": request_key, "status": "done"})
-        await db.delivery_requests.delete_one({"request_key": request_key})
-        return result
-    except Exception:
-        log.exception("Batch delivery processing interrupted; persisted progress will be resumed")
-        await db.batch_deliveries.update_one(
-            {"request_key": request_key, "status": "processing"},
-            {"$set": {"status": "pending", "last_error_at": _now()}},
-        )
-        raise
-
 
 async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: str, request_key: str | None = None):
     """Deliver directly; persist only message IDs and expiry metadata when Auto Delete is on."""
@@ -341,13 +136,11 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         expiry_suffix = request_key or f"{user_id}:{token_urlsafe(12)}"
         task_key = f"batch-expiry:{expiry_suffix}"
         task = {
-            "kind": "delete_delivery",
             "user_id": user_id,
             "message_ids": [],
             "deadline": None,
             "deeplink": deeplink,
             "status": "delivering",
-            "created_at": _now(),
             "updated_at": _now(),
             "messages_deleted": False,
             "after_delete_attempted": False,
@@ -443,25 +236,6 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
     return (sent_count, failed_count)
 
 
-async def run_batch_delivery_worker(bot: Bot, db, poll_seconds: int = 2):
-    """Resume durable batch deliveries left pending by a prior interruption."""
-    while True:
-        doc = await db.batch_deliveries.find_one_and_update(
-            {"status": "pending"},
-            {"$set": {"status": "processing", "worker_claimed_at": _now()}},
-            sort=[("created_at", 1)],
-            return_document=True,
-        )
-        if not doc:
-            await asyncio.sleep(poll_seconds)
-            continue
-        try:
-            await _process_batch_delivery(bot, db, doc["request_key"])
-        except Exception:
-            log.exception("Background batch delivery remains pending and will retry")
-        await asyncio.sleep(0.05)
-
-
 async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
     while True:
         now = _now()
@@ -537,7 +311,7 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                 expiry_key = task.get("request_key")
                 if expiry_key:
                     delivery_key = expiry_key.removeprefix("batch-expiry:")
-                    await db.batch_deliveries.delete_one({"request_key": delivery_key, "status": "done"})
+                    # Batch delivery queue was removed; Auto Delete uses tasks only.
                     await db.delivery_requests.delete_one({"request_key": delivery_key, "status": "done"})
                 await db.tasks.delete_one({"_id": task["_id"], "status": "done"})
             except Exception:
