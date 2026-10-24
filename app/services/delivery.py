@@ -149,7 +149,8 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
         # Resolve the fallback keyboard once per batch instead of one DB read per file.
         custom_buttons = []
         if any(
-            not item.get("reply_markup") and not item.get("original_has_buttons")
+            not item.get("disable_buttons")
+            and not item.get("reply_markup") and not item.get("original_has_buttons")
             for item in items
         ):
             custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
@@ -197,11 +198,11 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
             try:
                 # Prepare the keyboard before copying so the file and its buttons
                 # arrive in one Telegram API request (instead of copy + edit).
-                markup_data = item.get("reply_markup")
+                markup_data = None if item.get("disable_buttons") else item.get("reply_markup")
                 has_original_buttons = item.get(
                     "original_has_buttons", bool(markup_data)
                 )
-                if not has_original_buttons and not markup_data:
+                if not item.get("disable_buttons") and not has_original_buttons and not markup_data:
                     valid_buttons = [
                         InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
                         for button in custom_buttons[:2]
