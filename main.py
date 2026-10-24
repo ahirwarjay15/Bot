@@ -22,7 +22,7 @@ from app.handlers.settings import router as settings_router
 from app.handlers.broadcast import router as broadcast_router, run_broadcast_worker
 from app.handlers.shortener import router as shortener_router
 from app.handlers.misc import router as misc_router
-from app.services.delivery import run_task_worker, run_batch_delivery_worker
+from app.services.delivery import run_task_worker
 from app.services.polling_lease import run_polling_with_lease
 
 SERVICE_READY = False
@@ -158,7 +158,6 @@ async def main():
         if role in {"all", "worker"}:
             workers = (
                 (run_task_worker, (bot, database.db), "delivery-task-worker"),
-                (run_batch_delivery_worker, (bot, database.db), "batch-delivery-worker"),
                 (run_broadcast_worker, (bot, database.db), "broadcast-worker"),
                 (run_daily_database_cleanup_worker, (database.db,), "daily-database-cleanup-worker"),
                 (run_force_join_link_cleanup_worker, (bot, database.db), "force-join-link-cleanup-worker"),
