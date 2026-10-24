@@ -136,7 +136,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         expiry_suffix = request_key or f"{user_id}:{token_urlsafe(12)}"
         task_key = f"batch-expiry:{expiry_suffix}"
         task = {
-            "chat_id": user_id,
+            "user_id": user_id,
             "message_ids": [],
             "deadline": None,
             "deeplink": deeplink,
