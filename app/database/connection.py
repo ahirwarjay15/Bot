@@ -155,8 +155,8 @@ class Database:
                     {"status": "processing", **stale_claim},
                     {"$set": {"status": "pending", "recovered_at": datetime.now(timezone.utc)}},
                 )
-                    logger.info(
-                    "Stale job recovery complete: %s expiry tasks, %s batch deliveries",
+                logger.info(
+                    "Stale job recovery complete: %s expiry tasks",
                     task_result.modified_count,
                 )
             else:
