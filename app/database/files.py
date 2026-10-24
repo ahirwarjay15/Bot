@@ -128,10 +128,12 @@ class FileRepository:
         return bool(user and user.get("banned", False))
 
     async def get_setting(self, key: str, default=None):
-        item = await self.db.settings.find_one({"key": key}, {"value": 1})
+        item = await self.db.settings.find_one({"key": key, "channel": {"$exists": False}}, {"value": 1})
         return item.get("value", default) if item else default
 
     async def set_setting(self, key: str, value) -> None:
         await self.db.settings.update_one(
-            {"key": key}, {"$set": {"key": key, "value": value}}, upsert=True
+            {"key": key, "channel": {"$exists": False}},
+            {"$set": {"key": key, "value": value}},
+            upsert=True
         )
