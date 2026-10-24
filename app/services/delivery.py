@@ -424,25 +424,6 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
     return (sent_count, failed_count)
 
 
-async def run_batch_delivery_worker(bot: Bot, db, poll_seconds: int = 2):
-    """Resume durable batch deliveries left pending by a prior interruption."""
-    while True:
-        doc = await db.batch_deliveries.find_one_and_update(
-            {"status": "pending"},
-            {"$set": {"status": "processing", "worker_claimed_at": _now()}},
-            sort=[("created_at", 1)],
-            return_document=True,
-        )
-        if not doc:
-            await asyncio.sleep(poll_seconds)
-            continue
-        try:
-            await _process_batch_delivery(bot, db, doc["request_key"])
-        except Exception:
-            log.exception("Background batch delivery remains pending and will retry")
-        await asyncio.sleep(0.05)
-
-
 async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
     while True:
         now = _now()
