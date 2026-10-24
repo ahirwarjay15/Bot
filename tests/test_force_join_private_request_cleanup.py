@@ -216,50 +216,32 @@ async def test_private_channel_expired_pending_request_does_not_pass():
 
 
 @pytest.mark.asyncio
-async def test_missing_private_force_join_url_is_repaired_for_existing_channel():
+async def test_missing_private_force_join_url_does_not_create_link_during_user_request():
     from app.handlers.start import resolve_force_join_button_target
 
     class LinksCollection:
         def __init__(self):
             self.records = []
-            self.updates = []
 
         async def find_one(self, query):
             return None
 
-        async def update_many(self, query, update):
-            self.updates.append((query, update))
-
-        async def insert_one(self, record):
-            self.records.append(record)
-
     class FakeBot:
         async def get_chat(self, chat_id):
-            assert chat_id == -100123
-            return SimpleNamespace(id=-100123, title="Private Channel", type="channel", username=None)
+            raise AssertionError("User requests must not resolve/create invite links synchronously")
 
         async def create_chat_invite_link(self, **kwargs):
-            assert kwargs["chat_id"] == -100123
-            assert kwargs["creates_join_request"] is True
-            assert kwargs["expire_date"] > int(datetime.now(timezone.utc).timestamp())
-            return SimpleNamespace(invite_link="https://t.me/+repaired_invite")
+            raise AssertionError("Invite links are created only by the background worker")
 
     links = LinksCollection()
-    settings = SimpleNamespace(updates=[])
-    db = SimpleNamespace(settings=settings, force_join_links=links)
+    db = SimpleNamespace(settings=SimpleNamespace(), force_join_links=links)
     target = await resolve_force_join_button_target(FakeBot(), db, "-100123", {})
 
-    assert target == "https://t.me/+repaired_invite"
-    assert settings.updates == []
-    assert len(links.records) == 1
-    record = links.records[0]
-    assert record["mode"] == "join_request"
-    assert record["expires_at"] - record["created_at"] == timedelta(minutes=10)
-    assert record["refresh_at"] - record["created_at"] == timedelta(minutes=5)
-
+    assert target is None
+    assert links.records == []
 
 @pytest.mark.asyncio
-async def test_stale_private_force_join_invite_is_recreated_when_channel_metadata_differs():
+async def test_stale_private_force_join_invite_is_not_recreated_in_user_request():
     from app.handlers.start import resolve_force_join_button_target
 
     class LinksCollection:
@@ -269,41 +251,26 @@ async def test_stale_private_force_join_invite_is_recreated_when_channel_metadat
         async def find_one(self, query):
             return None
 
-        async def update_many(self, query, update):
-            pass
-
-        async def insert_one(self, record):
-            self.records.append(record)
-
     class FakeBot:
         async def get_chat(self, chat_id):
-            return SimpleNamespace(id=-100123, title="Correct Channel", type="channel", username=None)
+            raise AssertionError("Background rotation owns chat resolution")
 
         async def create_chat_invite_link(self, **kwargs):
-            assert kwargs["creates_join_request"] is True
-            return SimpleNamespace(invite_link="https://t.me/+new_correct_invite")
+            raise AssertionError("Background rotation owns invite creation")
 
     links = LinksCollection()
     db = SimpleNamespace(settings=SimpleNamespace(), force_join_links=links)
     target = await resolve_force_join_button_target(
-        FakeBot(),
-        db,
-        "-100123",
-        {
-            "button_url": "https://t.me/+wrong_channel_invite",
-            "channel_title": "Another Channel",
-            "chat_type": "channel",
-            "mode": "join_request",
-        },
+        FakeBot(), db, "-100123",
+        {"button_url": "https://t.me/+wrong_channel_invite",
+         "channel_title": "Another Channel", "chat_type": "channel", "mode": "join_request"},
     )
 
-    assert target == "https://t.me/+new_correct_invite"
-    assert links.records[0]["invite_link"] == target
-    assert "button_url" not in links.records[0]
-
+    assert target is None
+    assert links.records == []
 
 @pytest.mark.asyncio
-async def test_public_force_join_also_uses_temporary_rotating_invites():
+async def test_public_force_join_link_is_not_created_in_user_request():
     from app.handlers.start import resolve_force_join_button_target
 
     class LinksCollection:
@@ -313,29 +280,19 @@ async def test_public_force_join_also_uses_temporary_rotating_invites():
         async def find_one(self, query):
             return None
 
-        async def update_many(self, query, update):
-            pass
-
-        async def insert_one(self, record):
-            self.records.append(record)
-
     class FakeBot:
         async def get_chat(self, chat_id):
-            return SimpleNamespace(id=-100123, title="Public Channel", type="channel", username="public_channel")
+            raise AssertionError("Background rotation owns chat resolution")
 
         async def create_chat_invite_link(self, **kwargs):
-            assert kwargs["chat_id"] == -100123
-            assert kwargs["creates_join_request"] is False
-            return SimpleNamespace(invite_link="https://t.me/+temporary_public_invite")
+            raise AssertionError("Background rotation owns invite creation")
 
     links = LinksCollection()
     target = await resolve_force_join_button_target(
-        FakeBot(),
-        SimpleNamespace(settings=SimpleNamespace(), force_join_links=links),
-        "-100123",
-        {"mode": "normal"},
+        FakeBot(), SimpleNamespace(settings=SimpleNamespace(), force_join_links=links),
+        "-100123", {"mode": "normal"},
     )
 
-    assert target == "https://t.me/+temporary_public_invite"
-    assert links.records[0]["mode"] == "normal"
-    assert links.records[0]["expires_at"] - links.records[0]["created_at"] == timedelta(minutes=10)
+    assert target is None
+    assert links.records == []
+
