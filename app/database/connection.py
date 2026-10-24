@@ -22,7 +22,6 @@ async def unify_file_batch_records(db) -> int:
         elif isinstance(existing.get("items"), list):
             await db.batches.delete_one({"_id": batch["_id"]})
     await db.files.update_many({}, {"$unset": {"kind": "", "file_name": "", "created_at": "", "created_by": ""}})
-    await db.deeplink_codes.update_many({}, {"$unset": {"kind": ""}})
     return moved
 
 
@@ -138,7 +137,6 @@ class Database:
                     "button2_url": "", "button2_enabled": "",
                 }},
             )
-            logger.info("Unified file/batch records; legacy batches moved=%s", moved_batches)
             # Keep multiple short-lived links per user/chat so issuing a fresh
             # link never has to revoke an older one in the interactive request path.
             force_join_indexes = await self.db.force_join_links.index_information()
