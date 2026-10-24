@@ -25,6 +25,30 @@ async def unify_file_batch_records(db) -> int:
     return moved
 
 
+async def cleanup_completed_transients(db) -> dict:
+    """Remove completed temporary delivery and broadcast records."""
+    result = {
+        "done_tasks": (await db.tasks.delete_many({"status": "done"})).deleted_count,
+        "finished_delivery_requests": (
+            await db.delivery_requests.delete_many({"status": {"$in": ["done", "failed"]}})
+        ).deleted_count,
+    }
+    completed_jobs = [
+        job["_id"] async for job in db.broadcast_jobs.find({"status": "completed"}, {"_id": 1})
+    ]
+    if completed_jobs:
+        result["broadcast_recipients"] = (
+            await db.broadcast_recipients.delete_many({"job_id": {"$in": completed_jobs}})
+        ).deleted_count
+        result["broadcast_jobs"] = (
+            await db.broadcast_jobs.delete_many({"_id": {"$in": completed_jobs}})
+        ).deleted_count
+    else:
+        result["broadcast_recipients"] = 0
+        result["broadcast_jobs"] = 0
+    return result
+
+
 async def remove_legacy_external_force_join_links(db) -> bool:
     """Remove the retired external Force Join setting from legacy deployments."""
     migration_id = "remove_external_force_join_links_v1"
@@ -99,10 +123,12 @@ class Database:
             await self.db.batch_sessions.drop()
             await self.db.batch_deliveries.drop()
             await self.db.deeplink_codes.drop()
+            cleanup_counts = await cleanup_completed_transients(self.db)
+            logger.info("Removed completed temporary records: %s", cleanup_counts)
             # Keep active Auto Delete timers but normalize their minimal schema.
             await self.db.tasks.update_many(
                 {"chat_id": {"$exists": False}, "user_id": {"$exists": True}},
-                {"$rename": {"user_id": "chat_id"}, "$unset": {"kind": "", "notice": "", "notice_entities": ""}},
+                {"$rename": {"user_id": "chat_id"}, "$unset": {"kind": "", "created_at": "", "notice": "", "notice_entities": ""}},
             )
             await self.db.tasks.update_many(
                 {},
