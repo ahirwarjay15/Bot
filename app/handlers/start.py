@@ -668,14 +668,17 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
         await _edit_force_join_post(animation_post, rendered, markup)
         return True
     if animation_enabled and animation_mode == "message":
-        # A text message cannot be converted into media through the Bot API.
-        # Send the final Force Sub post with its configured poster, then remove the last frame.
-        await _send_force_join_post(bot, user.id, cfg, rendered, markup)
-        if separate_animation_id:
-            try:
-                await bot.delete_message(chat_id=user.id, message_id=separate_animation_id)
-            except TelegramAPIError:
-                pass
+        # Publish the final Force Sub post and remove the last animation frame concurrently.
+        async def delete_message_animation():
+            if separate_animation_id:
+                try:
+                    await bot.delete_message(chat_id=user.id, message_id=separate_animation_id)
+                except TelegramAPIError:
+                    pass
+        await asyncio.gather(
+            _send_force_join_post(bot, user.id, cfg, rendered, markup),
+            delete_message_animation(),
+        )
         return True
     new_post = await _send_force_join_post(bot, user.id, cfg, rendered, markup)
     if separate_animation_id:
@@ -1139,13 +1142,17 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             return
 
         if animation_enabled and animation_mode == "message":
-            # Final Force Sub prompt is fresh, so the animation never gains an Edited tag.
-            new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)
-            if separate_animation_id:
-                try:
-                    await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)
-                except TelegramAPIError:
-                    pass
+            # Publish the final Force Sub post and remove the animation frame concurrently.
+            async def delete_message_animation():
+                if separate_animation_id:
+                    try:
+                        await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)
+                    except TelegramAPIError:
+                        pass
+            new_post, _ = await asyncio.gather(
+                _send_force_join_post(bot, user_id, force_cfg, rendered, markup),
+                delete_message_animation(),
+            )
             if old_post and old_post.message_id != new_post.message_id:
                 try:
                     await old_post.delete()
