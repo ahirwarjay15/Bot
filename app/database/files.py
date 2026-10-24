@@ -75,8 +75,8 @@ class FileRepository:
     async def save_batch(
         self, items: list[dict], batch_id: str | None = None
     ) -> dict:
-        if len(items) < 2 or len(items) > 100:
-            raise ValueError("A batch must contain 2 to 100 files")
+        if len(items) < 2:
+            raise ValueError("A batch must contain at least 2 messages")
         if batch_id:
             doc = {
                 "batch_id": batch_id, "items": items, "kind": "batch",
