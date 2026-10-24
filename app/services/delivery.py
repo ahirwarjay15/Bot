@@ -438,6 +438,14 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 5):
                     except TelegramAPIError:
                         log.info("Could not delete auto-delete notice %s for user %s", notice_id, task["user_id"])
                 await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"status": "done", "finished_at": _now()}})
+                # Once expiry is complete, discard temporary delivery progress and IDs.
+                # Keep user/file/batch source records untouched.
+                expiry_key = task.get("request_key")
+                if expiry_key:
+                    delivery_key = expiry_key.removeprefix("batch-expiry:")
+                    await db.batch_deliveries.delete_one({"request_key": delivery_key, "status": "done"})
+                    await db.delivery_requests.delete_one({"request_key": delivery_key, "status": "done"})
+                await db.tasks.delete_one({"_id": task["_id"], "status": "done"})
             except Exception:
                 log.exception("Expiry task failed")
                 await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"status": "pending", "last_error_at": _now()}})
