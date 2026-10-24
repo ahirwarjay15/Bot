@@ -6,13 +6,13 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 
-async def _backfill_code_collection(source, target, field: str, kind: str, batch_size: int = 500):
+async def _backfill_code_collection(source, target, field: str, batch_size: int = 500):
     operations = []
     async for record in source.find({field: {"$type": "string"}}, {field: 1}):
         code = record[field]
         operations.append(UpdateOne(
             {"code": code},
-            {"$setOnInsert": {"code": code, "kind": kind}},
+            {"$setOnInsert": {"code": code}},
             upsert=True,
         ))
         if len(operations) >= batch_size:
@@ -27,8 +27,8 @@ async def backfill_deeplink_codes(db, batch_size: int = 500) -> bool:
     migration_id = "deeplink_code_backfill_v1"
     if await db.system_migrations.find_one({"_id": migration_id}):
         return False
-    await _backfill_code_collection(db.files, db.deeplink_codes, "file_key", "legacy-file", batch_size)
-    await _backfill_code_collection(db.batches, db.deeplink_codes, "batch_id", "legacy-batch", batch_size)
+    await _backfill_code_collection(db.files, db.deeplink_codes, "file_key", batch_size)
+    await _backfill_code_collection(db.batches, db.deeplink_codes, "batch_id", batch_size)
     await db.system_migrations.update_one(
         {"_id": migration_id},
         {"$setOnInsert": {"completed": True}},
@@ -53,6 +53,7 @@ async def unify_file_batch_records(db) -> int:
         elif isinstance(existing.get("items"), list):
             await db.batches.delete_one({"_id": batch["_id"]})
     await db.files.update_many({}, {"$unset": {"kind": ""}})
+    await db.deeplink_codes.update_many({}, {"$unset": {"kind": ""}})
     return moved
 
 
