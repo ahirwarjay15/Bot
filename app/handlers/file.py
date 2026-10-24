@@ -108,7 +108,7 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
             reply_markup=markup_data,
         )
         me = await message.bot.get_me()
-        link = f"https://t.me/{me.username}?start=deepcode_{build_deeplink_token(record['file_key'])}"
+        link = f"https://t.me/{me.username}?start={build_deeplink_token(record['file_key'])}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])
