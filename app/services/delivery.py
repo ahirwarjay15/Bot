@@ -324,13 +324,11 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         expiry_suffix = request_key or f"{user_id}:{token_urlsafe(12)}"
         task_key = f"batch-expiry:{expiry_suffix}"
         task = {
-            "kind": "delete_delivery",
-            "user_id": user_id,
+            "chat_id": user_id,
             "message_ids": [],
             "deadline": None,
             "deeplink": deeplink,
             "status": "delivering",
-            "created_at": _now(),
             "updated_at": _now(),
             "messages_deleted": False,
             "after_delete_attempted": False,
@@ -476,7 +474,7 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                     deletion_failed = False
                     for mid in task.get("message_ids", []):
                         try:
-                            await bot.delete_message(task["user_id"], mid)
+                            await bot.delete_message(task["chat_id"], mid)
                         except TelegramBadRequest as exc:
                             if "message to delete not found" in str(exc).lower():
                                 continue  # Already gone; the desired state is reached.
