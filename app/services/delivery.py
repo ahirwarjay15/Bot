@@ -311,7 +311,7 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                 expiry_key = task.get("request_key")
                 if expiry_key:
                     delivery_key = expiry_key.removeprefix("batch-expiry:")
-                    await db.batch_deliveries.delete_one({"request_key": delivery_key, "status": "done"})
+                    # Batch delivery queue was removed; Auto Delete uses tasks only.
                     await db.delivery_requests.delete_one({"request_key": delivery_key, "status": "done"})
                 await db.tasks.delete_one({"_id": task["_id"], "status": "done"})
             except Exception:
