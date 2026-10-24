@@ -61,6 +61,19 @@ async def pin_broadcast_reply(message: Message, settings: Settings, database):
         log.info("Silent /pin attempt could not pin message in chat %s", message.chat.id, exc_info=True)
 
 
+@router.message(F.pinned_message)
+async def remove_bot_pin_service_message(message: Message):
+    pinned = message.pinned_message
+    if not pinned:
+        return
+    try:
+        bot_user = await message.bot.get_me()
+        if pinned.from_user and pinned.from_user.id == bot_user.id:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+    except TelegramAPIError:
+        log.debug("Could not remove pin service message", exc_info=True)
+
+
 @router.message(Command("broadcast", "pbroadcast"))
 async def broadcast(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
