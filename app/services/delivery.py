@@ -384,7 +384,7 @@ async def run_batch_delivery_worker(bot: Bot, db, poll_seconds: int = 2):
         await asyncio.sleep(0.05)
 
 
-async def run_task_worker(bot: Bot, db, poll_seconds: int = 5):
+async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
     while True:
         now = _now()
         async for task in db.tasks.find({"status": "pending", "deadline": {"$lte": now}}).sort("deadline", 1).limit(50):
