@@ -260,9 +260,8 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
             )
             if claimed.modified_count:
                 try:
-                    notice_cfg = {"notice": doc.get("notice", DEFAULT_NOTICE)}
-                    if doc.get("notice_entities") is not None:
-                        notice_cfg["notice_entities"] = doc.get("notice_entities")
+                    # Notice formatting stays in settings; never duplicate it in delivery records.
+                    notice_cfg = await db.settings.find_one({"key": "auto_delete", "enabled": True}) or {}
                     notice_text, notice_entities, custom_format = format_notice(notice_cfg, int(doc["minutes"]))
                     notice_buttons = [
                         InlineKeyboardButton(text=str(doc.get(f"button{i}_text", "")), url=str(doc.get(f"button{i}_url", "")))
@@ -301,7 +300,7 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                 {"$set": {"alert_status": "unknown"}},
             )
         doc = await db.batch_deliveries.find_one({"request_key": request_key})
-        if doc.get("auto_delete") and doc.get("deadline"):
+        if doc.get("auto_delete") and doc.get("deadline") and delivered_ids:
             message_ids = list(doc.get("delivered_message_ids", []))
             notice_message_id = doc.get("alert_message_id") if doc.get("alert_status") == "sent" else None
             await _save_expiry_task(
@@ -312,12 +311,13 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
             {"request_key": request_key, "status": "processing"},
             {"$set": {"status": "done", "finished_at": _now()}},
         )
-        await db.delivery_requests.update_one(
-            {"request_key": request_key, "status": "processing"},
-            {"$set": {"status": "done", "updated_at": _now(), "recovered_or_completed_at": _now()}},
-        )
-        final = await db.batch_deliveries.find_one({"request_key": request_key})
-        return (len(final.get("delivered_message_ids", [])), int(final.get("failed_count", 0)))
+        final = await db.batch_deliveries.find_one({"request_key": request_key}) or doc
+        result = (len(final.get("delivered_message_ids", [])), int(final.get("failed_count", 0)))
+        # Delivery progress is temporary. The expiry task keeps only the IDs and
+        # deadline needed to delete delivered messages (plus the optional after-delete link).
+        await db.batch_deliveries.delete_one({"request_key": request_key, "status": "done"})
+        await db.delivery_requests.delete_one({"request_key": request_key})
+        return result
     except Exception:
         log.exception("Batch delivery processing interrupted; persisted progress will be resumed")
         await db.batch_deliveries.update_one(
@@ -328,7 +328,37 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
 
 
 async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: str, request_key: str | None = None):
-    """Persist every batch item before sending, so restarts can resume safely."""
+    """Persist progress only when Auto Delete needs a durable expiry schedule."""
+    items = list(batch.get("items", []))
+    if not items:
+        return (0, 0)
+    auto = await db.settings.find_one({"key": "auto_delete", "enabled": True})
+    if not auto:
+        # Auto Delete disabled: deliver directly and leave no delivery/task records.
+        custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
+        custom_buttons = custom_cfg.get("buttons", [])
+        sent_count = failed_count = 0
+        for item in items:
+            markup_data = None if item.get("disable_buttons") else item.get("reply_markup")
+            if not item.get("disable_buttons") and not item.get("original_has_buttons") and not markup_data:
+                valid_buttons = [
+                    InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
+                    for button in custom_buttons[:2]
+                    if button.get("text") and button.get("url")
+                ]
+                if valid_buttons:
+                    markup_data = InlineKeyboardMarkup(inline_keyboard=[valid_buttons]).model_dump(mode="json", exclude_none=True)
+            markup = InlineKeyboardMarkup.model_validate(markup_data) if markup_data else None
+            try:
+                await bot.copy_message(
+                    chat_id=user_id, from_chat_id=item["source_chat_id"],
+                    message_id=item["source_message_id"], reply_markup=markup,
+                )
+                sent_count += 1
+            except TelegramAPIError as exc:
+                failed_count += 1
+                log.warning("Delivery item %s failed for user %s: %s", item.get("source_message_id"), user_id, type(exc).__name__)
+        return (sent_count, failed_count)
     request_key = request_key or f"batch:{user_id}:{token_urlsafe(12)}"
     existing = await db.batch_deliveries.find_one({"request_key": request_key})
     if not existing:
@@ -340,10 +370,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
             "request_key": request_key, "user_id": user_id, "batch_id": batch.get("batch_id"),
             "items": items, "item_states": [{"status": "pending"} for _ in items],
             "next_index": 0, "delivered_message_ids": [], "failed_count": 0,
-            "auto_delete": bool(auto), "minutes": _minutes(auto) if auto else None,
-            "notice": (auto or {}).get("notice", DEFAULT_NOTICE),
-            **({key: auto[key] for key in ("button1_text", "button1_url", "button1_enabled", "button2_text", "button2_url", "button2_enabled") if key in auto} if auto else {}),
-            **({"notice_entities": auto["notice_entities"]} if auto and auto.get("notice_entities") is not None else {}),
+            "auto_delete": True, "minutes": _minutes(auto),
             "deadline": None,
             "alert_status": "pending", "deeplink": deeplink, "status": "processing",
             "created_at": _now(),
