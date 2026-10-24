@@ -767,8 +767,9 @@ async def delete_start_command_after(message: Message, db, *, delay: bool = True
 
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
     me=await bot.get_me();link=f"https://t.me/{me.username}?start={payload}"
-    if payload.startswith("file_"):return await deliver_reference(bot,database.db,settings,user_id=user_id,file_doc=record,deeplink=link,request_key=request_key)
-    return await deliver_batch(bot,database.db,user_id=user_id,batch=record,deeplink=link,request_key=request_key)
+    if isinstance(record.get("items"), list):
+        return await deliver_batch(bot,database.db,user_id=user_id,batch=record,deeplink=link,request_key=request_key)
+    return await deliver_reference(bot,database.db,settings,user_id=user_id,file_doc=record,deeplink=link,request_key=request_key)
 
 @router.message(CommandStart())
 async def start_command(message:Message,command:CommandObject,settings:Settings,database,bot):
@@ -778,13 +779,15 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
     if await repo.is_banned(user.id):return
     payload=command.args or ""
     if payload:
-        if payload.startswith("file_"):
-            # Deepcode is always the first five characters. Accept both the
-            # full 20-character public token and a bare 5-character code.
+        if payload.startswith("deepcode_"):
+            token = payload[len("deepcode_"):]
+            code = token[:5]
+            record = await repo.get_file(code) if len(token) in (5, 20) else None
+        elif payload.startswith("file_"):  # Backward compatibility for old links
             token = payload[5:]
             code = token[:5]
             record = await repo.get_file(code) if len(token) in (5, 20) else None
-        elif payload.startswith("batch_"):
+        elif payload.startswith("batch_"):  # Backward compatibility for old links
             token = payload[6:]
             code = token[:5]
             record = await repo.get_batch(code) if len(token) in (5, 20) else None
@@ -799,8 +802,9 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         if await gate_or_prompt(message,payload,settings,database,bot):
             await delete_start_command_after(message, database.db)
             return
-        request_key = f"start:{user.id}:{message.message_id}"
-        if not await claim_delivery_request(database.db, request_key, user.id, payload):
+        auto_delete_cfg = await database.db.settings.find_one({"key": "auto_delete", "enabled": True})
+        request_key = f"start:{user.id}:{message.message_id}" if auto_delete_cfg else None
+        if request_key and not await claim_delivery_request(database.db, request_key, user.id, payload):
             await delete_start_command_after(message, database.db)
             return
         success = False
@@ -808,11 +812,12 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             # Flash and clear the blink before delivering the file/batch.
             await send_file_animation(bot, database.db, message.chat.id)
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
-            if payload.startswith("batch_") and result[0]==0:
+            is_batch = isinstance(record.get("items"), list)
+            if is_batch and result[0]==0:
                 await message.answer("None of the batch files could be delivered. The source messages may be unavailable.")
-            elif payload.startswith("batch_") and result[1]:
+            elif is_batch and result[1]:
                 log.warning("Batch delivery partial: %s delivered, %s failed",*result)
-            elif payload.startswith("file_") and result[0] == 0:
+            elif not is_batch and result[0] == 0:
                 await message.answer("This file is currently unavailable. The source message may have been deleted or become inaccessible.")
             success = result[0] > 0
         except TelegramAPIError:
@@ -823,8 +828,9 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         finally:
             # The blink has already appeared before delivery.
             await delete_start_command_after(message, database.db, delay=False)
-            try: await finish_delivery_request(database.db, request_key, success)
-            except Exception: log.exception("Could not update delivery request status")
+            if request_key:
+                try: await finish_delivery_request(database.db, request_key, success)
+                except Exception: log.exception("Could not update delivery request status")
         return
     if await is_owner_or_moderator(database.db,user.id,settings):
         await delete_start_command_after(message, database.db)

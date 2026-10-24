@@ -46,10 +46,8 @@ async def claim_delivery_request(db, request_key: str, user_id: int, payload: st
 
 
 async def finish_delivery_request(db, request_key: str, success: bool):
-    await db.delivery_requests.update_one(
-        {"request_key": request_key, "status": "processing"},
-        {"$set": {"status": "done" if success else "failed", "updated_at": _now()}},
-    )
+    # Request deduplication is only needed while the delivery is running.
+    await db.delivery_requests.delete_one({"request_key": request_key})
 
 
 def _minutes(cfg):
@@ -260,9 +258,8 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
             )
             if claimed.modified_count:
                 try:
-                    notice_cfg = {"notice": doc.get("notice", DEFAULT_NOTICE)}
-                    if doc.get("notice_entities") is not None:
-                        notice_cfg["notice_entities"] = doc.get("notice_entities")
+                    # Notice formatting stays in settings; never duplicate it in delivery records.
+                    notice_cfg = await db.settings.find_one({"key": "auto_delete", "enabled": True}) or {}
                     notice_text, notice_entities, custom_format = format_notice(notice_cfg, int(doc["minutes"]))
                     notice_buttons = [
                         InlineKeyboardButton(text=str(doc.get(f"button{i}_text", "")), url=str(doc.get(f"button{i}_url", "")))
@@ -301,7 +298,7 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
                 {"$set": {"alert_status": "unknown"}},
             )
         doc = await db.batch_deliveries.find_one({"request_key": request_key})
-        if doc.get("auto_delete") and doc.get("deadline"):
+        if doc.get("auto_delete") and doc.get("deadline") and delivered_ids:
             message_ids = list(doc.get("delivered_message_ids", []))
             notice_message_id = doc.get("alert_message_id") if doc.get("alert_status") == "sent" else None
             await _save_expiry_task(
@@ -312,12 +309,13 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
             {"request_key": request_key, "status": "processing"},
             {"$set": {"status": "done", "finished_at": _now()}},
         )
-        await db.delivery_requests.update_one(
-            {"request_key": request_key, "status": "processing"},
-            {"$set": {"status": "done", "updated_at": _now(), "recovered_or_completed_at": _now()}},
-        )
-        final = await db.batch_deliveries.find_one({"request_key": request_key})
-        return (len(final.get("delivered_message_ids", [])), int(final.get("failed_count", 0)))
+        final = await db.batch_deliveries.find_one({"request_key": request_key}) or doc
+        result = (len(final.get("delivered_message_ids", [])), int(final.get("failed_count", 0)))
+        # Delivery progress is temporary. The expiry task keeps only the IDs and
+        # deadline needed to delete delivered messages (plus the optional after-delete link).
+        await db.batch_deliveries.delete_one({"request_key": request_key, "status": "done"})
+        await db.delivery_requests.delete_one({"request_key": request_key})
+        return result
     except Exception:
         log.exception("Batch delivery processing interrupted; persisted progress will be resumed")
         await db.batch_deliveries.update_one(
@@ -328,42 +326,121 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
 
 
 async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: str, request_key: str | None = None):
-    """Persist every batch item before sending, so restarts can resume safely."""
-    request_key = request_key or f"batch:{user_id}:{token_urlsafe(12)}"
-    existing = await db.batch_deliveries.find_one({"request_key": request_key})
-    if not existing:
-        auto = await db.settings.find_one({"key": "auto_delete", "enabled": True})
-        items = list(batch.get("items", []))
-        if not items:
-            return (0, 0)
-        doc = {
-            "request_key": request_key, "user_id": user_id, "batch_id": batch.get("batch_id"),
-            "items": items, "item_states": [{"status": "pending"} for _ in items],
-            "next_index": 0, "delivered_message_ids": [], "failed_count": 0,
-            "auto_delete": bool(auto), "minutes": _minutes(auto) if auto else None,
-            "notice": (auto or {}).get("notice", DEFAULT_NOTICE),
-            **({key: auto[key] for key in ("button1_text", "button1_url", "button1_enabled", "button2_text", "button2_url", "button2_enabled") if key in auto} if auto else {}),
-            **({"notice_entities": auto["notice_entities"]} if auto and auto.get("notice_entities") is not None else {}),
+    """Deliver directly; persist only message IDs and expiry metadata when Auto Delete is on."""
+    items = list(batch.get("items", []))
+    if not items:
+        return (0, 0)
+
+    auto = await db.settings.find_one({"key": "auto_delete", "enabled": True})
+    task_key = None
+    deadline = None
+    minutes = None
+    if auto:
+        minutes = _minutes(auto)
+        deadline = None
+        expiry_suffix = request_key or f"{user_id}:{token_urlsafe(12)}"
+        task_key = f"batch-expiry:{expiry_suffix}"
+        task = {
+            "kind": "delete_delivery",
+            "user_id": user_id,
+            "message_ids": [],
             "deadline": None,
-            "alert_status": "pending", "deeplink": deeplink, "status": "processing",
+            "deeplink": deeplink,
+            "status": "delivering",
             "created_at": _now(),
+            "updated_at": _now(),
+            "messages_deleted": False,
+            "after_delete_attempted": False,
+            "request_key": task_key,
         }
+        # This is the only persistent delivery record for new deliveries: the
+        # IDs to delete, destination chat, deadline, and minimal retry metadata.
+        await db.tasks.update_one(
+            {"request_key": task_key}, {"$setOnInsert": task}, upsert=True
+        )
+
+    custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
+    custom_buttons = custom_cfg.get("buttons", [])
+    sent_count = failed_count = 0
+    for item in items:
+        markup_data = None if item.get("disable_buttons") else item.get("reply_markup")
+        has_original_buttons = item.get("original_has_buttons", bool(markup_data))
+        if not item.get("disable_buttons") and not has_original_buttons and not markup_data:
+            valid_buttons = [
+                InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
+                for button in custom_buttons[:2]
+                if button.get("text") and button.get("url")
+            ]
+            if valid_buttons:
+                markup_data = InlineKeyboardMarkup(inline_keyboard=[valid_buttons]).model_dump(
+                    mode="json", exclude_none=True
+                )
+        markup = None
+        if markup_data:
+            try:
+                markup = InlineKeyboardMarkup.model_validate(markup_data)
+            except (ValueError, TypeError):
+                log.warning("Invalid inline buttons for source message %s",
+                            item["source_message_id"], exc_info=True)
         try:
-            await db.batch_deliveries.insert_one(doc)
-        except Exception as exc:
-            if getattr(exc, "code", None) != 11000:
-                raise
-    else:
-        if existing.get("status") == "done":
-            return (len(existing.get("delivered_message_ids", [])), int(existing.get("failed_count", 0)))
-        if existing.get("status") == "pending":
-            claim = await db.batch_deliveries.update_one(
-                {"request_key": request_key, "status": "pending"},
-                {"$set": {"status": "processing", "resumed_at": _now()}},
+            sent = await bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=item["source_chat_id"],
+                message_id=item["source_message_id"],
+                reply_markup=markup,
             )
-            if not claim.modified_count:
-                return (len(existing.get("delivered_message_ids", [])), int(existing.get("failed_count", 0)))
-    return await _process_batch_delivery(bot, db, request_key)
+            sent_count += 1
+            if task_key:
+                await db.tasks.update_one(
+                    {"request_key": task_key},
+                    {"$push": {"message_ids": sent.message_id}, "$set": {"updated_at": _now()}},
+                )
+        except TelegramAPIError as exc:
+            failed_count += 1
+            log.warning("Delivery item %s failed for user %s: %s",
+                        item.get("source_message_id"), user_id, type(exc).__name__)
+
+    if task_key:
+        if sent_count == 0:
+            await db.tasks.delete_one({"request_key": task_key})
+        else:
+            # Timer starts after delivery; while sending, this record cannot expire.
+            deadline = _now() + timedelta(minutes=minutes)
+            # Keep notice text/entities/buttons in settings, not in the task record.
+            notice_text, notice_entities, custom_format = format_notice(auto, minutes)
+            notice_buttons = [
+                InlineKeyboardButton(
+                    text=str(auto.get(f"button{i}_text", "")),
+                    url=str(auto.get(f"button{i}_url", "")),
+                )
+                for i in (1, 2)
+                if auto.get(f"button{i}_enabled", False)
+                and auto.get(f"button{i}_text")
+                and str(auto.get(f"button{i}_url", "")).startswith(("http://", "https://"))
+            ]
+            notice_markup = InlineKeyboardMarkup(inline_keyboard=[notice_buttons]) if notice_buttons else None
+            try:
+                if custom_format:
+                    alert = await bot.send_message(
+                        user_id, notice_text, entities=notice_entities,
+                        parse_mode=None, reply_markup=notice_markup,
+                    )
+                else:
+                    alert = await bot.send_message(
+                        user_id, notice_text, parse_mode="HTML", reply_markup=notice_markup
+                    )
+                await db.tasks.update_one(
+                    {"request_key": task_key},
+                    {"$set": {"notice_message_id": alert.message_id}},
+                )
+            except TelegramAPIError:
+                log.warning("Auto-delete notice could not be sent; file delivery remains successful", exc_info=True)
+            await db.tasks.update_one(
+                {"request_key": task_key, "status": "delivering"},
+                {"$set": {"status": "pending", "deadline": deadline, "updated_at": _now()}},
+            )
+
+    return (sent_count, failed_count)
 
 
 async def run_batch_delivery_worker(bot: Bot, db, poll_seconds: int = 2):
@@ -388,6 +465,22 @@ async def run_batch_delivery_worker(bot: Bot, db, poll_seconds: int = 2):
 async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
     while True:
         now = _now()
+        # Recover a delivery interrupted before its expiry timer was armed.
+        stale_before = now - timedelta(minutes=10)
+        async for stuck in db.tasks.find({
+            "status": "delivering",
+            "$or": [
+                {"updated_at": {"$lte": stale_before}},
+                {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_before}},
+            ],
+        }).limit(50):
+            if stuck.get("message_ids"):
+                await db.tasks.update_one(
+                    {"_id": stuck["_id"], "status": "delivering"},
+                    {"$set": {"status": "pending", "deadline": now, "updated_at": now}},
+                )
+            else:
+                await db.tasks.delete_one({"_id": stuck["_id"], "status": "delivering"})
         async for task in db.tasks.find({"status": "pending", "deadline": {"$lte": now}}).sort("deadline", 1).limit(50):
             claimed = await db.tasks.update_one({"_id": task["_id"], "status": "pending"}, {"$set": {"status": "processing", "claimed_at": _now()}})
             if not claimed.modified_count:

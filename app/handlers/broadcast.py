@@ -61,7 +61,7 @@ async def pin_broadcast_reply(message: Message, settings: Settings, database):
         log.info("Silent /pin attempt could not pin message in chat %s", message.chat.id, exc_info=True)
 
 
-@router.message(Command("broadcast"))
+@router.message(Command("broadcast", "pbroadcast"))
 async def broadcast(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
@@ -74,12 +74,15 @@ async def broadcast(message: Message, settings: Settings, database):
         await message.answer("You already have a pending broadcast draft or active broadcast. Finish it before starting another.")
         return
     source = message.reply_to_message
+    command_name = (message.text or "").split()[0].split("@")[0].lstrip("/").lower()
+    pin_after_send = command_name == "pbroadcast"
     recipients = await database.db.users.count_documents({"banned": {"$ne": True}})
     await database.db.broadcast_drafts.update_one(
         {"admin_id": admin_id},
         {"$set": {"admin_id": admin_id, "chat_id": source.chat.id, "message_id": source.message_id,
                   "reply_markup": (source.reply_markup.model_dump(mode="json", exclude_none=True)
                                    if source.reply_markup else None),
+                  "pin_after_send": pin_after_send,
                   "created_at": now(), "draft_key": token_urlsafe(8), "status": "draft"}},
         upsert=True,
     )
@@ -89,7 +92,8 @@ async def broadcast(message: Message, settings: Settings, database):
         return
     draft_key = draft["draft_key"]
     keyboard = confirmation_keyboard(draft_key)
-    await message.answer(f"BROADCAST CONFIRMATION\nReview the message before sending it to users.\nRecipients: {recipients}", reply_markup=keyboard)
+    action = "broadcast and pin" if pin_after_send else "broadcast"
+    await message.answer(f"BROADCAST CONFIRMATION\nReview the message before sending it to users.\nAction: {action}\nRecipients: {recipients}", reply_markup=keyboard)
 
 @router.callback_query(F.data.startswith("broadcast:"))
 async def confirm(query: CallbackQuery, settings: Settings, database):
@@ -126,6 +130,7 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         {"$setOnInsert": {
             "draft_id": draft["_id"], "admin_id": admin_id, "source_chat_id": draft["chat_id"],
             "source_message_id": draft["message_id"], "reply_markup": draft.get("reply_markup"),
+            "pin_after_send": bool(draft.get("pin_after_send", False)),
             "report_chat_id": draft.get("report_chat_id", admin_id),
             "report_message_id": draft.get("report_message_id"), "status": "preparing",
             "created_at": now(), "recipients_loaded": False,
@@ -154,6 +159,7 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
                     "draft_id": draft["_id"], "admin_id": draft["admin_id"],
                     "source_chat_id": draft["chat_id"], "source_message_id": draft["message_id"],
                     "reply_markup": draft.get("reply_markup"),
+                    "pin_after_send": bool(draft.get("pin_after_send", False)),
                     "report_chat_id": draft.get("report_chat_id", draft["admin_id"]),
                     "report_message_id": draft.get("report_message_id"),
                     "status": "preparing", "created_at": draft.get("queued_at", draft.get("created_at", now())),
@@ -204,8 +210,10 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
                     await bot.send_message(job["report_chat_id"], report)
             except TelegramAPIError:
                 log.exception("Could not send broadcast report for job %s", job_id)
-            await db.broadcast_jobs.update_one({"_id": job_id}, {"$set": {"status": "completed", "completed_at": now(), "counts": counts}})
+            # Completion report has been sent; all queue/history data is disposable.
             await db.broadcast_drafts.delete_one({"_id": job["draft_id"]})
+            await db.broadcast_recipients.delete_many({"job_id": job_id})
+            await db.broadcast_jobs.delete_one({"_id": job_id})
             continue
         uid = recipient["user_id"]
         latest_user = await db.users.find_one({"user_id": uid}, {"banned": 1})
@@ -218,10 +226,16 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
         try:
             markup_data = job.get("reply_markup")
             markup = InlineKeyboardMarkup.model_validate(markup_data) if markup_data else None
-            await bot.copy_message(
+            copied = await bot.copy_message(
                 chat_id=uid, from_chat_id=job["source_chat_id"],
                 message_id=job["source_message_id"], reply_markup=markup,
             )
+            if job.get("pin_after_send"):
+                try:
+                    await bot.pin_chat_message(chat_id=uid, message_id=copied.message_id, disable_notification=True)
+                except TelegramAPIError:
+                    # A pin failure should not mark a successfully delivered broadcast as failed.
+                    log.warning("Could not pin /pbroadcast message for user %s", uid, exc_info=True)
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "sent", "finished_at": now()}})
         except RetryAfter as exc:
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "pending", "retry_after": float(exc.retry_after)}})

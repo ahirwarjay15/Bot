@@ -246,7 +246,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     try:
         batch = await FileRepository(database.db).save_batch(items)
         me = await message.bot.get_me()
-        link = f"https://t.me/{me.username}?start=batch_{build_deeplink_token(batch['batch_id'])}"
+        link = f"https://t.me/{me.username}?start=deepcode_{build_deeplink_token(batch['file_key'])}"
         keyboard = _link_keyboard(link)
         link_send_attempted = True
         sent_link = await message.answer(link, reply_markup=keyboard)
@@ -256,7 +256,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     except Exception:
         if batch is not None and not link_send_attempted:
             try:
-                await database.db.batches.delete_one({"batch_id": batch["batch_id"], "kind": "batch"})
+                await database.db.files.delete_one({"file_key": batch["file_key"]})
             except Exception:
                 log.warning("Could not clean up an unlinked batch record", exc_info=True)
         log.exception("Range batch generation failed")

@@ -22,7 +22,7 @@ class FileRepository:
     def __init__(self, db):
         self.db = db
 
-    async def reserve_code(self, length: int, kind: str) -> str:
+    async def reserve_code(self, length: int) -> str:
         """Reserve a random alphanumeric code permanently, even if a session is abandoned."""
         if length != 5:
             raise ValueError("Deepcodes must be exactly 5 characters")
@@ -39,7 +39,7 @@ class FileRepository:
                 continue
             try:
                 await self.db.deeplink_codes.insert_one({
-                    "code": code, "length": length, "kind": kind, "reserved_at": _now()
+                    "code": code, "length": length, "reserved_at": _now()
                 })
                 return code
             except Exception as exc:
@@ -53,13 +53,12 @@ class FileRepository:
         reply_markup: dict | None = None,
     ) -> dict:
         for _ in range(8):
-            key = await self.reserve_code(5, "file")
+            key = await self.reserve_code(5)
             doc = {
                 "file_key": key,
                 "source_chat_id": source_chat_id,
                 "source_message_id": source_message_id,
                 **({"reply_markup": reply_markup} if reply_markup else {}),
-                "kind": "file",
             }
             try:
                 await self.db.files.insert_one(doc)
@@ -70,7 +69,19 @@ class FileRepository:
         raise RuntimeError("Could not allocate a unique file key")
 
     async def get_file(self, key: str) -> dict | None:
-        return await self.db.files.find_one({"file_key": key, "kind": "file"})
+        """Find either a single file or a batch in the unified files collection."""
+        record = await self.db.files.find_one({"file_key": key})
+        if record:
+            return record
+        # Read old batch links during migration; new batches use files.
+        legacy = await self.db.batches.find_one({"batch_id": key})
+        if legacy:
+            legacy["file_key"] = legacy.get("batch_id")
+            return legacy
+        return None
+
+    async def is_batch_record(self, record: dict) -> bool:
+        return bool(record and isinstance(record.get("items"), list))
 
     async def save_batch(
         self, items: list[dict], batch_id: str | None = None
@@ -78,22 +89,16 @@ class FileRepository:
         if len(items) < 2:
             raise ValueError("A batch must contain at least 2 messages")
         if batch_id:
-            doc = {
-                "batch_id": batch_id, "items": items, "kind": "batch",
-            }
-            await self.db.batches.update_one(
-                {"batch_id": batch_id, "kind": "batch"},
-                {"$set": doc},
-                upsert=True,
+            doc = {"file_key": batch_id, "items": items}
+            await self.db.files.update_one(
+                {"file_key": batch_id}, {"$set": doc}, upsert=True
             )
-            return await self.db.batches.find_one({"batch_id": batch_id, "kind": "batch"})
+            return await self.db.files.find_one({"file_key": batch_id})
         for _ in range(8):
-            key = await self.reserve_code(5, "batch")
-            doc = {
-                "batch_id": key, "items": items, "kind": "batch",
-            }
+            key = await self.reserve_code(5)
+            doc = {"file_key": key, "items": items}
             try:
-                await self.db.batches.insert_one(doc)
+                await self.db.files.insert_one(doc)
                 return doc
             except Exception as exc:
                 if getattr(exc, "code", None) != 11000:
@@ -101,7 +106,10 @@ class FileRepository:
         raise RuntimeError("Could not allocate a unique batch key")
 
     async def get_batch(self, batch_id: str) -> dict | None:
-        return await self.db.batches.find_one({"batch_id": batch_id, "kind": "batch"})
+        record = await self.db.files.find_one({"file_key": batch_id, "items": {"$exists": True}})
+        if record:
+            return record
+        return await self.db.batches.find_one({"batch_id": batch_id})
 
     async def save_user(self, user) -> None:
         if user is None:
@@ -120,10 +128,12 @@ class FileRepository:
         return bool(user and user.get("banned", False))
 
     async def get_setting(self, key: str, default=None):
-        item = await self.db.settings.find_one({"key": key}, {"value": 1})
+        item = await self.db.settings.find_one({"key": key, "channel": {"$exists": False}}, {"value": 1})
         return item.get("value", default) if item else default
 
     async def set_setting(self, key: str, value) -> None:
         await self.db.settings.update_one(
-            {"key": key}, {"$set": {"key": key, "value": value}}, upsert=True
+            {"key": key, "channel": {"$exists": False}},
+            {"$set": {"key": key, "value": value}},
+            upsert=True
         )

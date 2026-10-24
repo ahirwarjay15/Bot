@@ -6,13 +6,13 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 
-async def _backfill_code_collection(source, target, field: str, kind: str, batch_size: int = 500):
+async def _backfill_code_collection(source, target, field: str, batch_size: int = 500):
     operations = []
     async for record in source.find({field: {"$type": "string"}}, {field: 1}):
         code = record[field]
         operations.append(UpdateOne(
             {"code": code},
-            {"$setOnInsert": {"code": code, "kind": kind}},
+            {"$setOnInsert": {"code": code}},
             upsert=True,
         ))
         if len(operations) >= batch_size:
@@ -27,14 +27,34 @@ async def backfill_deeplink_codes(db, batch_size: int = 500) -> bool:
     migration_id = "deeplink_code_backfill_v1"
     if await db.system_migrations.find_one({"_id": migration_id}):
         return False
-    await _backfill_code_collection(db.files, db.deeplink_codes, "file_key", "legacy-file", batch_size)
-    await _backfill_code_collection(db.batches, db.deeplink_codes, "batch_id", "legacy-batch", batch_size)
+    await _backfill_code_collection(db.files, db.deeplink_codes, "file_key", batch_size)
+    await _backfill_code_collection(db.batches, db.deeplink_codes, "batch_id", batch_size)
     await db.system_migrations.update_one(
         {"_id": migration_id},
         {"$setOnInsert": {"completed": True}},
         upsert=True,
     )
     return True
+
+
+async def unify_file_batch_records(db) -> int:
+    """Move legacy batch records into files and remove the obsolete kind discriminator."""
+    moved = 0
+    async for batch in db.batches.find({}):
+        code = batch.get("batch_id")
+        items = batch.get("items")
+        if not code or not isinstance(items, list):
+            continue
+        existing = await db.files.find_one({"file_key": code}, {"_id": 1, "items": 1})
+        if existing is None:
+            await db.files.insert_one({"file_key": code, "items": items})
+            moved += 1
+            await db.batches.delete_one({"_id": batch["_id"]})
+        elif isinstance(existing.get("items"), list):
+            await db.batches.delete_one({"_id": batch["_id"]})
+    await db.files.update_many({}, {"$unset": {"kind": ""}})
+    await db.deeplink_codes.update_many({}, {"$unset": {"kind": ""}})
+    return moved
 
 
 async def remove_legacy_external_force_join_links(db) -> bool:
@@ -107,6 +127,8 @@ class Database:
             await self.db.delivery_requests.create_index([("status", ASCENDING), ("updated_at", ASCENDING)])
             await self.db.batches.create_index([("batch_id", ASCENDING)], unique=True, sparse=True)
             await self.db.deeplink_codes.create_index([("code", ASCENDING)], unique=True)
+            moved_batches = await unify_file_batch_records(self.db)
+            logger.info("Unified file/batch records; legacy batches moved=%s", moved_batches)
             # Keep multiple short-lived links per user/chat so issuing a fresh
             # link never has to revoke an older one in the interactive request path.
             force_join_indexes = await self.db.force_join_links.index_information()
