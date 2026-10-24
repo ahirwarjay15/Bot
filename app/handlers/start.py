@@ -782,15 +782,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         if payload.startswith("deepcode_"):
             token = payload[len("deepcode_"):]
             code = token[:5]
-            record = await repo.get_file(code) if len(token) in (5, 20) else None
-        elif payload.startswith("file_"):  # Backward compatibility for old links
-            token = payload[5:]
-            code = token[:5]
-            record = await repo.get_file(code) if len(token) in (5, 20) else None
-        elif payload.startswith("batch_"):  # Backward compatibility for old links
-            token = payload[6:]
-            code = token[:5]
-            record = await repo.get_batch(code) if len(token) in (5, 20) else None
+            record = await repo.get_file(code) if len(token) == 20 else None
         else:
             await message.answer("This link is invalid or expired.")
             await delete_start_command_after(message, database.db)
