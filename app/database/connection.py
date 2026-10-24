@@ -125,8 +125,8 @@ class Database:
             await self.db.batch_deliveries.drop()
             await self.db.deeplink_codes.drop()
             await self.db.tasks.update_many(
-                {"chat_id": {"$exists": False}, "user_id": {"$exists": True}},
-                {"$rename": {"user_id": "chat_id"}, "$unset": {
+                {},
+                {"$unset": {
                     "kind": "", "created_at": "", "notice": "", "notice_entities": "",
                 }},
             )
