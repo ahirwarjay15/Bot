@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from secrets import token_urlsafe
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pymongo.errors import BulkWriteError
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -112,9 +112,14 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         await query.message.edit_text("Broadcast queued. You will receive the delivery report when it finishes.")
 
 async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
-    """Resume queued broadcasts after restarts; a 'sending' recipient is not resent blindly."""
-    # If the process stopped mid-request, outcome is ambiguous; count it as failed instead of risking a duplicate.
-    await db.broadcast_recipients.update_many({"status": "sending"}, {"$set": {"status": "unknown", "error": "process restarted during send"}})
+    """Resume queued broadcasts without resetting recipients owned by a live worker."""
+    # Only recover recipients whose send attempt has been stale for 10+ minutes.
+    # A second worker starting must not mark another worker's active send as unknown.
+    stale_before = now() - timedelta(minutes=10)
+    await db.broadcast_recipients.update_many(
+        {"status": "sending", "attempted_at": {"$lte": stale_before}},
+        {"$set": {"status": "unknown", "error": "stale send recovered", "recovered_at": now()}},
+    )
     while True:
         # Recover the narrow crash window after a draft is marked queued but before its job is inserted.
         async for draft in db.broadcast_drafts.find({"status": "queued"}).limit(20):
@@ -158,6 +163,11 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
             sort=[("user_id", 1)],
         )
         if not recipient:
+            # Another worker may currently be sending a recipient for this same job.
+            # Do not publish a final report until all claimed sends have finished.
+            if await db.broadcast_recipients.count_documents({"job_id": job_id, "status": "sending"}):
+                await asyncio.sleep(0.1)
+                continue
             counts = {}
             for status in ("sent", "failed", "blocked", "unknown", "skipped_banned"):
                 counts[status] = await db.broadcast_recipients.count_documents({"job_id": job_id, "status": status})
