@@ -95,7 +95,7 @@ class Database:
             await self.db.delivery_requests.create_index([("status", ASCENDING), ("updated_at", ASCENDING)])
             moved_batches = await unify_file_batch_records(self.db)
             logger.info("Unified file/batch records; legacy batches moved=%s", moved_batches)
-            await self.db.batches.delete_many({})
+            await self.db.batches.drop()
             await self.db.batch_sessions.drop()
             await self.db.batch_deliveries.drop()
             await self.db.deeplink_codes.drop()
