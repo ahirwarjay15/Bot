@@ -337,16 +337,18 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
     minutes = None
     if auto:
         minutes = _minutes(auto)
-        deadline = _now() + timedelta(minutes=minutes)
-        task_key = f"batch-expiry:{request_key or f'{user_id}:{token_urlsafe(12)}'}"
+        deadline = None
+        expiry_suffix = request_key or f"{user_id}:{token_urlsafe(12)}"
+        task_key = f"batch-expiry:{expiry_suffix}"
         task = {
             "kind": "delete_delivery",
             "user_id": user_id,
             "message_ids": [],
-            "deadline": deadline,
+            "deadline": None,
             "deeplink": deeplink,
-            "status": "pending",
+            "status": "delivering",
             "created_at": _now(),
+            "updated_at": _now(),
             "messages_deleted": False,
             "after_delete_attempted": False,
             "request_key": task_key,
@@ -391,7 +393,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
             if task_key:
                 await db.tasks.update_one(
                     {"request_key": task_key},
-                    {"$push": {"message_ids": sent.message_id}},
+                    {"$push": {"message_ids": sent.message_id}, "$set": {"updated_at": _now()}},
                 )
         except TelegramAPIError as exc:
             failed_count += 1
@@ -402,6 +404,8 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         if sent_count == 0:
             await db.tasks.delete_one({"request_key": task_key})
         else:
+            # Timer starts after delivery; while sending, this record cannot expire.
+            deadline = _now() + timedelta(minutes=minutes)
             # Keep notice text/entities/buttons in settings, not in the task record.
             notice_text, notice_entities, custom_format = format_notice(auto, minutes)
             notice_buttons = [
@@ -431,6 +435,10 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
                 )
             except TelegramAPIError:
                 log.warning("Auto-delete notice could not be sent; file delivery remains successful", exc_info=True)
+            await db.tasks.update_one(
+                {"request_key": task_key, "status": "delivering"},
+                {"$set": {"status": "pending", "deadline": deadline, "updated_at": _now()}},
+            )
 
     return (sent_count, failed_count)
 
@@ -457,6 +465,22 @@ async def run_batch_delivery_worker(bot: Bot, db, poll_seconds: int = 2):
 async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
     while True:
         now = _now()
+        # Recover a delivery interrupted before its expiry timer was armed.
+        stale_before = now - timedelta(minutes=10)
+        async for stuck in db.tasks.find({
+            "status": "delivering",
+            "$or": [
+                {"updated_at": {"$lte": stale_before}},
+                {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_before}},
+            ],
+        }).limit(50):
+            if stuck.get("message_ids"):
+                await db.tasks.update_one(
+                    {"_id": stuck["_id"], "status": "delivering"},
+                    {"$set": {"status": "pending", "deadline": now, "updated_at": now}},
+                )
+            else:
+                await db.tasks.delete_one({"_id": stuck["_id"], "status": "delivering"})
         async for task in db.tasks.find({"status": "pending", "deadline": {"$lte": now}}).sort("deadline", 1).limit(50):
             claimed = await db.tasks.update_one({"_id": task["_id"], "status": "pending"}, {"$set": {"status": "processing", "claimed_at": _now()}})
             if not claimed.modified_count:
