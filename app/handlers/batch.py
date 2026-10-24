@@ -198,13 +198,14 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
         await message.answer("Please forward the first Database Channel post with its forward tag, or send its message link.")
         return
     first_id, first_caption = parsed
+    # Avoid forwarding posts into the admin DM just to inspect captions/entities.
     try:
-        first_caption, first_entities = await _source_post_content(message, int(settings.source_channel_id), first_id)
+        await message.bot.get_chat(int(settings.source_channel_id))
     except TelegramAPIError:
-        log.exception("Could not read the first source post's text/entities")
-        await message.answer("I couldn't read the first post from the Database Channel. Check that the bot can access and forward that post.")
+        log.exception("Bot cannot access the configured Database Channel")
+        await message.answer("I couldn't access the Database Channel. Check the bot's channel permissions.")
         return
-    await state.update_data(first_message_id=first_id, first_caption=first_caption, first_caption_entities=first_entities)
+    await state.update_data(first_message_id=first_id)
     await state.set_state(BatchState.waiting_last)
     await message.answer(
         "Forward The Batch Last Message From Database Channel (With Forward Tag).. or Give Me Batch last message link from your batch channel"
@@ -222,12 +223,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         await message.answer("Please forward the last Database Channel post with its forward tag, or send its message link.")
         return
     last_id, last_caption = parsed
-    try:
-        last_caption, last_entities = await _source_post_content(message, int(settings.source_channel_id), last_id)
-    except TelegramAPIError:
-        log.exception("Could not read the last source post's text/entities")
-        await message.answer("I couldn't read the last post from the Database Channel. Check that the bot can access and forward that post.")
-        return
+    # Do not temporarily forward the last post into the admin DM.
     data = await state.get_data()
     first_id = int(data["first_message_id"])
     source_chat_id = int(data["source_chat_id"])
@@ -240,20 +236,11 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         return
     # No arbitrary 100-message cap: allow the full selected range. Telegram API
     # limits still apply, so large batches can take longer or need retries.
-    try:
-        valid_ids = await _existing_source_message_ids(
-            message.bot, message.chat.id, source_chat_id, first_id, last_id
-        )
-    except TelegramAPIError:
-        log.exception("Could not validate the selected Database Channel range")
-        await message.answer("I couldn't verify the selected messages. Check the bot's access to the Database Channel and try again.")
-        return
-    if len(valid_ids) < 2:
-        await message.answer("At least two existing messages are required. Deleted/unavailable messages were skipped.")
-        return
-    # Preserve all message types (text, media, GIF, documents, etc.); only unavailable IDs are omitted.
-    items = [{"source_chat_id": source_chat_id, "source_message_id": mid}
-             for mid in valid_ids]
+    # Do not forward every post to the admin DM for range validation.
+    # Keep source references only; individual unavailable messages are handled at delivery.
+    items = [{"source_chat_id": source_chat_id, "source_message_id": mid,
+              "disable_buttons": True}
+             for mid in range(first_id, last_id + 1)]
     batch = None
     link_send_attempted = False
     try:
@@ -263,21 +250,8 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         keyboard = _link_keyboard(link)
         link_send_attempted = True
         sent_link = await message.answer(link, reply_markup=keyboard)
-        # Reply in first-then-last order, preserving the original Telegram entities.
-        captions = [
-            (data.get("first_caption", ""), data.get("first_caption_entities", [])),
-            (last_caption, last_entities),
-        ]
-        for caption, entities_data in captions:
-            if caption:
-                await message.bot.send_message(
-                    chat_id=message.chat.id,
-                    text=caption,
-                    entities=_entities_from_data(entities_data),
-                    parse_mode=None,
-                    reply_to_message_id=sent_link.message_id,
-                )
-        await mirror_deeplink(message.bot, settings, link, keyboard, captions)
+        # Do not send source captions or source-post buttons alongside the batch link.
+        await mirror_deeplink(message.bot, settings, link, keyboard)
         await state.clear()
     except Exception:
         if batch is not None and not link_send_attempted:
