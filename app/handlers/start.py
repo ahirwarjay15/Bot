@@ -95,7 +95,7 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     normalized = dict(cfg or {})
     frames = normalized.get("frames")
     frames = [str(frame) for frame in frames if str(frame).strip()] if isinstance(frames, list) else []
-    if not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    if not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
     normalized["frames"] = frames[:6]
     mode = normalized.get("mode")
     if mode in ("new_message", "message"): mode = "message"
@@ -229,9 +229,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     fallback_query = {"channel": channel, "expires_at": {"$gt": now}}
     if mode in {"normal", "join_request"}:
         fallback_query["mode"] = mode
-    fallback = await links_collection.find_one(
-        fallback_query, sort=[("created_at", -1)]
-    )
+    fallback = await links_collection.find_one(fallback_query)
     if fallback and fallback.get("invite_link"):
         return fallback["invite_link"]
     log.warning("No pre-generated Force Sub link is currently available for %s", channel)
@@ -255,7 +253,7 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> 
     current = await links.find_one({
         "channel": channel, "chat_id": chat_id, "mode": mode,
         "is_rotation_current": True, "expires_at": {"$gt": now},
-    }, sort=[("created_at", -1)])
+    })
     if current and current.get("refresh_at") and current["refresh_at"] > now:
         return True
     try:
@@ -303,6 +301,14 @@ async def run_force_join_link_rotation_worker(bot, db, settings, interval_second
         try:
             channels = await effective_force_join_channels(type("DatabaseProxy", (), {"db": db})(), settings)
             cfg = await db.settings.find_one({"key": "force_join"}) or {}
+            active_channels = set(channels)
+            # A removed channel must never keep generating links. Revoke and remove
+            # every tracked invite for channels no longer in the effective config.
+            async for stale_link in db.force_join_links.find({"channel": {"$nin": list(active_channels)}}).limit(200):
+                try:
+                    await _revoke_tracked_force_join_link(bot, db, stale_link)
+                except Exception:
+                    log.warning("Could not revoke invite for removed Force Sub channel", exc_info=True)
             if cfg.get("enabled", False):
                 channel_cfgs = await asyncio.gather(*(
                     db.settings.find_one({"key": "force_join_channel", "channel": channel})
