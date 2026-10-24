@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from pymongo import ASCENDING, AsyncMongoClient
+from pymongo.errors import DuplicateKeyError
 from app.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,61 @@ async def unify_file_batch_records(db) -> int:
             await db.batches.delete_one({"_id": batch["_id"]})
     await db.files.update_many({}, {"$unset": {"kind": "", "file_name": "", "created_at": "", "created_by": ""}})
     return moved
+
+
+async def migrate_delivery_storage(db) -> bool:
+    """Run destructive legacy-collection cleanup once across multiple worker services."""
+    migration_id = "minimal_delivery_storage_v1"
+    now = datetime.now(timezone.utc)
+    existing = await db.system_migrations.find_one({"_id": migration_id})
+    if existing and existing.get("completed"):
+        return False
+    if existing:
+        started_at = existing.get("started_at")
+        if started_at and started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        if existing.get("status") == "running" and started_at and now - started_at < timedelta(minutes=10):
+            return False
+        claimed = await db.system_migrations.update_one(
+            {"_id": migration_id, "status": existing.get("status"), "started_at": existing.get("started_at")},
+            {"$set": {"status": "running", "started_at": now, "completed": False}},
+        )
+        if not claimed.modified_count:
+            return False
+    else:
+        try:
+            await db.system_migrations.insert_one({
+                "_id": migration_id, "status": "running", "started_at": now, "completed": False,
+            })
+        except DuplicateKeyError:
+            return False
+
+    try:
+        moved = await unify_file_batch_records(db)
+        logger.info("Unified file/batch records; legacy batches moved=%s", moved)
+        await db.batches.drop()
+        await db.batch_sessions.drop()
+        await db.batch_deliveries.drop()
+        await db.deeplink_codes.drop()
+        await db.tasks.update_many(
+            {},
+            {"$unset": {
+                "kind": "", "created_at": "", "notice": "", "notice_entities": "",
+                "button1_text": "", "button1_url": "", "button1_enabled": "",
+                "button2_text": "", "button2_url": "", "button2_enabled": "",
+            }},
+        )
+        await db.system_migrations.update_one(
+            {"_id": migration_id},
+            {"$set": {"status": "completed", "completed": True, "completed_at": datetime.now(timezone.utc)}},
+        )
+        return True
+    except Exception:
+        await db.system_migrations.update_one(
+            {"_id": migration_id},
+            {"$set": {"status": "failed", "failed_at": datetime.now(timezone.utc)}},
+        )
+        raise
 
 
 async def cleanup_completed_transients(db) -> dict:
@@ -117,26 +173,7 @@ class Database:
             await self.db.tasks.create_index([("request_key", ASCENDING)], unique=True, sparse=True)
             await self.db.delivery_requests.create_index([("request_key", ASCENDING)], unique=True)
             await self.db.delivery_requests.create_index([("status", ASCENDING), ("updated_at", ASCENDING)])
-            moved_batches = await unify_file_batch_records(self.db)
-            logger.info("Unified file/batch records; legacy batches moved=%s", moved_batches)
-            await self.db.batches.drop()
-            await self.db.batch_sessions.drop()
-            await self.db.batch_deliveries.drop()
-            await self.db.deeplink_codes.drop()
-            await self.db.tasks.update_many(
-                {},
-                {"$unset": {
-                    "kind": "", "created_at": "", "notice": "", "notice_entities": "",
-                }},
-            )
-            await self.db.tasks.update_many(
-                {},
-                {"$unset": {
-                    "notice": "", "notice_entities": "", "button1_text": "",
-                    "button1_url": "", "button1_enabled": "", "button2_text": "",
-                    "button2_url": "", "button2_enabled": "",
-                }},
-            )
+            await migrate_delivery_storage(self.db)
             # Keep multiple short-lived links per user/chat so issuing a fresh
             # link never has to revoke an older one in the interactive request path.
             force_join_indexes = await self.db.force_join_links.index_information()
