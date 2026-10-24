@@ -141,7 +141,12 @@ class Database:
                     {"claimed_at": {"$lte": stale_before}},
                     {"worker_claimed_at": {"$lte": stale_before}},
                     {"updated_at": {"$lte": stale_before}},
-                    {"created_at": {"$lte": stale_before}},
+                    {"$and": [
+                        {"claimed_at": {"$exists": False}},
+                        {"worker_claimed_at": {"$exists": False}},
+                        {"updated_at": {"$exists": False}},
+                        {"created_at": {"$lte": stale_before}},
+                    ]},
                 ]}
                 task_result = await self.db.tasks.update_many(
                     {"status": "processing", **stale_claim},
