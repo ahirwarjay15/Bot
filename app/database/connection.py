@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from pymongo import ASCENDING, AsyncMongoClient, UpdateOne
 from app.config import Settings
 
@@ -133,11 +134,34 @@ class Database:
             await self.db.batch_sessions.create_index([("status", ASCENDING), ("last_activity_ts", ASCENDING)])
             await self.db.users.create_index([("blocked", ASCENDING)])
             if self.recover_interrupted_jobs:
-                await self.db.tasks.update_many({"status": "processing"}, {"$set": {"status": "pending"}})
-                await self.db.batch_deliveries.update_many({"status": "processing"}, {"$set": {"status": "pending"}})
-                logger.info("MongoDB ready; interrupted delete tasks and batch deliveries recovered")
+                # Never reset jobs just because a second worker started. Only reclaim
+                # work whose claim/heartbeat has been stale long enough to indicate a crash.
+                stale_before = datetime.now(timezone.utc) - timedelta(minutes=10)
+                stale_claim = {"$or": [
+                    {"claimed_at": {"$lte": stale_before}},
+                    {"worker_claimed_at": {"$lte": stale_before}},
+                    {"updated_at": {"$lte": stale_before}},
+                    {"$and": [
+                        {"claimed_at": {"$exists": False}},
+                        {"worker_claimed_at": {"$exists": False}},
+                        {"updated_at": {"$exists": False}},
+                        {"created_at": {"$lte": stale_before}},
+                    ]},
+                ]}
+                task_result = await self.db.tasks.update_many(
+                    {"status": "processing", **stale_claim},
+                    {"$set": {"status": "pending", "recovered_at": datetime.now(timezone.utc)}},
+                )
+                batch_result = await self.db.batch_deliveries.update_many(
+                    {"status": "processing", **stale_claim},
+                    {"$set": {"status": "pending", "recovered_at": datetime.now(timezone.utc)}},
+                )
+                logger.info(
+                    "Stale job recovery complete: %s expiry tasks, %s batch deliveries",
+                    task_result.modified_count, batch_result.modified_count,
+                )
             else:
-                logger.info("MongoDB ready; worker-owned job recovery skipped for this process role")
+                logger.info("Worker-owned job recovery skipped for this process role")
         except Exception:
             await self.close()
             logger.exception("MongoDB startup check failed")

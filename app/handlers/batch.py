@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -61,6 +61,35 @@ def is_batch_file(message) -> bool:
 def ordered_batch_items(items):
     """Order batch source references by their original channel message IDs."""
     return sorted(items, key=lambda item: int(item.get("source_message_id", 0)))
+
+
+async def _existing_source_message_ids(bot, destination_chat_id: int, source_chat_id: int,
+                                       first_id: int, last_id: int) -> list[int]:
+    """Return source IDs that can still be read; deleted posts are skipped safely."""
+    available = []
+    for source_id in range(first_id, last_id + 1):
+        temporary = None
+        try:
+            temporary = await bot.forward_message(
+                chat_id=destination_chat_id,
+                from_chat_id=source_chat_id,
+                message_id=source_id,
+            )
+            available.append(source_id)
+        except TelegramBadRequest as exc:
+            # Telegram reports a deleted/unavailable source message as BadRequest.
+            log.info("Skipping unavailable source message %s: %s", source_id, exc)
+        except TelegramAPIError:
+            # Permission/network failures are not evidence that the source is deleted.
+            raise
+        finally:
+            if temporary is not None:
+                try:
+                    await bot.delete_message(destination_chat_id, temporary.message_id)
+                except TelegramAPIError:
+                    log.warning("Could not remove temporary batch validation message %s",
+                                temporary.message_id, exc_info=True)
+    return available
 
 
 async def _parse_message_reference(message: Message, bot, configured_chat_id):
@@ -212,9 +241,20 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     if count > 100:
         await message.answer("This batch contains more than the supported 100 messages. Please choose a smaller range.")
         return
-    # The existing repository and delivery pipeline store only source IDs, not copied media.
+    try:
+        valid_ids = await _existing_source_message_ids(
+            message.bot, message.chat.id, source_chat_id, first_id, last_id
+        )
+    except TelegramAPIError:
+        log.exception("Could not validate the selected Database Channel range")
+        await message.answer("I couldn't verify the selected messages. Check the bot's access to the Database Channel and try again.")
+        return
+    if len(valid_ids) < 2:
+        await message.answer("At least two existing messages are required. Deleted/unavailable messages were skipped.")
+        return
+    # Preserve all message types (text, media, GIF, documents, etc.); only unavailable IDs are omitted.
     items = [{"source_chat_id": source_chat_id, "source_message_id": mid}
-             for mid in range(first_id, last_id + 1)]
+             for mid in valid_ids]
     batch = None
     link_send_attempted = False
     try:

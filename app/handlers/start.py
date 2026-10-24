@@ -95,7 +95,7 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     normalized = dict(cfg or {})
     frames = normalized.get("frames")
     frames = [str(frame) for frame in frames if str(frame).strip()] if isinstance(frames, list) else []
-    if not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    if not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
     normalized["frames"] = frames[:6]
     mode = normalized.get("mode")
     if mode in ("new_message", "message"): mode = "message"
@@ -229,9 +229,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     fallback_query = {"channel": channel, "expires_at": {"$gt": now}}
     if mode in {"normal", "join_request"}:
         fallback_query["mode"] = mode
-    fallback = await links_collection.find_one(
-        fallback_query, sort=[("created_at", -1)]
-    )
+    fallback = await links_collection.find_one(fallback_query)
     if fallback and fallback.get("invite_link"):
         return fallback["invite_link"]
     log.warning("No pre-generated Force Sub link is currently available for %s", channel)
@@ -255,8 +253,13 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> 
     current = await links.find_one({
         "channel": channel, "chat_id": chat_id, "mode": mode,
         "is_rotation_current": True, "expires_at": {"$gt": now},
-    }, sort=[("created_at", -1)])
-    if current and current.get("refresh_at") and current["refresh_at"] > now:
+    })
+    refresh_at = current.get("refresh_at") if current else None
+    # MongoDB datetime decoding may return naive UTC datetimes when tz_aware is disabled.
+    # Normalize to UTC-aware before comparing with the aware UTC clock.
+    if refresh_at is not None and refresh_at.tzinfo is None:
+        refresh_at = refresh_at.replace(tzinfo=timezone.utc)
+    if current and refresh_at and refresh_at > now:
         return True
     try:
         invite = await bot.create_chat_invite_link(
@@ -303,6 +306,14 @@ async def run_force_join_link_rotation_worker(bot, db, settings, interval_second
         try:
             channels = await effective_force_join_channels(type("DatabaseProxy", (), {"db": db})(), settings)
             cfg = await db.settings.find_one({"key": "force_join"}) or {}
+            active_channels = set(channels)
+            # A removed channel must never keep generating links. Revoke and remove
+            # every tracked invite for channels no longer in the effective config.
+            async for stale_link in db.force_join_links.find({"channel": {"$nin": list(active_channels)}}).limit(200):
+                try:
+                    await _revoke_tracked_force_join_link(bot, db, stale_link)
+                except Exception:
+                    log.warning("Could not revoke invite for removed Force Sub channel", exc_info=True)
             if cfg.get("enabled", False):
                 channel_cfgs = await asyncio.gather(*(
                     db.settings.find_one({"key": "force_join_channel", "channel": channel})
@@ -311,7 +322,41 @@ async def run_force_join_link_rotation_worker(bot, db, settings, interval_second
                 semaphore = asyncio.Semaphore(5)
                 async def prepare(channel, channel_cfg):
                     async with semaphore:
-                        await _prepare_force_join_link(bot, db, channel, channel_cfg or {})
+                        # Shared MongoDB lease prevents the two Worker services from
+                        # creating/rotating links for the same channel simultaneously.
+                        owner = f"{id(asyncio.current_task())}:{time.monotonic()}"
+                        locks = db.service_locks
+                        now = datetime.now(timezone.utc)
+                        lease_until = now + timedelta(minutes=2)
+                        try:
+                            lock = await locks.find_one_and_update(
+                                {"_id": f"force_join_rotation:{channel}",
+                                 "$or": [{"lease_until": {"$lte": now}}, {"owner": owner}]},
+                                {"$set": {"owner": owner, "lease_until": lease_until}},
+                                upsert=True,
+                                return_document=True,
+                            )
+                        except Exception as exc:
+                            if getattr(exc, "code", None) == 11000:
+                                return
+                            raise
+                        if not lock or lock.get("owner") != owner:
+                            return
+                        try:
+                            # Re-read effective settings immediately before creation: a channel
+                            # removed while this worker was waiting for its lease must not get a link.
+                            latest_channels = await effective_force_join_channels(
+                                type("DatabaseProxy", (), {"db": db})(), settings
+                            )
+                            latest_cfg = await db.settings.find_one({"key": "force_join"}) or {}
+                            if channel not in latest_channels or not latest_cfg.get("enabled", False):
+                                return
+                            await _prepare_force_join_link(bot, db, channel, channel_cfg or {})
+                        finally:
+                            await locks.update_one(
+                                {"_id": f"force_join_rotation:{channel}", "owner": owner},
+                                {"$set": {"lease_until": datetime.now(timezone.utc)}},
+                            )
                 await asyncio.gather(*(prepare(channel, channel_cfg) for channel, channel_cfg in zip(channels, channel_cfgs)))
             # Expired links are revoked by the existing cleanup worker.
         except asyncio.CancelledError:
@@ -425,7 +470,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                         stop_event: asyncio.Event | None = None,
                         cycle_event: asyncio.Event | None = None):
     frames = cfg.get("frames")
-    if not isinstance(frames, list) or not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
     frames = [str(frame) for frame in frames]
     try: speed = float(cfg.get("speed", 0.25))
     except (TypeError, ValueError): speed = 0.25

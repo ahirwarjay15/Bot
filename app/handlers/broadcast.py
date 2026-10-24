@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from secrets import token_urlsafe
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pymongo.errors import BulkWriteError
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -35,6 +35,31 @@ def confirmation_keyboard(draft_key: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="ᴄᴏɴꜰɪʀᴍ", callback_data=f"broadcast:yes:{draft_key}"),
         InlineKeyboardButton(text="ᴄᴀɴᴄᴇʟ", callback_data=f"broadcast:no:{draft_key}"),
     ]])
+
+@router.message(Command("pin"))
+async def pin_broadcast_reply(message: Message, settings: Settings, database):
+    """Silently pin a bot-delivered broadcast when Telegram supports pinning in this chat."""
+    if not message.from_user or not message.reply_to_message:
+        return
+    if not await is_owner_or_moderator(database.db, message.from_user.id, settings):
+        return
+    # Telegram does not support pinning messages in private user-bot chats.
+    if message.chat.type not in ("group", "supergroup", "channel"):
+        return
+    try:
+        bot_user = await message.bot.get_me()
+        target = message.reply_to_message
+        if not target.from_user or target.from_user.id != bot_user.id:
+            return
+        await message.bot.pin_chat_message(
+            chat_id=message.chat.id,
+            message_id=target.message_id,
+            disable_notification=True,
+        )
+    except TelegramAPIError:
+        # The command is intentionally silent; missing permissions must not disrupt broadcasts.
+        log.info("Silent /pin attempt could not pin message in chat %s", message.chat.id, exc_info=True)
+
 
 @router.message(Command("broadcast"))
 async def broadcast(message: Message, settings: Settings, database):
@@ -112,9 +137,14 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         await query.message.edit_text("Broadcast queued. You will receive the delivery report when it finishes.")
 
 async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
-    """Resume queued broadcasts after restarts; a 'sending' recipient is not resent blindly."""
-    # If the process stopped mid-request, outcome is ambiguous; count it as failed instead of risking a duplicate.
-    await db.broadcast_recipients.update_many({"status": "sending"}, {"$set": {"status": "unknown", "error": "process restarted during send"}})
+    """Resume queued broadcasts without resetting recipients owned by a live worker."""
+    # Only recover recipients whose send attempt has been stale for 10+ minutes.
+    # A second worker starting must not mark another worker's active send as unknown.
+    stale_before = now() - timedelta(minutes=10)
+    await db.broadcast_recipients.update_many(
+        {"status": "sending", "attempted_at": {"$lte": stale_before}},
+        {"$set": {"status": "unknown", "error": "stale send recovered", "recovered_at": now()}},
+    )
     while True:
         # Recover the narrow crash window after a draft is marked queued but before its job is inserted.
         async for draft in db.broadcast_drafts.find({"status": "queued"}).limit(20):
@@ -158,6 +188,11 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
             sort=[("user_id", 1)],
         )
         if not recipient:
+            # Another worker may currently be sending a recipient for this same job.
+            # Do not publish a final report until all claimed sends have finished.
+            if await db.broadcast_recipients.count_documents({"job_id": job_id, "status": "sending"}):
+                await asyncio.sleep(0.1)
+                continue
             counts = {}
             for status in ("sent", "failed", "blocked", "unknown", "skipped_banned"):
                 counts[status] = await db.broadcast_recipients.count_documents({"job_id": job_id, "status": status})

@@ -188,7 +188,7 @@ def format_settings_page(text: str) -> str:
     while lines and (not lines[0].strip() or re.fullmatch(r"[_—\-\s]+", lines[0])):
         lines.pop(0)
     body = "\n".join(lines).rstrip()
-    title = f"<u><b>{heading}</b></u>"
+    title = f"<b><u>{heading}</u></b>"
     if body and "<i>" not in body and "</i>" not in body:
         body = f"<i>{body}</i>"
     return title + (f"\n\n{body}" if body else "")
@@ -879,6 +879,17 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         if index < len(channels):
             channel = channels.pop(index)
             await patch(db, "force_join", {"channels": channels, "channels_override": True})
+            # Immediately revoke every tracked invite for the removed channel;
+            # the background worker also prunes stale channel links as a safeguard.
+            async for link in db.force_join_links.find({"channel": channel}):
+                try:
+                    if link.get("invite_link") and link.get("chat_id") is not None:
+                        await query.bot.revoke_chat_invite_link(
+                            chat_id=int(link["chat_id"]), invite_link=link["invite_link"]
+                        )
+                except TelegramAPIError:
+                    pass
+                await db.force_join_links.delete_one({"_id": link["_id"]})
             await db.settings.delete_one({"key": "force_join_channel", "channel": channel})
         await render_forcejoin(query, db, settings)
     elif action == "forcejoin_message": await render_forcejoin_message(query)
@@ -1633,8 +1644,8 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     if field == "animation_frames_collect":
         frames = list(data.get("pending_frames", []))
         if value.lower() == "/done":
-            if len(frames) < 1:
-                await tracked_answer(message, state, f"At least 1 frame is required. You have {len(frames)}; send a frame or /cancel.")
+            if len(frames) < 4:
+                await tracked_answer(message, state, f"At least 4 frames are required. You have {len(frames)}; send more frames or /cancel.")
                 return
             animation_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
             await db.settings.update_one(
@@ -1664,7 +1675,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             return
         frames.append(formatted_input_text(message, value))
         await state.update_data(field="animation_frames_collect", pending_frames=frames)
-        await tracked_answer(message, state, f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 1 frame.")
+        await tracked_answer(message, state, f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 4 frames.")
         return
     if field == "forcejoin_label":
         if not value or len(value) > 64:
