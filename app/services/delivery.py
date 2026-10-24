@@ -267,7 +267,7 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                     deletion_failed = False
                     for mid in task.get("message_ids", []):
                         try:
-                            await bot.delete_message(task["chat_id"], mid)
+                            await bot.delete_message(task["user_id"], mid)
                         except TelegramBadRequest as exc:
                             if "message to delete not found" in str(exc).lower():
                                 continue  # Already gone; the desired state is reached.
