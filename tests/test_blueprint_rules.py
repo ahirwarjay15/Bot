@@ -395,7 +395,7 @@ def test_message_animation_is_removed_only_after_replacement_post():
     send_pos = impl.index('new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)', impl.index('if animation_enabled and animation_mode == "message":'))
     delete_pos = impl.index('await bot.delete_message(chat_id=user_id, message_id=separate_animation_id)', send_pos)
     assert send_pos < delete_pos
-    assert "wait_for_cycle=True" in impl
+    assert "_wait_for_gate_animation_minimum_cycle(user_id, payload, animation_mode)" in impl
 def test_force_join_add_cleans_prompts_and_returns_to_main_page():
     from pathlib import Path
 
@@ -741,15 +741,15 @@ def test_invalid_post_ignores_commands_banned_users_owner_and_moderators():
 
 
 
-def test_poster_mode_sends_replacement_before_removing_temporary_posts():
+def test_poster_mode_edits_the_same_poster_into_final_force_join_post():
     from pathlib import Path
     source = Path("app/handlers/start.py").read_text()
     impl_start = source.index("async def _forcejoin_check_impl")
     impl = source[impl_start:]
-    poster_send = impl.index('animation_post = await bot.send_animation(user_id, force_cfg["poster_file_id"])')
-    replacement = impl.index('new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)', poster_send)
-    temporary_delete = impl.index('await temporary_post.delete()', replacement)
-    assert poster_send < replacement < temporary_delete
+    poster_send = impl.index('animation_post = await bot.send_animation(')
+    final_edit = impl.index('await _edit_force_join_post(animation_post, rendered, markup)', poster_send)
+    assert poster_send < final_edit
+    assert 'if old_post and old_post.message_id != animation_post.message_id:' in impl
 def test_broadcast_report_counts_skipped_banned_recipients():
     from app.handlers.broadcast import format_broadcast_report
 
