@@ -21,7 +21,7 @@ async def unify_file_batch_records(db) -> int:
             await db.batches.delete_one({"_id": batch["_id"]})
         elif isinstance(existing.get("items"), list):
             await db.batches.delete_one({"_id": batch["_id"]})
-    await db.files.update_many({}, {"$unset": {"kind": ""}})
+    await db.files.update_many({}, {"$unset": {"kind": "", "file_name": "", "created_at": "", "created_by": ""}})
     return moved
 
 
