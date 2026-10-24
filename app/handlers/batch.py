@@ -256,7 +256,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     except Exception:
         if batch is not None and not link_send_attempted:
             try:
-                await database.db.files.delete_one({"file_key": batch["file_key"]}
+                await database.db.files.delete_one({"file_key": batch["file_key"]})
             except Exception:
                 log.warning("Could not clean up an unlinked batch record", exc_info=True)
         log.exception("Range batch generation failed")
