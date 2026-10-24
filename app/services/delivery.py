@@ -243,9 +243,7 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
         stale_before = now - timedelta(minutes=10)
         async for stuck in db.tasks.find({
             "status": "delivering",
-            "$or": [
-                {"updated_at": {"$lte": stale_before}},
-            ],
+            "updated_at": {"$lte": stale_before},
         }).limit(50):
             if stuck.get("message_ids"):
                 await db.tasks.update_one(
@@ -271,10 +269,10 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                             if "message to delete not found" in str(exc).lower():
                                 continue  # Already gone; the desired state is reached.
                             deletion_failed = True
-                            log.warning("Delete attempt rejected for delivered message %s (user %s): %s", mid, task["user_id"], exc)
+                            log.warning("Delete attempt rejected for delivered message %s (user %s): %s", mid, task["chat_id"], exc)
                         except TelegramAPIError:
                             deletion_failed = True
-                            log.warning("Could not delete delivered message %s for user %s; task will retry", mid, task["user_id"], exc_info=True)
+                            log.warning("Could not delete delivered message %s for user %s; task will retry", mid, task["chat_id"], exc_info=True)
                     if deletion_failed:
                         raise RuntimeError("One or more delivered messages could not be deleted; retrying expiry task")
                     await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"messages_deleted": True}})
@@ -288,12 +286,12 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                     ]]) if link else None
                     try:
                         if notice_id:
-                            await bot.edit_message_text(chat_id=task["user_id"], message_id=notice_id, text=text, reply_markup=markup, parse_mode="HTML")
+                            await bot.edit_message_text(chat_id=task["chat_id"], message_id=notice_id, text=text, reply_markup=markup, parse_mode="HTML")
                         else:
-                            await bot.send_message(task["user_id"], text, reply_markup=markup, parse_mode="HTML")
+                            await bot.send_message(task["chat_id"], text, reply_markup=markup, parse_mode="HTML")
                     except (TelegramForbiddenError, TelegramBadRequest):
                         await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"after_delete_attempted": True}})
-                        log.warning("After-delete replacement cannot be edited for user %s", task["user_id"])
+                        log.warning("After-delete replacement cannot be edited for user %s", task["chat_id"])
                     except TelegramAPIError:
                         log.exception("Transient After-delete replacement failure; expiry task will retry")
                         raise
@@ -301,9 +299,9 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                         await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"after_delete_attempted": True}})
                 elif not after and notice_id:
                     try:
-                        await bot.delete_message(task["user_id"], notice_id)
+                        await bot.delete_message(task["chat_id"], notice_id)
                     except TelegramAPIError:
-                        log.info("Could not delete auto-delete notice %s for user %s", notice_id, task["user_id"])
+                        log.info("Could not delete auto-delete notice %s for user %s", notice_id, task["chat_id"])
                 await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"status": "done", "finished_at": _now()}})
                 # Once expiry is complete, discard temporary delivery progress and IDs.
                 # Keep user/file/batch source records untouched.
