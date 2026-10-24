@@ -457,7 +457,7 @@ async def _animate_gate(bot, user_id: int, payload: str, gate_message: Message,
                         stop_event: asyncio.Event | None = None,
                         cycle_event: asyncio.Event | None = None):
     frames = cfg.get("frames")
-    if not isinstance(frames, list) or not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    if not isinstance(frames, list) or not 4 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
     frames = [str(frame) for frame in frames]
     try: speed = float(cfg.get("speed", 0.25))
     except (TypeError, ValueError): speed = 0.25
