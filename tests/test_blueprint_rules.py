@@ -347,7 +347,7 @@ def test_batch_repository_rejects_single_file_batch():
 
     source = inspect.getsource(FileRepository.save_batch)
     assert "len(items) < 2" in source
-    assert "2 to 100 files" in source
+    assert "2 to 100 files" not in source
 
 
 def test_broadcast_job_restores_saved_inline_keyboard():
@@ -882,11 +882,12 @@ def test_batch_does_not_copy_external_files_and_debounces_panels():
     assert "message.bot.copy_message(" not in source
     assert "source_message_id" in source
 
-def test_batch_starts_with_minimum_and_maximum_file_prompt():
+def test_batch_requires_two_messages_without_an_arbitrary_range_cap():
     from pathlib import Path
     source = Path("app/handlers/batch.py").read_text()
     assert "at least two messages" in source
-    assert "more than the supported 100 messages" in source
+    assert "for mid in range(first_id, last_id + 1)" in source
+    assert "more than the supported 100 messages" not in source
 
 def test_batch_single_file_does_not_render_a_generate_panel():
     from pathlib import Path
