@@ -158,12 +158,28 @@ async def _process_batch_delivery(bot: Bot, db, request_key: str):
             index = int(doc.get("next_index", 0))
             state = (doc.get("item_states") or [{} for _ in items])[index]
             if state.get("status") == "sending":
-                # The process may have died after Telegram accepted the copy but before MongoDB recorded it.
-                await db.batch_deliveries.update_one(
-                    {"request_key": request_key, "status": "processing", "next_index": index},
-                    {"$set": {f"item_states.{index}.status": "unknown", "next_index": index + 1},
+                # A second Worker may be looking at an item actively sent by the first.
+                # Wait while its claim is fresh; only stale claims become unknown after a crash.
+                started_at = _as_utc_aware(state.get("started_at"))
+                if started_at and _now() - started_at < timedelta(minutes=10):
+                    await asyncio.sleep(0.1)
+                    doc = await db.batch_deliveries.find_one({"request_key": request_key})
+                    if not doc or doc.get("status") != "processing":
+                        return (len((doc or {}).get("delivered_message_ids", [])),
+                                int((doc or {}).get("failed_count", 0)))
+                    continue
+                changed = await db.batch_deliveries.update_one(
+                    {"request_key": request_key, "status": "processing", "next_index": index,
+                     f"item_states.{index}.status": "sending",
+                     f"item_states.{index}.started_at": state.get("started_at")},
+                    {"$set": {f"item_states.{index}.status": "unknown",
+                              f"item_states.{index}.recovered_at": _now(),
+                              "next_index": index + 1},
                      "$inc": {"failed_count": 1}},
                 )
+                if not changed.modified_count:
+                    doc = await db.batch_deliveries.find_one({"request_key": request_key})
+                    continue
                 doc = await db.batch_deliveries.find_one({"request_key": request_key})
                 continue
             claim = await db.batch_deliveries.update_one(
