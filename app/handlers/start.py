@@ -311,7 +311,33 @@ async def run_force_join_link_rotation_worker(bot, db, settings, interval_second
                 semaphore = asyncio.Semaphore(5)
                 async def prepare(channel, channel_cfg):
                     async with semaphore:
-                        await _prepare_force_join_link(bot, db, channel, channel_cfg or {})
+                        # Shared MongoDB lease prevents the two Worker services from
+                        # creating/rotating links for the same channel simultaneously.
+                        owner = f"{id(asyncio.current_task())}:{time.monotonic()}"
+                        locks = db.service_locks
+                        now = datetime.now(timezone.utc)
+                        lease_until = now + timedelta(minutes=2)
+                        try:
+                            lock = await locks.find_one_and_update(
+                                {"_id": f"force_join_rotation:{channel}",
+                                 "$or": [{"lease_until": {"$lte": now}}, {"owner": owner}]},
+                                {"$set": {"owner": owner, "lease_until": lease_until}},
+                                upsert=True,
+                                return_document=True,
+                            )
+                        except Exception as exc:
+                            if getattr(exc, "code", None) == 11000:
+                                return
+                            raise
+                        if not lock or lock.get("owner") != owner:
+                            return
+                        try:
+                            await _prepare_force_join_link(bot, db, channel, channel_cfg or {})
+                        finally:
+                            await locks.update_one(
+                                {"_id": f"force_join_rotation:{channel}", "owner": owner},
+                                {"$set": {"lease_until": datetime.now(timezone.utc)}},
+                            )
                 await asyncio.gather(*(prepare(channel, channel_cfg) for channel, channel_cfg in zip(channels, channel_cfgs)))
             # Expired links are revoked by the existing cleanup worker.
         except asyncio.CancelledError:
