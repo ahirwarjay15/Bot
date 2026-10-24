@@ -233,6 +233,8 @@ async def cancel_batch(message: Message, state: FSMContext):
 async def receive_first(message: Message, state: FSMContext, settings: Settings):
     if not message.from_user:
         return
+    if not await _touch_batch_session(message, state):
+        return
     if message.text and message.text.startswith("/"):
         raise SkipHandler
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
