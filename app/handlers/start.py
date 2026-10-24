@@ -338,6 +338,14 @@ async def run_force_join_link_rotation_worker(bot, db, settings, interval_second
                         if not lock or lock.get("owner") != owner:
                             return
                         try:
+                            # Re-read effective settings immediately before creation: a channel
+                            # removed while this worker was waiting for its lease must not get a link.
+                            latest_channels = await effective_force_join_channels(
+                                type("DatabaseProxy", (), {"db": db})(), settings
+                            )
+                            latest_cfg = await db.settings.find_one({"key": "force_join"}) or {}
+                            if channel not in latest_channels or not latest_cfg.get("enabled", False):
+                                return
                             await _prepare_force_join_link(bot, db, channel, channel_cfg or {})
                         finally:
                             await locks.update_one(
