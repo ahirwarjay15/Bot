@@ -30,9 +30,7 @@ async def cleanup_completed_transients(db) -> dict:
     """Remove completed temporary records left by older versions; keep active work intact."""
     result = {}
     result["done_tasks"] = (await db.tasks.delete_many({"status": "done"})).deleted_count
-    result["done_batch_deliveries"] = (
-        await db.batch_deliveries.delete_many({"status": "done"})
-    ).deleted_count
+    result["done_batch_deliveries"] = 0  # The obsolete collection is dropped during schema initialization.
     result["finished_delivery_requests"] = (
         await db.delivery_requests.delete_many({"status": {"$in": ["done", "failed"]}})
     ).deleted_count
