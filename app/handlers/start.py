@@ -664,13 +664,8 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
             bot, user.id, payload, delete_separate=(animation_mode != "message")
         )
     if animation_enabled and animation_mode == "poster" and animation_post:
-        # Never edit media captions: Telegram marks edited media messages as Edited.
-        # Send the final poster+prompt as a new post, then remove the temporary poster.
-        await _send_force_join_post(bot, user.id, cfg, rendered, markup)
-        try:
-            await animation_post.delete()
-        except TelegramAPIError:
-            pass
+        # Reuse the animated poster as the final Force Join post; only its caption/buttons change.
+        await _edit_force_join_post(animation_post, rendered, markup)
         return True
     if animation_enabled and animation_mode == "message":
         # A text message cannot be converted into media through the Bot API.
@@ -1134,14 +1129,13 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         else:
             separate_animation_id = await _cancel_gate_animation(bot, user_id, payload)
         if animation_enabled and animation_mode == "poster" and animation_post:
-            # Final media is a new message; neither the temporary poster nor its caption is edited.
-            new_post = await _send_force_join_post(bot, user_id, force_cfg, rendered, markup)
-            for temporary_post in (animation_post, old_post):
-                if temporary_post and temporary_post.message_id != new_post.message_id:
-                    try:
-                        await temporary_post.delete()
-                    except TelegramAPIError:
-                        pass
+            # The same animated poster becomes the final Force Join post.
+            await _edit_force_join_post(animation_post, rendered, markup)
+            if old_post and old_post.message_id != animation_post.message_id:
+                try:
+                    await old_post.delete()
+                except TelegramAPIError:
+                    pass
             return
 
         if animation_enabled and animation_mode == "message":
