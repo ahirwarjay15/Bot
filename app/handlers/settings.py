@@ -134,7 +134,7 @@ async def patch(db, key, values, defaults=None):
     update = {"$set": {"key": key, **values}}
     if defaults:
         update["$setOnInsert"] = defaults
-    await db.settings.update_one({"key": key}, update, upsert=True)
+    await db.settings.update_one({"key": key, "channel": {"$exists": False}}, update, upsert=True)
 
 def time_label(minutes: int) -> str:
     return f"{minutes // 60}h" if minutes >= 60 else f"{minutes}m"
