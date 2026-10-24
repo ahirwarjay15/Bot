@@ -1,5 +1,4 @@
 """MongoDB persistence for file references, users, batches, and never-reused codes."""
-import asyncio
 from datetime import datetime, timezone
 from secrets import choice
 from string import ascii_letters, digits
@@ -23,30 +22,14 @@ class FileRepository:
         self.db = db
 
     async def reserve_code(self, length: int) -> str:
-        """Reserve a random alphanumeric code permanently, even if a session is abandoned."""
+        """Generate a Deepcode; the shared files collection enforces uniqueness."""
         if length != 5:
             raise ValueError("Deepcodes must be exactly 5 characters")
         for _ in range(100):
             code = "".join(choice(_CODE_ALPHABET) for _ in range(length))
-            # Check legacy records concurrently; this avoids three serial DB round trips
-            # on every new deeplink while preserving the never-reuse guarantee.
-            legacy_matches = await asyncio.gather(
-                self.db.files.find_one({"file_key": code}, {"_id": 1}),
-                self.db.batches.find_one({"batch_id": code}, {"_id": 1}),
-                self.db.batch_sessions.find_one({"batch_id": code}, {"_id": 1}),
-            )
-            if any(legacy_matches):
-                continue
-            try:
-                await self.db.deeplink_codes.insert_one({
-                    "code": code, "length": length, "reserved_at": _now()
-                })
+            if not await self.db.files.find_one({"file_key": code}, {"_id": 1}):
                 return code
-            except Exception as exc:
-                if getattr(exc, "code", None) == 11000:
-                    continue
-                raise
-        raise RuntimeError("Could not allocate a never-used deeplink code")
+        raise RuntimeError("Could not allocate a unique Deepcode")
 
     async def save_file(
         self, *, source_chat_id: int, source_message_id: int,
@@ -69,16 +52,8 @@ class FileRepository:
         raise RuntimeError("Could not allocate a unique file key")
 
     async def get_file(self, key: str) -> dict | None:
-        """Find either a single file or a batch in the unified files collection."""
-        record = await self.db.files.find_one({"file_key": key})
-        if record:
-            return record
-        # Read old batch links during migration; new batches use files.
-        legacy = await self.db.batches.find_one({"batch_id": key})
-        if legacy:
-            legacy["file_key"] = legacy.get("batch_id")
-            return legacy
-        return None
+        """Find either a single file or a batch in the shared files collection."""
+        return await self.db.files.find_one({"file_key": key})
 
     async def is_batch_record(self, record: dict) -> bool:
         return bool(record and isinstance(record.get("items"), list))
@@ -106,10 +81,7 @@ class FileRepository:
         raise RuntimeError("Could not allocate a unique batch key")
 
     async def get_batch(self, batch_id: str) -> dict | None:
-        record = await self.db.files.find_one({"file_key": batch_id, "items": {"$exists": True}})
-        if record:
-            return record
-        return await self.db.batches.find_one({"batch_id": batch_id})
+        return await self.db.files.find_one({"file_key": batch_id, "items": {"$exists": True}})
 
     async def save_user(self, user) -> None:
         if user is None:
