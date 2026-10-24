@@ -146,7 +146,7 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
     except TelegramAPIError as exc:
         if record is not None and not link_send_attempted:
             try:
-                await database.db.files.delete_one({"file_key": record["file_key"], "kind": "file"})
+                await database.db.files.delete_one({"file_key": record["file_key"]})
             except Exception:
                 log.warning("Could not clean up an unlinked file record", exc_info=True)
         log.exception("Could not create file link")
@@ -163,7 +163,7 @@ async def receive_file(message:Message,state:FSMContext,settings:Settings,databa
     except Exception:
         if record is not None and link_message is None:
             try:
-                await database.db.files.delete_one({"file_key": record["file_key"], "kind": "file"})
+                await database.db.files.delete_one({"file_key": record["file_key"]})
             except Exception:
                 log.warning("Could not clean up an unlinked file record", exc_info=True)
         log.exception("File link creation failed");await message.answer("Unexpected error while saving this link. Check bot logs.")
