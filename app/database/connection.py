@@ -57,6 +57,32 @@ async def unify_file_batch_records(db) -> int:
     return moved
 
 
+async def cleanup_completed_transients(db) -> dict:
+    """Remove completed temporary records left by older versions; keep active work intact."""
+    result = {}
+    result["done_tasks"] = (await db.tasks.delete_many({"status": "done"})).deleted_count
+    result["done_batch_deliveries"] = (
+        await db.batch_deliveries.delete_many({"status": "done"})
+    ).deleted_count
+    result["finished_delivery_requests"] = (
+        await db.delivery_requests.delete_many({"status": {"$in": ["done", "failed"]}})
+    ).deleted_count
+    completed_jobs = [
+        job["_id"] async for job in db.broadcast_jobs.find({"status": "completed"}, {"_id": 1})
+    ]
+    if completed_jobs:
+        result["broadcast_recipients"] = (
+            await db.broadcast_recipients.delete_many({"job_id": {"$in": completed_jobs}})
+        ).deleted_count
+        result["broadcast_jobs"] = (
+            await db.broadcast_jobs.delete_many({"_id": {"$in": completed_jobs}})
+        ).deleted_count
+    else:
+        result["broadcast_recipients"] = 0
+        result["broadcast_jobs"] = 0
+    return result
+
+
 async def remove_legacy_external_force_join_links(db) -> bool:
     """Remove the retired external Force Join setting from legacy deployments."""
     migration_id = "remove_external_force_join_links_v1"
@@ -145,6 +171,8 @@ class Database:
             await self.db.force_join_links.create_index([("invite_link", ASCENDING)], unique=True, name="invite_link_unique")
             await remove_legacy_external_force_join_links(self.db)
             await backfill_deeplink_codes(self.db)
+            cleanup_counts = await cleanup_completed_transients(self.db)
+            logger.info("Removed completed legacy records: %s", cleanup_counts)
             await self.db.broadcast_drafts.create_index([("admin_id", ASCENDING)], unique=True)
             await self.db.broadcast_jobs.create_index([("draft_id", ASCENDING)], unique=True)
             await self.db.broadcast_jobs.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
