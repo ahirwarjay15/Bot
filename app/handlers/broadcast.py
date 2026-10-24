@@ -36,6 +36,31 @@ def confirmation_keyboard(draft_key: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="ᴄᴀɴᴄᴇʟ", callback_data=f"broadcast:no:{draft_key}"),
     ]])
 
+@router.message(Command("pin"))
+async def pin_broadcast_reply(message: Message, settings: Settings, database):
+    """Silently pin a bot-delivered broadcast when Telegram supports pinning in this chat."""
+    if not message.from_user or not message.reply_to_message:
+        return
+    if not await is_owner_or_moderator(database.db, message.from_user.id, settings):
+        return
+    # Telegram does not support pinning messages in private user-bot chats.
+    if message.chat.type not in ("group", "supergroup", "channel"):
+        return
+    try:
+        bot_user = await message.bot.get_me()
+        target = message.reply_to_message
+        if not target.from_user or target.from_user.id != bot_user.id:
+            return
+        await message.bot.pin_chat_message(
+            chat_id=message.chat.id,
+            message_id=target.message_id,
+            disable_notification=True,
+        )
+    except TelegramAPIError:
+        # The command is intentionally silent; missing permissions must not disrupt broadcasts.
+        log.info("Silent /pin attempt could not pin message in chat %s", message.chat.id, exc_info=True)
+
+
 @router.message(Command("broadcast"))
 async def broadcast(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
