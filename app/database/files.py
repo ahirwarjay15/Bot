@@ -22,7 +22,7 @@ class FileRepository:
     def __init__(self, db):
         self.db = db
 
-    async def reserve_code(self, length: int, kind: str) -> str:
+    async def reserve_code(self, length: int) -> str:
         """Reserve a random alphanumeric code permanently, even if a session is abandoned."""
         if length != 5:
             raise ValueError("Deepcodes must be exactly 5 characters")
@@ -39,7 +39,7 @@ class FileRepository:
                 continue
             try:
                 await self.db.deeplink_codes.insert_one({
-                    "code": code, "length": length, "kind": kind, "reserved_at": _now()
+                    "code": code, "length": length, "reserved_at": _now()
                 })
                 return code
             except Exception as exc:
@@ -53,7 +53,7 @@ class FileRepository:
         reply_markup: dict | None = None,
     ) -> dict:
         for _ in range(8):
-            key = await self.reserve_code(5, "file")
+            key = await self.reserve_code(5)
             doc = {
                 "file_key": key,
                 "source_chat_id": source_chat_id,
@@ -95,7 +95,7 @@ class FileRepository:
             )
             return await self.db.files.find_one({"file_key": batch_id})
         for _ in range(8):
-            key = await self.reserve_code(5, "batch")
+            key = await self.reserve_code(5)
             doc = {"file_key": key, "items": items}
             try:
                 await self.db.files.insert_one(doc)
