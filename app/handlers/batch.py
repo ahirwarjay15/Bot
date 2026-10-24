@@ -238,9 +238,8 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     if count < 2:
         await message.answer("Please choose at least two messages. Send the last post again.")
         return
-    if count > 100:
-        await message.answer("This batch contains more than the supported 100 messages. Please choose a smaller range.")
-        return
+    # No arbitrary 100-message cap: allow the full selected range. Telegram API
+    # limits still apply, so large batches can take longer or need retries.
     try:
         valid_ids = await _existing_source_message_ids(
             message.bot, message.chat.id, source_chat_id, first_id, last_id
