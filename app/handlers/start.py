@@ -851,7 +851,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         if cfg.get("about_enabled", True):
             rows.append([InlineKeyboardButton(text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="start:about")])
         markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
-        raw_text = normalize_telegram_text(ensure_default_quote_format(cfg.get("text") or "<b><i>✨ ʜᴇʟʟᴏ {mention}</i></b>\n\nɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!", "start"))
+        raw_text = normalize_telegram_text(ensure_default_quote_format(cfg.get("text") or "<b>✨ ʜᴇʟʟᴏ</b> <i>{mention}</i>\n\nɪ'm {bot_mention} ꜰɪʟᴇ ʙᴏᴛ ʙʏ <b><a href="https://t.me/lexianime">Lexi Anime</a></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!", "start"))
         me = await message.bot.get_me()
         text = render_common_variables(raw_text, user, me)
         if cfg.get("poster_file_id"):
@@ -934,7 +934,7 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
     if cfg.get("about_enabled", True):
         rows.append([InlineKeyboardButton(text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="start:about")])
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
-    raw = cfg.get("text") or "<b><i>✨ ʜᴇʟʟᴏ {mention}</i></b>\n\nɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
+    raw = cfg.get("text") or "<b>✨ ʜᴇʟʟᴏ</b> <i>{mention}</i>\n\nɪ'm {bot_mention} ꜰɪʟᴇ ʙᴏᴛ ʙʏ <b><a href="https://t.me/lexianime">Lexi Anime</a></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
     rendered = render_common_variables(raw, user, me)
     # Re-send the main Start post and remove About instead of editing in place.
     # This avoids Telegram's Edited label on both text and media messages.
