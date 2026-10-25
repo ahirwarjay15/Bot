@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError, Telegra
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, MessageEntity
 
 log = logging.getLogger(__name__)
-DEFAULT_NOTICE = "Your files will be automatically deleted after {auto_delete_time}."
+DEFAULT_NOTICE = "<blockquote><b><i>This file will be automatically deleted in {auto_delete_time}. Make sure to save it before it gets deleted..!</i></b></blockquote>"
 
 
 def _now():
