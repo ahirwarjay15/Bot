@@ -851,7 +851,12 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         if cfg.get("about_enabled", True):
             rows.append([InlineKeyboardButton(text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="start:about")])
         markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
-        raw_text = normalize_telegram_text(ensure_default_quote_format(cfg.get("text") or "<b>✨ ʜᴇʟʟᴏ</b> <i>{mention}</i>\n\nɪ'm {bot_mention} ꜰɪʟᴇ ʙᴏᴛ ʙʏ <b><a href="https://t.me/lexianime">Lexi Anime</a></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!", "start"))
+        default_start_text = (
+            "<b>✨ ʜᴇʟʟᴏ</b> <i>{mention}</i>\\n\\n"
+            "ɪ'm {bot_mention} ꜰɪʟᴇ ʙᴏᴛ ʙʏ <b><a href=\"https://t.me/lexianime\">Lexi Anime</a></b>.\\n"
+            "⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
+        )
+        raw_text = normalize_telegram_text(ensure_default_quote_format(cfg.get("text") or default_start_text, "start"))
         me = await message.bot.get_me()
         text = render_common_variables(raw_text, user, me)
         if cfg.get("poster_file_id"):
