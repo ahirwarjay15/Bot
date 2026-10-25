@@ -57,7 +57,7 @@ def unicode_buttons(value: str) -> str:
     })
     return "".join(ch.translate(table) if ch.isascii() and ch.isalpha() else ch for ch in str(value))
 AUTO_DELETE_MINUTES = (2, 5, 10, 15, 30, 60, 180, 360, 720, 1440)
-DEFAULT_NOTICE = "<b>⚠️ Cᴏᴘʏʀɪɢʜᴛ Nᴏᴛɪᴄᴇ..</b>\n<blockquote>Yᴏᴜʀ ғɪʟᴇs ᴡɪʟʟ ʙᴇ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪɴ {auto_delete_time}.</blockquote>\n<blockquote>ᴘʟᴇᴀsᴇ ғᴏʀᴡᴀʀᴅ ᴏʀ sᴀᴠᴇ ʏᴏᴜʀ ғɪʟᴇs sᴏᴍᴇᴡʜᴇʀᴇ sᴀғᴇ sᴏ ʏᴏᴜ ᴄᴀɴ ᴀᴄᴄᴇss ᴛʜᴇᴍ ᴀɴʏᴛɪᴍᴇ!</blockquote>"
+DEFAULT_NOTICE = "<blockquote><b><i>This file will be automatically deleted in {auto_delete_time}. Make sure to save it before it gets deleted..!</i></b></blockquote>"
 DEFAULT_START_TEXT = "<blockquote><b><i>✨ ʜᴇʟʟᴏ {mention}</i></b></blockquote>\n\nɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
 DEFAULT_AFTER_TEXT = "Yᴏᴜʀ Vɪᴅᴇᴏ / Fɪʟᴇ Iꜱ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ Dᴇʟᴇᴛᴇᴅ ✅"
 DEFAULT_AFTER_BUTTON = "Gᴇᴛ ʏᴏᴜʀ ꜰɪʟᴇꜱ ᴀɢᴀɪɴ"
