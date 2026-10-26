@@ -386,6 +386,14 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict, own
         refresh_at = refresh_at.replace(tzinfo=timezone.utc)
     if current and refresh_at and refresh_at > now:
         return True
+    if link_mode == "rotation":
+        retry_key = f"force_join_create_retry:{channel}:{chat_id}:{mode}"
+        retry_state = await db.service_locks.find_one({"_id": retry_key}) or {}
+        retry_at = retry_state.get("retry_at")
+        if isinstance(retry_at, datetime) and retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        if retry_state.get("failed") or (retry_at and retry_at > now):
+            return False
     try:
         invite_args = {
             "chat_id": chat_id,
