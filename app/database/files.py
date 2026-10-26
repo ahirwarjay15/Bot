@@ -25,7 +25,7 @@ class FileRepository:
             raise ValueError("Deepcodes must be exactly 7 characters")
         for _ in range(100):
             code = "".join(choice(_CODE_ALPHABET) for _ in range(length))
-            if not await self.db.files.find_one({"$or": [{"key": code}, {"file_key": code}]}, {"_id": 1}):
+            if not await self.db.files.find_one({"key": code}, {"_id": 1}):
                 return code
         raise RuntimeError("Could not allocate a unique Deepcode")
 
@@ -38,7 +38,6 @@ class FileRepository:
                 if getattr(exc, "code", None) != 11000:
                     raise
                 doc["key"] = await self.reserve_code(7)
-                doc["file_key"] = doc["key"]
         raise RuntimeError("Could not allocate a unique file key")
 
     async def save_file(self, *, source_chat_id: int | None = None,
@@ -47,7 +46,7 @@ class FileRepository:
         # source_chat_id is accepted for backwards compatibility but isn't stored.
         for attempt in range(8):
             key = await self.reserve_code(7)
-            doc = {"key": key, "file_key": key, "id": int(source_message_id)}
+            doc = {"key": key, "id": int(source_message_id)}
             compact = buttons if buttons else None
             if compact:
                 doc["buttons"] = compact
@@ -64,7 +63,7 @@ class FileRepository:
         raise RuntimeError("Could not allocate a unique file key after duplicate-key retries")
 
     async def get_file(self, key: str) -> dict | None:
-        return await self.db.files.find_one({"$or": [{"key": key}, {"file_key": key}]})
+        return await self.db.files.find_one({"key": key})
 
     async def is_batch_record(self, record: dict) -> bool:
         return bool(record and (isinstance(record.get("items"), list)
@@ -80,16 +79,16 @@ class FileRepository:
         if len(ids) < 2:
             raise ValueError("A batch must contain at least 2 messages")
         key = batch_id or await self.reserve_code(7)
-        doc = {"key": key, "file_key": key, "id": {f"{i:02d}": mid for i, mid in enumerate(ids, 1)}}
+        doc = {"key": key, "id": {f"{i:02d}": mid for i, mid in enumerate(ids, 1)}}
         if buttons:
             doc["buttons"] = {str(k): v for k, v in buttons.items() if v}
         if batch_id:
-            await self.db.files.update_one({"$or": [{"key": batch_id}, {"file_key": batch_id}]}, {"$set": doc}, upsert=True)
+            await self.db.files.update_one({"key": batch_id}, {"$set": doc}, upsert=True)
             return await self.db.files.find_one({"key": batch_id})
         return await self._insert_unique(doc)
 
     async def get_batch(self, batch_id: str) -> dict | None:
-        return await self.db.files.find_one({"$and": [{"$or": [{"key": batch_id}, {"file_key": batch_id}]}, {"$or": [{"id": {"$type": "object"}}, {"source_message_id": {"$type": "array"}}, {"items": {"$exists": True}}]}]})
+        return await self.db.files.find_one({"$and": [{"key": batch_id}, {"$or": [{"id": {"$type": "object"}}, {"source_message_id": {"$type": "array"}}, {"items": {"$exists": True}}]}]})
 
     async def save_user(self, user) -> None:
         if user is None:
