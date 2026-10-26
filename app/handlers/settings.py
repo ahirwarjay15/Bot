@@ -1531,6 +1531,13 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         if not shared and forwarded_chat_id is None:
             await tracked_answer(message, state, "Please use the Group/Channel buttons or forward a message from that Group/Channel with its Forward tag. Send /cancel to stop.")
             return
+        if shared or forwarded_chat_id is not None:
+            # Hide the reply keyboard as soon as Telegram returns the selected chat.
+            try:
+                keyboard_removal = await message.answer(" ", reply_markup=ReplyKeyboardRemove())
+                await keyboard_removal.delete()
+            except TelegramAPIError:
+                pass
         # Remove the selection/forward message so the setup chat stays clean.
         try:
             await message.delete()
