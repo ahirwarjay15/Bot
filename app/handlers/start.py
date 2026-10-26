@@ -155,36 +155,144 @@ def build_force_join_channel_button(
     return None
 
 
+async def _force_join_owner_alert(bot, db, record: dict, operation: str, error: Exception, attempts: int):
+    """Send one durable owner alert for a terminal Force Sub task failure."""
+    task_id = str(record.get("_id", "unknown"))
+    alerts = getattr(db, "force_join_alerts", None)
+    if alerts is not None:
+        try:
+            claim = await alerts.update_one(
+                {"_id": f"{operation}:{task_id}", "sent": {"$ne": True}},
+                {"$setOnInsert": {"created_at": datetime.now(timezone.utc), "sent": False}},
+                upsert=True,
+            )
+            existing = await alerts.find_one({"_id": f"{operation}:{task_id}", "sent": True})
+            if existing:
+                return
+        except Exception:
+            log.exception("Could not claim Force Sub owner alert")
+            alerts = None
+    settings_doc = await db.settings.find_one({"key": "runtime"}) or {}
+    owner_id = settings_doc.get("owner_id")
+    # OWNER_ID is supplied by the application settings at worker startup and is
+    # passed through the bot's configured owner metadata when available.
+    owner_id = owner_id or getattr(bot, "owner_id", None)
+    chat_id = record.get("chat_id")
+    chat_name = record.get("channel") or record.get("chat_title") or "unknown"
+    message = (
+        "⚠️ <b>Force Sub task failed</b>\n"
+        f"Operation: <code>{html.escape(operation)}</code>\n"
+        f"Chat: <code>{html.escape(str(chat_name))}</code>\n"
+        f"Chat ID: <code>{html.escape(str(chat_id or 'unknown'))}</code>\n"
+        f"Attempts: <code>{attempts}/3</code>\n"
+        f"Task/link: <code>{html.escape(str(record.get('invite_link') or task_id))}</code>\n"
+        f"Error: <code>{html.escape(str(error)[:2500])}</code>"
+    )
+    if owner_id:
+        try:
+            await bot.send_message(int(owner_id), message, parse_mode="HTML")
+            if alerts is not None:
+                await alerts.update_one({"_id": f"{operation}:{task_id}"}, {"$set": {"sent": True, "sent_at": datetime.now(timezone.utc)}})
+        except Exception:
+            log.exception("Could not deliver Force Sub owner alert")
+    else:
+        log.error("Force Sub owner alert cannot be sent: owner ID unavailable; %s", message)
+
+
 async def _revoke_tracked_force_join_link(bot, db, record: dict) -> None:
+    """Revoke an expired invite with durable, bounded retries."""
     link, chat_id = record.get("invite_link"), record.get("chat_id")
+    now = datetime.now(timezone.utc)
+    attempts = int(record.get("revoke_attempts", 0))
+    due = record.get("revoke_retry_at")
+    if isinstance(due, datetime) and due.tzinfo is None:
+        due = due.replace(tzinfo=timezone.utc)
+    if due and due > now:
+        return
     if link and chat_id is not None:
         try:
             await bot.revoke_chat_invite_link(chat_id=int(chat_id), invite_link=link)
-        except (TelegramRetryAfter, TelegramNetworkError):
-            # Preserve the record so the background cleanup worker can retry.
-            raise
-        except TelegramAPIError:
-            log.debug("Force Sub link already expired/revoked", exc_info=True)
+        except TelegramAPIError as exc:
+            # Telegram's "already revoked/expired" response is treated as completed.
+            if isinstance(exc, (TelegramRetryAfter, TelegramNetworkError)):
+                attempts += 1
+                if attempts >= 3:
+                    await db.force_join_links.update_one(
+                        {"_id": record["_id"]},
+                        {"$set": {"revoke_attempts": attempts, "revoke_failed": True,
+                                  "revoke_last_error": str(exc), "revoke_failed_at": now}},
+                    )
+                    await _force_join_owner_alert(bot, db, record, "revoke", exc, attempts)
+                    return
+                await db.force_join_links.update_one(
+                    {"_id": record["_id"]},
+                    {"$set": {"revoke_attempts": attempts, "revoke_retry_at": now + timedelta(seconds=30),
+                              "revoke_last_error": str(exc)}},
+                )
+                return
+            log.info("Force Sub invite already expired/revoked: %s", exc)
+        except Exception as exc:
+            attempts += 1
+            if attempts >= 3:
+                await db.force_join_links.update_one(
+                    {"_id": record["_id"]},
+                    {"$set": {"revoke_attempts": attempts, "revoke_failed": True,
+                              "revoke_last_error": str(exc), "revoke_failed_at": now}},
+                )
+                await _force_join_owner_alert(bot, db, record, "revoke", exc, attempts)
+                return
+            await db.force_join_links.update_one(
+                {"_id": record["_id"]},
+                {"$set": {"revoke_attempts": attempts, "revoke_retry_at": now + timedelta(seconds=30),
+                          "revoke_last_error": str(exc)}},
+            )
+            return
     await db.force_join_links.delete_one({"_id": record["_id"]})
 
 
 async def cleanup_expired_force_join_links(bot, db, limit: int = 200) -> int:
     now = datetime.now(timezone.utc)
-    records = [r async for r in db.force_join_links.find({"expires_at": {"$lte": now}}).limit(limit)]
+    records = [r async for r in db.force_join_links.find({
+        "expires_at": {"$lte": now}, "revoke_failed": {"$ne": True},
+        "$or": [{"revoke_retry_at": {"$exists": False}}, {"revoke_retry_at": {"$lte": now}}],
+    }).limit(limit)]
     semaphore = asyncio.Semaphore(10)
 
     async def cleanup_one(record):
         async with semaphore:
+            # Atomic claim makes simultaneous workers skip the same link.
+            owner = f"{id(asyncio.current_task())}:{time.monotonic()}"
+            claim_until = now + timedelta(minutes=2)
             try:
-                await _revoke_tracked_force_join_link(bot, db, record)
+                claimed = await db.force_join_links.find_one_and_update(
+                    {"_id": record["_id"], "$or": [
+                        {"revoke_claim_until": {"$lte": now}},
+                        {"revoke_claim_until": {"$exists": False}},
+                    ]},
+                    {"$set": {"revoke_claim_owner": owner, "revoke_claim_until": claim_until}},
+                    return_document=True,
+                )
             except Exception:
-                log.warning("Could not clean up an expired Force Sub link; will retry", exc_info=True)
+                log.exception("Could not claim expired Force Sub link for cleanup")
+                return
+            if not claimed or claimed.get("revoke_claim_owner") != owner:
+                return
+            try:
+                await _revoke_tracked_force_join_link(bot, db, claimed)
+            except Exception:
+                log.warning("Could not clean up an expired Force Sub link", exc_info=True)
+            finally:
+                await db.force_join_links.update_one(
+                    {"_id": record["_id"], "revoke_claim_owner": owner},
+                    {"$set": {"revoke_claim_until": datetime.now(timezone.utc)}},
+                )
 
     await asyncio.gather(*(cleanup_one(record) for record in records))
     return len(records)
 
 
 async def run_force_join_link_cleanup_worker(bot, db, interval_seconds: int = 5):
+    """Recover due revocations promptly after restarts; retry failed API calls every 30s."""
     while True:
         try:
             await cleanup_expired_force_join_links(bot, db)
@@ -196,12 +304,12 @@ async def run_force_join_link_cleanup_worker(bot, db, interval_seconds: int = 5)
 
 
 async def _revoke_used_force_join_link(bot, db, chat_id: int, invite_link) -> None:
-    """Invite links are revoked only by the ten-minute expiry worker."""
+    """Shared invite links are revoked only by their scheduled expiry task."""
     return
 
 
 def _schedule_used_force_join_link_cleanup(bot, db, chat_id: int, invite_link) -> None:
-    """Do not revoke a shared invite when one user uses it; keep it live for ten minutes."""
+    """Do not revoke a shared invite when one user uses it."""
     return
 
 
