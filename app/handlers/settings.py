@@ -859,6 +859,13 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await keyboard_removal.delete()
         except TelegramAPIError:
             pass
+        # The link-mode chooser is a temporary prompt; remove only that
+        # message after a selection, leaving the main Force Sub settings panel intact.
+        if query.message:
+            try:
+                await query.message.delete()
+            except TelegramAPIError:
+                pass
         await state.clear()
         panel_chat_id = pending.get("pending_forcejoin_panel_chat_id")
         panel_message_id = pending.get("pending_forcejoin_panel_message_id")
