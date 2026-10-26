@@ -793,14 +793,24 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await query.answer("Selection expired. Please add the chat again.", show_alert=True)
             return
         await state.update_data(pending_forcejoin_access_mode=mode)
+        link_prompt = (
+            f"Choose link mode for <b>{html.escape(pending.get('pending_forcejoin_chat_title') or str(pending['pending_forcejoin_chat_id']))}</b>:"
+        )
+        link_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="ʀᴏᴛᴀᴛɪᴏɴ ʟɪɴᴋꜱ", callback_data="settings:forcejoin_link_mode:rotation")],
+            [InlineKeyboardButton(text="ꜱɪɴɢʟᴇ ʟɪɴᴋ", callback_data="settings:forcejoin_link_mode:single")],
+        ])
+        edited = False
         if query.message:
-            await query.message.edit_text(
-                f"Choose link mode for <b>{html.escape(pending.get('pending_forcejoin_chat_title') or str(pending['pending_forcejoin_chat_id']))}</b>:",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="ʀᴏᴛᴀᴛɪᴏɴ ʟɪɴᴋꜱ", callback_data="settings:forcejoin_link_mode:rotation")],
-                    [InlineKeyboardButton(text="ꜱɪɴɢʟᴇ ʟɪɴᴋ", callback_data="settings:forcejoin_link_mode:single")],
-                ]),
+            try:
+                await query.message.edit_text(link_prompt, parse_mode="HTML", reply_markup=link_markup)
+                edited = True
+            except TelegramAPIError:
+                pass
+        if not edited:
+            await query.bot.send_message(
+                chat_id=query.from_user.id, text=link_prompt,
+                parse_mode="HTML", reply_markup=link_markup,
             )
         await query.answer("Access mode saved.")
         return
@@ -854,7 +864,14 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         panel_message_id = pending.get("pending_forcejoin_panel_message_id")
         if panel_chat_id and panel_message_id:
             panel_text, panel_markup = await build_forcejoin_page(query.bot, db, settings)
-            await refresh_settings_panel(query.bot, panel_chat_id, panel_message_id, panel_text, panel_markup)
+            refreshed = await refresh_settings_panel(query.bot, panel_chat_id, panel_message_id, panel_text, panel_markup)
+            if not refreshed:
+                try:
+                    await query.bot.send_message(
+                        chat_id=query.from_user.id, text=panel_text, reply_markup=panel_markup
+                    )
+                except TelegramAPIError:
+                    pass
         await query.answer("Link mode saved.")
         return
     if action in {"home", "home_back"}: await render_home(query)
