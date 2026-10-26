@@ -154,7 +154,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
 
     custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
     custom_buttons = custom_cfg.get("buttons", []) if custom_cfg.get("enabled", False) else []
-    is_batch = isinstance(batch.get("items"), list) and batch.get("batch_id") is not None
+    is_batch = isinstance(batch.get("items"), list) and bool(batch.get("file_key"))
     # Batch deliveries intentionally use the configured custom keyboard uniformly:
     # source-message keyboards are not stored in batch items and must not affect
     # whether a batch item receives custom buttons. Single-file behavior stays as-is.
