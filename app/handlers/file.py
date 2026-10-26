@@ -14,18 +14,15 @@ from app.services.deeplink_channel import mirror_deeplink
 router = Router(name="file")
 log = logging.getLogger(__name__)
 MAX_FILES = 20
-PANEL_TEXT = ("Send more files to create your collection. When you're done, generate your link below.\n"
-              "You can also tap BACK to cancel this process.")
+PANEL_TEXT = ("<i>Send more files to create your collection. When you're done, generate your link below.\n"
+              "You can also tap BACK to cancel this process.</i>")
 class FileStates(StatesGroup):
     waiting_for_message = State()
     collecting = State()
 
 def _panel_keyboard(count):
     rows = [[InlineKeyboardButton(text="GENERATE LINK", callback_data="file:generate")]]
-    if count < MAX_FILES:
-        rows.append([InlineKeyboardButton(text="BACK", callback_data="file:back")])
-    else:
-        rows.append([InlineKeyboardButton(text="LIMIT REACHED", callback_data="file:limit")])
+    rows.append([InlineKeyboardButton(text="BACK", callback_data="file:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def _url_keyboard(message):
@@ -59,17 +56,18 @@ async def _delete(bot, chat_id, message_id):
 async def _show_panel(message, state, *, edit=False):
     data = await state.get_data()
     count = len(data.get("collected", []))
-    text = PANEL_TEXT + f"\n\nFiles added: {count}/{MAX_FILES}"
+    text = (PANEL_TEXT + f"\n\n<i>Files added: {count}/{MAX_FILES}</i>" if count < MAX_FILES
+            else "<i>LIMIT REACHED — maximum 20 files. Generate your link below.</i>\n\n<i>Files added: 20/20</i>")
     if edit and data.get("panel_message_id"):
         try:
             await message.bot.edit_message_text(
                 chat_id=data["panel_chat_id"], message_id=data["panel_message_id"],
-                text=text, reply_markup=_panel_keyboard(count),
+                text=text, reply_markup=_panel_keyboard(count), parse_mode="HTML",
             )
             return
         except TelegramAPIError:
             pass
-    panel = await message.answer(text, reply_markup=_panel_keyboard(count))
+    panel = await message.answer(text, reply_markup=_panel_keyboard(count), parse_mode="HTML")
     await state.update_data(panel_message_id=panel.message_id, panel_chat_id=panel.chat.id)
 
 @router.message(Command("file"))
@@ -111,13 +109,13 @@ async def file_limit(callback: CallbackQuery):
 @router.callback_query(F.data == "file:back")
 async def file_back(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    if not data.get("collected"):
-        await state.clear()
-        await _delete(callback.bot, data.get("prompt_chat_id", callback.message.chat.id), data.get("prompt_message_id", 0))
+    await state.clear()
+    await _delete(callback.bot, data.get("prompt_chat_id", callback.message.chat.id), data.get("prompt_message_id", 0))
+    try:
         await callback.message.delete()
-        await callback.answer("Cancelled")
-        return
-    await callback.answer("Use /cancel to cancel this collection.", show_alert=True)
+    except TelegramAPIError:
+        pass
+    await callback.answer("Collection cancelled")
 
 @router.callback_query(F.data == "file:generate")
 async def generate_file_link(callback: CallbackQuery, state: FSMContext, settings: Settings, database):
