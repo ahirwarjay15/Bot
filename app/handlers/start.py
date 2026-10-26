@@ -394,8 +394,25 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict, own
         if link_mode == "rotation":
             invite_args["expire_date"] = int(now.timestamp()) + 1800
         invite = await bot.create_chat_invite_link(**invite_args)
-    except TelegramAPIError:
-        log.warning("Could not pre-generate Force Sub link for %s; retaining old link until expiry", channel, exc_info=True)
+    except Exception as exc:
+        # Persist bounded retries so process restarts do not reset failure state.
+        retry_key = f"force_join_create_retry:{channel}:{chat_id}:{mode}"
+        state = await db.service_locks.find_one({"_id": retry_key}) or {}
+        retry_at = state.get("retry_at")
+        if isinstance(retry_at, datetime) and retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        if state.get("failed") or (retry_at and retry_at > now):
+            return False
+        attempts = int(state.get("attempts", 0)) + 1
+        fields = {"attempts": attempts, "last_error": str(exc), "channel": channel, "chat_id": chat_id}
+        if attempts >= 3:
+            fields.update({"failed": True, "failed_at": now})
+            await db.service_locks.update_one({"_id": retry_key}, {"$set": fields}, upsert=True)
+            await _force_join_owner_alert(bot, db, {"_id": retry_key, "channel": channel, "chat_id": chat_id}, "create", exc, attempts, owner_id)
+        else:
+            fields["retry_at"] = now + timedelta(seconds=30)
+            await db.service_locks.update_one({"_id": retry_key}, {"$set": fields}, upsert=True)
+        log.warning("Could not pre-generate Force Sub link for %s (attempt %s/3); retaining old link until expiry", channel, attempts, exc_info=True)
         return False
     # Anchor DB timestamps to the exact expiry timestamp sent to Telegram.
     created = now
@@ -414,6 +431,9 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict, own
             "expires_at": created + timedelta(seconds=1800),
             "cleanup_at": created + timedelta(seconds=1800),
         })
+    # Clear the persisted create retry state only after Telegram creation succeeds.
+    retry_key = f"force_join_create_retry:{channel}:{chat_id}:{mode}"
+    await db.service_locks.delete_one({"_id": retry_key})
     try:
         await links.insert_one(record)
         if link_mode == "rotation":
