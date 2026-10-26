@@ -1601,7 +1601,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 pending_forcejoin_panel_chat_id=data.get("forcejoin_panel_chat_id"),
                 pending_forcejoin_panel_message_id=data.get("forcejoin_panel_message_id"),
             )
-            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            # Reuse module-level keyboard imports; local imports shadow names for the whole function.
             await tracked_answer(
                 message, state,
                 f"Choose a mode for <b>{html.escape(chat.title or str(chat.id))}</b>:",
