@@ -792,7 +792,8 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await query.answer("Selection expired. Please add the chat again.", show_alert=True)
             return
         await state.update_data(pending_forcejoin_access_mode=mode)
-        await query.message.answer(
+        await tracked_answer(
+            query.message, state,
             f"Choose link mode for <b>{html.escape(pending.get('pending_forcejoin_chat_title') or str(pending['pending_forcejoin_chat_id']))}</b>:",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
