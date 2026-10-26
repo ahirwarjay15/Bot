@@ -341,8 +341,6 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
                     reply_markup=keyboard,
                     parse_mode=None,
                 )
-                sent_link = await message.bot.get_chat(message.chat.id)
-                # Keep a lightweight message-like reference for the caption reply below.
                 sent_link_message_id = int(prompt_id)
             except TelegramAPIError:
                 sent_link = await message.answer(link, reply_markup=keyboard)
