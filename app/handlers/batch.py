@@ -161,35 +161,6 @@ def _link_keyboard(link: str):
         InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
     ]])
 
-async def _source_post_content(message: Message, source_chat_id: int, message_id: int):
-    """Read exact text/caption and formatting entities; temporary forwards are deleted."""
-    origin = _origin(message, source_chat_id)
-    if origin and origin[1] == int(message_id):
-        source = message
-        temporary = False
-    else:
-        source = await message.bot.forward_message(
-            chat_id=message.chat.id,
-            from_chat_id=source_chat_id,
-            message_id=message_id,
-        )
-        temporary = True
-    try:
-        if source.caption is not None:
-            text = source.caption
-            entities = source.caption_entities or []
-        else:
-            text = source.text or ""
-            entities = source.entities or []
-        serialized = [entity.model_dump(mode="json", exclude_none=True) for entity in entities]
-        return text, serialized
-    finally:
-        if temporary:
-            try:
-                await message.bot.delete_message(chat_id=source.chat.id, message_id=source.message_id)
-            except TelegramAPIError:
-                log.warning("Could not delete temporary source-post lookup message %s", source.message_id, exc_info=True)
-
 
 def _combine_caption_data(first_text, first_entities, last_text, last_entities):
     """Join first/last captions into one message and preserve Telegram entity offsets."""
@@ -348,28 +319,6 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         else:
             sent_link = await message.answer(link, reply_markup=keyboard)
             sent_link_message_id = sent_link.message_id
-
-        # Combine first and last captions into one reply, retaining each
-        # caption's Telegram entities and adjusting offsets for the separator.
-        first_caption_text, first_caption_entities = await _source_post_content(
-            message, source_chat_id, first_id
-        )
-        last_caption_text, last_caption_entities = await _source_post_content(
-            message, source_chat_id, last_id
-        )
-        combined_text, combined_entities = _combine_caption_data(
-            first_caption_text, first_caption_entities,
-            last_caption_text, last_caption_entities,
-        )
-        caption_items = [(combined_text, combined_entities)] if combined_text else []
-        if combined_text:
-            await message.bot.send_message(
-                chat_id=message.chat.id,
-                text=combined_text,
-                entities=_entities_from_data(combined_entities) or None,
-                parse_mode=None,
-                reply_to_message_id=sent_link_message_id,
-            )
 
         await state.clear()
     except Exception:
