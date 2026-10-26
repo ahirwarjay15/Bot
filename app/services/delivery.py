@@ -109,12 +109,20 @@ def _notice(cfg, minutes):
 
 
 async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: dict, deeplink: str, request_key: str | None = None):
-    """Use the durable per-item queue for a single-file delivery as well."""
+    """Use compact records while resolving the fixed source channel at runtime."""
+    source_chat_id = file_doc.get("source_chat_id") or getattr(settings, "source_channel_id", None)
+    if not source_chat_id:
+        log.error("Source channel is missing for compact file record")
+        return (0, 1)
     item = {
-        "source_chat_id": file_doc["source_chat_id"],
+        "source_chat_id": source_chat_id,
         "source_message_id": file_doc["source_message_id"],
-        **({"reply_markup": file_doc["reply_markup"]} if file_doc.get("reply_markup") else {}),
     }
+    markup_data = file_doc.get("reply_markup")
+    if file_doc.get("buttons"):
+        markup_data = {"inline_keyboard": file_doc["buttons"]}
+    if markup_data:
+        item["reply_markup"] = markup_data
     return await deliver_batch(
         bot, db, user_id=user_id, batch={"batch_id": None, "items": [item]},
         deeplink=deeplink, request_key=request_key,
@@ -123,6 +131,17 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
 async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: str, request_key: str | None = None):
     """Deliver directly; persist only message IDs and expiry metadata when Auto Delete is on."""
     items = list(batch.get("items", []))
+    if not items and isinstance(batch.get("source_message_id"), list):
+        channel_id = batch.get("source_chat_id") or batch.get("_source_chat_id")
+        ids = batch["source_message_id"]
+        saved_buttons = batch.get("buttons") or {}
+        items = []
+        for index, mid in enumerate(ids, start=1):
+            item = {"source_chat_id": channel_id, "source_message_id": int(mid)}
+            rows = saved_buttons.get(f"{index:02d}")
+            if rows:
+                item["reply_markup"] = {"inline_keyboard": rows}
+            items.append(item)
     if not items:
         return (0, 0)
 
@@ -154,10 +173,8 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
 
     custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
     custom_buttons = custom_cfg.get("buttons", []) if custom_cfg.get("enabled", False) else []
-    is_batch = isinstance(batch.get("items"), list) and bool(batch.get("file_key"))
-    # Batch deliveries intentionally use the configured custom keyboard uniformly:
-    # source-message keyboards are not stored in batch items and must not affect
-    # whether a batch item receives custom buttons. Single-file behavior stays as-is.
+    is_batch = (isinstance(batch.get("items"), list) and bool(batch.get("file_key"))) or isinstance(batch.get("source_message_id"), list)
+    # Original supported URL buttons take priority. Custom buttons are only a fallback.
     valid_custom_buttons = [
         InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
         for button in custom_buttons[:2]
@@ -171,16 +188,11 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
     )
     sent_count = failed_count = 0
     for item in items:
-        if is_batch:
-            markup_data = batch_markup_data
-        else:
-            markup_data = None if item.get("disable_buttons") else item.get("reply_markup")
-            has_original_buttons = item.get("original_has_buttons", bool(markup_data))
-            if not item.get("disable_buttons") and not has_original_buttons and not markup_data:
-                if valid_custom_buttons:
-                    markup_data = InlineKeyboardMarkup(inline_keyboard=[valid_custom_buttons]).model_dump(
-                        mode="json", exclude_none=True
-                    )
+        markup_data = item.get("reply_markup")
+        if not markup_data and valid_custom_buttons:
+            markup_data = InlineKeyboardMarkup(inline_keyboard=[valid_custom_buttons]).model_dump(
+                mode="json", exclude_none=True
+            )
         markup = None
         if markup_data:
             try:
