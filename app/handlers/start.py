@@ -155,7 +155,7 @@ def build_force_join_channel_button(
     return None
 
 
-async def _force_join_owner_alert(bot, db, record: dict, operation: str, error: Exception, attempts: int):
+async def _force_join_owner_alert(bot, db, record: dict, operation: str, error: Exception, attempts: int, owner_id=None):
     """Send one durable owner alert for a terminal Force Sub task failure."""
     task_id = str(record.get("_id", "unknown"))
     alerts = getattr(db, "force_join_alerts", None)
@@ -173,10 +173,7 @@ async def _force_join_owner_alert(bot, db, record: dict, operation: str, error: 
             log.exception("Could not claim Force Sub owner alert")
             alerts = None
     settings_doc = await db.settings.find_one({"key": "runtime"}) or {}
-    owner_id = settings_doc.get("owner_id")
-    # OWNER_ID is supplied by the application settings at worker startup and is
-    # passed through the bot's configured owner metadata when available.
-    owner_id = owner_id or getattr(bot, "owner_id", None)
+    owner_id = owner_id or settings_doc.get("owner_id") or getattr(bot, "owner_id", None)
     chat_id = record.get("chat_id")
     chat_name = record.get("channel") or record.get("chat_title") or "unknown"
     message = (
@@ -199,7 +196,7 @@ async def _force_join_owner_alert(bot, db, record: dict, operation: str, error: 
         log.error("Force Sub owner alert cannot be sent: owner ID unavailable; %s", message)
 
 
-async def _revoke_tracked_force_join_link(bot, db, record: dict) -> None:
+async def _revoke_tracked_force_join_link(bot, db, record: dict, owner_id=None) -> None:
     """Revoke an expired invite with durable, bounded retries."""
     link, chat_id = record.get("invite_link"), record.get("chat_id")
     now = datetime.now(timezone.utc)
@@ -222,7 +219,7 @@ async def _revoke_tracked_force_join_link(bot, db, record: dict) -> None:
                         {"$set": {"revoke_attempts": attempts, "revoke_failed": True,
                                   "revoke_last_error": str(exc), "revoke_failed_at": now}},
                     )
-                    await _force_join_owner_alert(bot, db, record, "revoke", exc, attempts)
+                    await _force_join_owner_alert(bot, db, record, "revoke", exc, attempts, owner_id)
                     return
                 await db.force_join_links.update_one(
                     {"_id": record["_id"]},
@@ -250,7 +247,7 @@ async def _revoke_tracked_force_join_link(bot, db, record: dict) -> None:
     await db.force_join_links.delete_one({"_id": record["_id"]})
 
 
-async def cleanup_expired_force_join_links(bot, db, limit: int = 200) -> int:
+async def cleanup_expired_force_join_links(bot, db, limit: int = 200, owner_id=None) -> int:
     now = datetime.now(timezone.utc)
     records = [r async for r in db.force_join_links.find({
         "expires_at": {"$lte": now}, "revoke_failed": {"$ne": True},
@@ -278,7 +275,7 @@ async def cleanup_expired_force_join_links(bot, db, limit: int = 200) -> int:
             if not claimed or claimed.get("revoke_claim_owner") != owner:
                 return
             try:
-                await _revoke_tracked_force_join_link(bot, db, claimed)
+                await _revoke_tracked_force_join_link(bot, db, claimed, owner_id)
             except Exception:
                 log.warning("Could not clean up an expired Force Sub link", exc_info=True)
             finally:
@@ -291,11 +288,11 @@ async def cleanup_expired_force_join_links(bot, db, limit: int = 200) -> int:
     return len(records)
 
 
-async def run_force_join_link_cleanup_worker(bot, db, interval_seconds: int = 5):
+async def run_force_join_link_cleanup_worker(bot, db, settings=None, interval_seconds: int = 5):
     """Recover due revocations promptly after restarts; retry failed API calls every 30s."""
     while True:
         try:
-            await cleanup_expired_force_join_links(bot, db)
+            await cleanup_expired_force_join_links(bot, db, owner_id=getattr(settings, "owner_id", None))
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -355,7 +352,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     return None
 
 
-async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bool:
+async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict, owner_id=None) -> bool:
     """Create and persist a shared 30-minute link in the background rotation worker."""
     links = db.force_join_links
     try:
@@ -435,7 +432,7 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> 
     return True
 
 
-async def run_force_join_link_rotation_worker(bot, db, settings, interval_seconds: int = 30):
+async def run_force_join_link_rotation_worker(bot, db, settings, interval_seconds: int = 1):
     """Warm missing links and rotate shared links at 25 minutes, before 30-minute expiry."""
     while True:
         try:
@@ -482,7 +479,7 @@ async def run_force_join_link_rotation_worker(bot, db, settings, interval_second
                             latest_cfg = await db.settings.find_one({"key": "force_join"}) or {}
                             if channel not in latest_channels or not latest_cfg.get("enabled", False):
                                 return
-                            await _prepare_force_join_link(bot, db, channel, channel_cfg or {})
+                            await _prepare_force_join_link(bot, db, channel, channel_cfg or {}, settings.owner_id)
                         finally:
                             await locks.update_one(
                                 {"_id": f"force_join_rotation:{channel}", "owner": owner},
