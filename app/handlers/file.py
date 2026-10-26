@@ -134,7 +134,7 @@ async def generate_file_link(callback: CallbackQuery, state: FSMContext, setting
         else:
             record = await repo.save_batch(ids, buttons=buttons)
         me = await callback.bot.get_me()
-        link = f"https://t.me/{me.username}?start={build_deeplink_token(record['file_key'])}"
+        link = f"https://t.me/{me.username}?start={build_deeplink_token(record.get('key', record.get('file_key')))}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])
