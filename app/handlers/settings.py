@@ -788,14 +788,32 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await query.answer("Invalid mode.", show_alert=True)
             return
         pending = await state.get_data()
+        if not pending.get("pending_forcejoin_chat_id") or not pending.get("pending_forcejoin_channel_id"):
+            await query.answer("Selection expired. Please add the chat again.", show_alert=True)
+            return
+        await state.update_data(pending_forcejoin_access_mode=mode)
+        await query.message.answer(
+            f"Choose link mode for <b>{html.escape(pending.get('pending_forcejoin_chat_title') or str(pending['pending_forcejoin_chat_id']))}</b>:",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Rotation Links", callback_data="settings:forcejoin_link_mode:rotation")],
+                [InlineKeyboardButton(text="Single Link", callback_data="settings:forcejoin_link_mode:single")],
+            ]),
+        )
+        await query.answer("Access mode saved.")
+        return
+    if action.startswith("forcejoin_link_mode:"):
+        link_mode = action.split(":", 1)[1]
+        if link_mode not in {"rotation", "single"}:
+            await query.answer("Invalid link mode.", show_alert=True)
+            return
+        pending = await state.get_data()
         chat_id = pending.get("pending_forcejoin_chat_id")
         channel_id = pending.get("pending_forcejoin_channel_id")
+        access_mode = pending.get("pending_forcejoin_access_mode", "normal")
         if not chat_id or not channel_id:
             await query.answer("Selection expired. Please add the chat again.", show_alert=True)
             return
-        # Invite links are created lazily on the first user request and rotated
-        # by the shared ten-minute temporary-link lifecycle.
-        link = None
         channels = await effective_force_join_channels(database, settings)
         if channel_id not in channels:
             channels.append(channel_id)
@@ -803,19 +821,24 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await db.settings.update_one(
             {"key": "force_join_channel", "channel": channel_id},
             {"$set": {"key": "force_join_channel", "channel": channel_id,
-                      "button_url": link, "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat_id),
-                      "chat_type": pending.get("pending_forcejoin_chat_type"), "mode": mode}},
+                      "button_url": None, "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat_id),
+                      "chat_type": pending.get("pending_forcejoin_chat_type"),
+                      "mode": access_mode, "link_mode": link_mode}},
             upsert=True,
         )
+        try:
+            from app.handlers.start import _prepare_force_join_link
+            channel_cfg = await db.settings.find_one({"key": "force_join_channel", "channel": channel_id}) or {}
+            await _prepare_force_join_link(query.bot, db, channel_id, channel_cfg)
+        except Exception:
+            pass  # The rotation worker retries transient Telegram or database failures.
         await state.clear()
         panel_chat_id = pending.get("pending_forcejoin_panel_chat_id")
         panel_message_id = pending.get("pending_forcejoin_panel_message_id")
         if panel_chat_id and panel_message_id:
             panel_text, panel_markup = await build_forcejoin_page(query.bot, db, settings)
-            await refresh_settings_panel(
-                query.bot, panel_chat_id, panel_message_id, panel_text, panel_markup
-            )
-        await query.answer("Mode saved.")
+            await refresh_settings_panel(query.bot, panel_chat_id, panel_message_id, panel_text, panel_markup)
+        await query.answer("Link mode saved.")
         return
     if action in {"home", "home_back"}: await render_home(query)
     elif action == "forcejoin": await render_forcejoin(query, db, settings)
@@ -1510,209 +1533,28 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             await state.set_state(SettingInput.waiting)
             await state.update_data(field="forcejoin_wait_mode")
             return
-        mode = "normal"
-        link = f"https://t.me/{chat.username}"
-        channels.append(channel_id)
-        await patch(db, "force_join", {"channels": channels, "channels_override": True})
-        await db.settings.update_one({"key": "force_join_channel", "channel": channel_id},
-            {"$set": {"key": "force_join_channel", "channel": channel_id, "button_url": link,
-                      "channel_title": chat.title or str(chat.id), "chat_type": chat.type, "mode": mode}}, upsert=True)
-        panel_chat_id, panel_message_id = data.get("forcejoin_panel_chat_id"), data.get("forcejoin_panel_message_id")
-        await remove_temporary_prompts(message.bot, data)
-        await remove_input_prompt(message.bot, data)
-        await clear_state_preserving_prompts(state)
-        try:
-            await message.delete()
-        except TelegramAPIError:
-            pass
-        # Hide the chat-picker keyboard without leaving a new prompt in the chat.
-        try:
-            keyboard_removal = await tracked_answer(message, state, " ", reply_markup=ReplyKeyboardRemove())
-            await keyboard_removal.delete()
-        except TelegramAPIError:
-            pass
-        # Delete the selected-chat message too; all picker prompts are removed above.
-        # Refresh the original Add panel in place. If Telegram rejects the edit,
-        # send the main panel as a fallback and remove the stale Add panel.
-        if panel_chat_id and panel_message_id:
-            panel_text, panel_markup = await build_forcejoin_page(message.bot, db, settings)
-            try:
-                await message.bot.edit_message_text(
-                    chat_id=panel_chat_id, message_id=panel_message_id,
-                    text=format_settings_page(panel_text), parse_mode="HTML",
-                    reply_markup=panel_markup, link_preview_options={"is_disabled": True},
-                )
-            except TelegramBadRequest as exc:
-                if "message is not modified" not in str(exc).lower():
-                    try:
-                        replacement = await message.bot.send_message(
-                            chat_id=panel_chat_id, text=format_settings_page(panel_text),
-                            parse_mode="HTML", reply_markup=panel_markup,
-                            link_preview_options={"is_disabled": True},
-                        )
-                    except TelegramAPIError:
-                        replacement = None
-                    if replacement:
-                        try:
-                            await message.bot.delete_message(chat_id=panel_chat_id, message_id=panel_message_id)
-                        except TelegramAPIError:
-                            pass
-            except TelegramAPIError:
-                try:
-                    replacement = await message.bot.send_message(
-                        chat_id=panel_chat_id, text=format_settings_page(panel_text),
-                        parse_mode="HTML", reply_markup=panel_markup,
-                        link_preview_options={"is_disabled": True},
-                    )
-                except TelegramAPIError:
-                    replacement = None
-                if replacement:
-                    try:
-                        await message.bot.delete_message(chat_id=panel_chat_id, message_id=panel_message_id)
-                    except TelegramAPIError:
-                        pass
+        await state.update_data(
+            pending_forcejoin_chat_id=chat.id,
+            pending_forcejoin_channel_id=channel_id,
+            pending_forcejoin_chat_title=chat.title or str(chat.id),
+            pending_forcejoin_chat_type=chat.type,
+            pending_forcejoin_access_mode="normal",
+            pending_forcejoin_panel_chat_id=data.get("forcejoin_panel_chat_id"),
+            pending_forcejoin_panel_message_id=data.get("forcejoin_panel_message_id"),
+        )
+        await tracked_answer(
+            message, state,
+            f"Choose link mode for <b>{html.escape(chat.title or str(chat.id))}</b>:",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Rotation Links", callback_data="settings:forcejoin_link_mode:rotation")],
+                [InlineKeyboardButton(text="Single Link", callback_data="settings:forcejoin_link_mode:single")],
+            ]),
+        )
+        await state.set_state(SettingInput.waiting)
+        await state.update_data(field="forcejoin_wait_mode")
         return
 
-    if field == "custom_button_text":
-        if not value or len(value) > 64:
-            await tracked_answer(message, state, "Button text must be between 1 and 64 characters.")
-            return
-        data = await state.get_data()
-        await state.update_data(custom_button_pending_text=value, field="custom_button_url")
-        try:
-            await message.delete()
-        except TelegramAPIError:
-            pass
-        await remove_input_prompt(message.bot, data)
-        prompt = await tracked_answer(message, state, "Now send the button URL (https://... or t.me/...).")
-        await state.update_data(
-            input_prompt_chat_id=prompt.chat.id,
-            input_prompt_message_id=prompt.message_id,
-        )
-        return
-    if field == "custom_button_url":
-        normalized = normalize_http_url(value)
-        if not normalized:
-            await tracked_answer(message, state, "Please send a valid http/https URL.")
-            return
-        prev = await state.get_data()
-        cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
-        buttons = list(cfg.get("buttons", []))
-        if len(buttons) >= 2:
-            await tracked_answer(message, state, "Maximum 2 custom buttons allowed.")
-            await clear_state_preserving_prompts(state)
-            return
-        buttons.append({"text": prev.get("custom_button_pending_text", ""), "url": normalized})
-        await patch(db, "custom_buttons", {"buttons": buttons})
-        await remove_input_prompt(message.bot, prev)
-        try:
-            await message.delete()
-        except TelegramAPIError:
-            pass
-        # Refresh the original Custom Button panel in place after saving.
-        panel_chat = prev.get("custom_panel_chat_id")
-        panel_message = prev.get("custom_panel_message_id")
-        if panel_chat and panel_message:
-            current = buttons[:2]
-            rows = []
-            for i, item in enumerate(current):
-                rows.append([
-                    InlineKeyboardButton(text=str(item.get("text", f"Button {i+1}"))[:64], url=item.get("url")),
-                    InlineKeyboardButton(text="✖", callback_data=f"settings:custom_button_remove:{i}"),
-                ])
-            if len(current) < 2:
-                rows.append([InlineKeyboardButton(text="✚", callback_data="settings:custom_button_add")])
-            rows.append([InlineKeyboardButton(text="《 BACK", callback_data="settings:home")])
-            await refresh_settings_panel(
-                message.bot, panel_chat, panel_message,
-                "Custom Button:\n\nYou can add a custom buttons to your files.",
-                InlineKeyboardMarkup(inline_keyboard=rows),
-            )
-        await clear_state_preserving_prompts(state)
-        return
-    if field == "file_animation_text":
-        if not message.text or not value:
-            await tracked_answer(message, state, "Please send non-empty Blink text.")
-            return
-        panel_chat_id = data.get("animation_panel_chat_id")
-        panel_message_id = data.get("animation_panel_message_id")
-        await db.settings.update_one({"key": "animation"}, {"$set": {"file_animation_text": formatted_input_text(message, value)}}, upsert=True)
-        await clear_state_preserving_prompts(state)
-        await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
-        await tracked_answer(message, state, "✨ Blink text saved and enabled.")
-        return
-    if field == "animation_frames_collect":
-        frames = list(data.get("pending_frames", []))
-        if value.lower() == "/done":
-            if len(frames) < 4:
-                await tracked_answer(message, state, f"At least 4 frames are required. You have {len(frames)}; send more frames or /cancel.")
-                return
-            animation_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
-            await db.settings.update_one(
-                {"key": "animation"},
-                {"$set": {"key": "animation", "frames": frames, "speed": animation_cfg["speed"], "mode": animation_cfg["mode"], "enabled": animation_cfg["enabled"]},
-                 "$unset": {"prefix": "", "prefix_enabled": "", "frames_enabled": ""}},
-                upsert=True,
-            )
-            saved_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
-            if saved_cfg.get("frames") != frames:
-                await tracked_answer(message, state, "❌ Frames could not be verified in the database. Please retry.")
-                return
-            panel_chat_id = data.get("animation_panel_chat_id")
-            panel_message_id = data.get("animation_panel_message_id")
-            await clear_state_preserving_prompts(state)
-            refreshed_id = await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
-            if not refreshed_id and panel_chat_id:
-                text, markup = build_animation_page(saved_cfg)
-                await message.bot.send_message(chat_id=panel_chat_id, text=format_settings_page(text), parse_mode="HTML", reply_markup=markup, link_preview_options={"is_disabled": True})
-            await tracked_answer(message, state, f"✨ Saved {len(frames)} animation frames.")
-            return
-        if not message.text or not value:
-            await tracked_answer(message, state, "Please send a non-empty text frame.")
-            return
-        if len(frames) >= 6:
-            await tracked_answer(message, state, "Maximum 6 frames reached. Send /done to save them.")
-            return
-        frames.append(formatted_input_text(message, value))
-        await state.update_data(field="animation_frames_collect", pending_frames=frames)
-        await tracked_answer(message, state, f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 4 frames.")
-        return
-    if field == "forcejoin_label":
-        if not value or len(value) > 64:
-            await tracked_answer(message, state, "Button text must be between 1 and 64 characters.")
-            return
-        prev = await state.get_data()
-        channel = prev.get("channel")
-        if not channel:
-            await tracked_answer(message, state, "Channel setting expired. Please reopen it.")
-            await clear_state_preserving_prompts(state)
-            return
-        await save_force_join_channel_label(message.bot, db, channel, value)
-        await clear_state_preserving_prompts(state)
-        await tracked_answer(message, state, f"✨ Successfully updated button text for {channel} force-sub button.")
-        return
-    if field == "forcejoin_message":
-        value = formatted_input_text(message, value)
-        await patch(db, "force_join", {"message": value})
-        await finish_input_panel(message, state, "FORCE SUB CAPTION", "forcejoin")
-        await clear_state_preserving_prompts(state)
-        return
-    if field == "forcejoin_verify_text":
-        await patch(db, "force_join", {"verify_text": value})
-        await clear_state_preserving_prompts(state)
-        await tracked_answer(message, state, "✨ Successfully updated verification button text.")
-        return
-    if field == "forcejoin_media":
-        if message.animation:
-            await patch(db, "force_join", {"poster_file_id": message.animation.file_id, "poster_photo_id": None})
-        elif message.photo:
-            await patch(db, "force_join", {"poster_photo_id": message.photo[-1].file_id, "poster_file_id": None})
-        else:
-            await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
-            return
-        await clear_state_preserving_prompts(state)
-        await tracked_answer(message, state, "✨ Force-join poster updated successfully.")
-        return
     if field == "forcejoin_channel":
         await clear_state_preserving_prompts(state)
         await tracked_answer(message, state, "Please add a Group or Channel using the chat-selection keyboard from /settings → Force Sub → Add.")
