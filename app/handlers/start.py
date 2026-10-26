@@ -1412,7 +1412,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             log.info("Could not remove Force Sub verification animation")
     repo = FileRepository(database.db)
     # Files and batches share the same collection and Deepcode lookup.
-    record = await repo.get_file(payload[:5]) if len(payload) == 20 and payload.isalnum() else None
+    record = await repo.get_file(payload[:7]) if len(payload) == 22 and payload.isalnum() else None
     if not record:
         if old_post:
             try: await old_post.delete()
