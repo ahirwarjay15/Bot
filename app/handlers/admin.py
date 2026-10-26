@@ -1,5 +1,4 @@
 """Owner/moderator administration, ban controls, and stats popup."""
-from datetime import datetime, timezone
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -21,7 +20,7 @@ async def ban_user(message: Message, settings: Settings, database):
         await message.answer("Owner/moderators cannot be banned.")
         return
     await database.db.users.update_one(
-        {"user_id": uid}, {"$set": {"banned": True}, "$setOnInsert": {"created_at": datetime.now(timezone.utc)}}, upsert=True
+        {"user_id": uid}, {"$set": {"banned": True}, "$setOnInsert": {"user_id": uid}}, upsert=True
     )
     await message.answer(f"User {uid} banned.")
 
@@ -63,13 +62,8 @@ async def add_mod(message: Message, settings: Settings, database):
     if await database.db.moderators.count_documents({}) >= 3:
         await message.answer("Maximum 3 moderators allowed.")
         return
-    user = await database.db.users.find_one({"user_id": uid})
-    await database.db.moderators.insert_one({
-        "user_id": uid,
-        "first_name": (user or {}).get("first_name", f"User {uid}"),
-        "username": (user or {}).get("username"),
-    })
-    await message.answer(f"Successfully added {(user or {}).get('first_name', f'User {uid}')} as moderator.")
+    await database.db.moderators.insert_one({"user_id": uid, "first_name": f"User {uid}"})
+    await message.answer(f"Successfully added User {uid} as moderator.")
 
 @router.message(Command("delmod"))
 async def del_mod(message: Message, settings: Settings, database):
@@ -87,9 +81,9 @@ async def stats(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     total = await database.db.users.count_documents({})
-    blocked = await database.db.users.count_documents({"blocked": True})
+    banned = await database.db.users.count_documents({"banned": True})
     me = await message.bot.get_me()
-    text = f"{me.full_name}\n\nUSERS: {total}\n\nBLOCKED: {blocked}"
+    text = f"{me.full_name}\n\nUSERS: {total}\n\nBANNED: {banned}"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="OK", callback_data="stats:ok")]])
     await message.answer(text, reply_markup=keyboard)
 
