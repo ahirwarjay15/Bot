@@ -1,170 +1,198 @@
-"""Create permanent deeplinks by copying messages into the source channel."""
+"""Collect up to 20 files, then create one compact deeplink."""
 import logging
-from aiogram import F,Router
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State,StatesGroup
-from aiogram.types import Message,InlineKeyboardMarkup,InlineKeyboardButton,CopyTextButton
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, CopyTextButton
 from aiogram.exceptions import TelegramAPIError
-from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
 from app.database.files import FileRepository, build_deeplink_token
 from app.services.permissions import is_owner_or_moderator
 from app.services.deeplink_channel import mirror_deeplink
-router=Router(name="file");log=logging.getLogger(__name__)
-class FileStates(StatesGroup):waiting_for_message=State()
 
-@router.message(Command("file"))
-async def file_command(message:Message,state:FSMContext,settings:Settings,database):
-    if not message.from_user or not await is_owner_or_moderator(database.db,message.from_user.id,settings):return
-    if not settings.source_channel_id:
-        await message.answer("Storage isn't configured. Set SOURCE_CHANNEL_ID to the numeric ID of your private storage channel.")
-        return
-    # Validate the configured ID and bot permissions before asking for a file.
+router = Router(name="file")
+log = logging.getLogger(__name__)
+MAX_FILES = 20
+PANEL_TEXT = ("Send more files to create your collection. When you're done, generate your link below.\n"
+              "You can also tap BACK to cancel this process.")
+class FileStates(StatesGroup):
+    waiting_for_message = State()
+    collecting = State()
+
+def _panel_keyboard(count):
+    rows = [[InlineKeyboardButton(text="GENERATE LINK", callback_data="file:generate")]]
+    if count < MAX_FILES:
+        rows.append([InlineKeyboardButton(text="BACK", callback_data="file:back")])
+    else:
+        rows.append([InlineKeyboardButton(text="LIMIT REACHED", callback_data="file:limit")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def _url_keyboard(message):
+    markup = getattr(message, "reply_markup", None)
+    if not markup:
+        return None
+    rows = []
+    for row in markup.inline_keyboard:
+        saved = []
+        for button in row:
+            if button.url and button.text:
+                saved.append({"text": button.text, "url": button.url})
+        if saved:
+            rows.append(saved)
+    return rows or None
+
+def _markup_from_rows(rows):
+    if not rows:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=b["text"], url=b["url"]) for b in row]
+        for row in rows if row
+    ])
+
+async def _delete(bot, chat_id, message_id):
     try:
-        storage_chat = await message.bot.get_chat(settings.source_channel_id)
-        bot_member = await message.bot.get_chat_member(
-            chat_id=settings.source_channel_id,
-            user_id=(await message.bot.get_me()).id,
-        )
-        if bot_member.status not in ("administrator", "creator"):
-            await message.answer(
-                f"Storage channel found ({storage_chat.title or storage_chat.id}), "
-                "but the bot is not an administrator there. Promote it to admin "
-                "with permission to post messages, then try /file again."
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except TelegramAPIError:
+        log.debug("Could not delete collection message %s", message_id, exc_info=True)
+
+async def _show_panel(message, state, *, edit=False):
+    data = await state.get_data()
+    count = len(data.get("collected", []))
+    text = PANEL_TEXT + f"\n\nFiles added: {count}/{MAX_FILES}"
+    if edit and data.get("panel_message_id"):
+        try:
+            await message.bot.edit_message_text(
+                chat_id=data["panel_chat_id"], message_id=data["panel_message_id"],
+                text=text, reply_markup=_panel_keyboard(count),
             )
             return
-    except TelegramAPIError as exc:
-        log.exception("Storage channel preflight failed for SOURCE_CHANNEL_ID=%s", settings.source_channel_id)
-        detail = str(exc).lower()
-        if "chat not found" in detail:
-            reason = "Telegram cannot find this channel ID. Set SOURCE_CHANNEL_ID to the channel's numeric ID (usually starts with -100)."
-        elif "bot is not a member" in detail or "user not found" in detail:
-            reason = "The bot is not in this channel. Add the bot to the private storage channel and make it an administrator."
-        elif "administrator" in detail or "rights" in detail:
-            reason = "The bot needs administrator permission to post/copy messages in the storage channel."
-        else:
-            reason = f"Telegram rejected the storage channel configuration ({type(exc).__name__}). Verify SOURCE_CHANNEL_ID and bot admin access."
-        await message.answer(f"Storage channel check failed. {reason}")
-        return
-    await state.set_state(FileStates.waiting_for_message)
-    prompt = await message.answer("Send me the files you want to store. or use /cancel to stop.")
-    await state.update_data(prompt_message_id=prompt.message_id, prompt_chat_id=prompt.chat.id)
-
-@router.message(FileStates.waiting_for_message,Command("cancel"))
-async def cancel_file(message:Message,state:FSMContext):
-    data = await state.get_data()
-    await state.clear()
-    prompt_message_id = data.get("prompt_message_id")
-    prompt_chat_id = data.get("prompt_chat_id")
-    if prompt_message_id and prompt_chat_id:
-        try:
-            await message.bot.delete_message(chat_id=prompt_chat_id, message_id=prompt_message_id)
         except TelegramAPIError:
-            log.debug("Could not delete file prompt on cancellation", exc_info=True)
+            pass
+    panel = await message.answer(text, reply_markup=_panel_keyboard(count))
+    await state.update_data(panel_message_id=panel.message_id, panel_chat_id=panel.chat.id)
+
+@router.message(Command("file"))
+async def file_command(message: Message, state: FSMContext, settings: Settings, database):
+    if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
+        return
+    if not settings.source_channel_id:
+        await message.answer("Storage isn't configured. Set SOURCE_CHANNEL_ID to your private storage channel.")
+        return
+    try:
+        chat = await message.bot.get_chat(settings.source_channel_id)
+        member = await message.bot.get_chat_member(settings.source_channel_id, (await message.bot.get_me()).id)
+        if member.status not in ("administrator", "creator"):
+            await message.answer(f"Bot must be an admin in {chat.title or 'the storage channel'}.")
+            return
+    except TelegramAPIError:
+        log.exception("Storage channel preflight failed")
+        await message.answer("Storage channel check failed. Verify SOURCE_CHANNEL_ID and bot admin access.")
+        return
+    await state.clear()
+    await state.set_state(FileStates.waiting_for_message)
+    prompt = await message.answer("Send the first file. Then you can add up to 20 files before generating the link.")
+    await state.update_data(prompt_message_id=prompt.message_id, prompt_chat_id=prompt.chat.id, collected=[])
+
+@router.message(Command("cancel"))
+async def cancel_file(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if await state.get_state() not in (FileStates.waiting_for_message.state, FileStates.collecting.state):
+        return
+    await state.clear()
+    await _delete(message.bot, data.get("prompt_chat_id", message.chat.id), data.get("prompt_message_id", 0))
+    await _delete(message.bot, data.get("panel_chat_id", message.chat.id), data.get("panel_message_id", 0))
     await message.answer("File link creation cancelled.")
 
-@router.message(FileStates.waiting_for_message,F.text.startswith("/"))
-async def waiting_command(message:Message,state:FSMContext):
-    # Do not let file-collection mode swallow other commands such as /batch
-    # or /shortener. /cancel has its own handler above.
-    await state.clear()
-    raise SkipHandler
+@router.callback_query(F.data == "file:limit")
+async def file_limit(callback: CallbackQuery):
+    await callback.answer("LIMIT REACHED — maximum 20 files.", show_alert=True)
 
-@router.message(FileStates.waiting_for_message)
-async def receive_file(message:Message,state:FSMContext,settings:Settings,database):
-    if not message.from_user:return
-    state_data = await state.get_data()
-    record = None
-    link_message = None
-    link_send_attempted = False
+@router.callback_query(F.data == "file:back")
+async def file_back(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if not data.get("collected"):
+        await state.clear()
+        await _delete(callback.bot, data.get("prompt_chat_id", callback.message.chat.id), data.get("prompt_message_id", 0))
+        await callback.message.delete()
+        await callback.answer("Cancelled")
+        return
+    await callback.answer("Use /cancel to cancel this collection.", show_alert=True)
+
+@router.callback_query(F.data == "file:generate")
+async def generate_file_link(callback: CallbackQuery, state: FSMContext, settings: Settings, database):
+    data = await state.get_data()
+    collected = data.get("collected", [])
+    if not collected:
+        await callback.answer("Send at least one file first.", show_alert=True)
+        return
+    await callback.answer("Generating link…")
+    repo = FileRepository(database.db)
     try:
-        # If the user forwarded a post from the configured storage channel, reuse
-        # its original channel message ID instead of trying to copy the forwarded
-        # wrapper back into that same channel.
-        origin = message.forward_origin
-        origin_chat = getattr(origin, "chat", None)
-        origin_message_id = getattr(origin, "message_id", None)
-        if origin_chat and origin_message_id and origin_chat.id == settings.source_channel_id:
-            source_chat_id = origin_chat.id
-            source_message_id = origin_message_id
+        ids = [int(x["source_message_id"]) for x in collected]
+        buttons = {f"{i+1:02d}": item["buttons"] for i, item in enumerate(collected) if item.get("buttons")}
+        if len(ids) == 1:
+            record = await repo.save_file(source_message_id=ids[0], buttons=buttons.get("01"))
         else:
-            copied = await message.bot.copy_message(
-                chat_id=settings.source_channel_id,
-                from_chat_id=message.chat.id,
-                message_id=message.message_id,
-            )
-            source_chat_id = settings.source_channel_id
-            source_message_id = copied.message_id
-
-        # Store the complete keyboard JSON, without filename/user/timestamp metadata.
-        markup_data = (
-            message.reply_markup.model_dump(mode="json", exclude_none=True)
-            if message.reply_markup else None
-        )
-        record = await FileRepository(database.db).save_file(
-            source_chat_id=source_chat_id,
-            source_message_id=source_message_id,
-            reply_markup=markup_data,
-        )
-        me = await message.bot.get_me()
+            record = await repo.save_batch(ids, buttons=buttons)
+        me = await callback.bot.get_me()
         link = f"https://t.me/{me.username}?start={build_deeplink_token(record['file_key'])}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])
-        link_send_attempted = True
-        link_message = await message.answer(link, reply_markup=keyboard)
-        # Keep the original text and Telegram entities so the reply looks identical.
-        original_text = message.caption if message.caption is not None else (message.text or "")
-        original_entities = message.caption_entities if message.caption is not None else message.entities
-        entities_data = [entity.model_dump(mode="json", exclude_none=True) for entity in (original_entities or [])]
-        if original_text:
-            await message.bot.send_message(
-                chat_id=message.chat.id,
-                text=original_text,
-                entities=original_entities or None,
-                parse_mode=None,
-                reply_to_message_id=link_message.message_id,
-            )
-        await mirror_deeplink(
-            message.bot, settings, link, keyboard,
-            [(original_text, entities_data)] if original_text else [],
-        )
-        # Remove the collection prompt only after the deeplink has been delivered.
-        prompt_message_id = state_data.get("prompt_message_id")
-        prompt_chat_id = state_data.get("prompt_chat_id")
-        if prompt_message_id and prompt_chat_id:
-            try:
-                await message.bot.delete_message(chat_id=prompt_chat_id, message_id=prompt_message_id)
-            except TelegramAPIError:
-                log.warning("Could not delete file collection prompt after sending deeplink", exc_info=True)
-        # Delete the submitted message after its storage copy and link are saved.
-        try:
-            await message.delete()
-        except TelegramAPIError:
-            log.warning("Could not delete submitted message after saving", exc_info=True)
-    except TelegramAPIError as exc:
-        if record is not None and not link_send_attempted:
-            try:
-                await database.db.files.delete_one({"file_key": record["file_key"]})
-            except Exception:
-                log.warning("Could not clean up an unlinked file record", exc_info=True)
-        log.exception("Could not create file link")
-        reason = type(exc).__name__
-        if "chat not found" in str(exc).lower():
-            detail = "Storage channel ID is incorrect or the bot cannot access that channel."
-        elif "administrator" in str(exc).lower() or "chat_admin_required" in str(exc).lower():
-            detail = "Make the bot an administrator in the private storage channel with permission to post messages."
-        elif "message to copy" in str(exc).lower() or "message_id_invalid" in str(exc).lower():
-            detail = "The original channel message is unavailable or its ID could not be read."
-        else:
-            detail = f"Telegram error: {reason}. Check the bot's storage channel access and SOURCE_CHANNEL_ID."
-        await message.answer(f"Couldn't store this message. {detail}")
+        await callback.message.answer(link, reply_markup=keyboard)
+        await mirror_deeplink(callback.bot, settings, link, keyboard, [])
+        await _delete(callback.bot, data.get("prompt_chat_id", callback.message.chat.id), data.get("prompt_message_id", 0))
+        await callback.message.delete()
+        await state.clear()
     except Exception:
-        if record is not None and link_message is None:
-            try:
-                await database.db.files.delete_one({"file_key": record["file_key"]})
-            except Exception:
-                log.warning("Could not clean up an unlinked file record", exc_info=True)
-        log.exception("File link creation failed");await message.answer("Unexpected error while saving this link. Check bot logs.")
-    finally:await state.clear()
+        log.exception("Collection link generation failed")
+        await callback.message.answer("Link generation failed. Check bot logs and try again.")
+
+@router.message(FileStates.waiting_for_message)
+async def receive_first(message: Message, state: FSMContext, settings: Settings):
+    if not message.from_user:
+        return
+    if message.text and message.text.startswith("/"):
+        return
+    await state.set_state(FileStates.collecting)
+    await _receive_collected(message, state, settings)
+
+@router.message(FileStates.collecting)
+async def receive_more(message: Message, state: FSMContext, settings: Settings):
+    if not message.from_user:
+        return
+    if message.text and message.text.startswith("/"):
+        return
+    await _receive_collected(message, state, settings)
+
+async def _receive_collected(message: Message, state: FSMContext, settings: Settings):
+    data = await state.get_data()
+    collected = list(data.get("collected", []))
+    if len(collected) >= MAX_FILES:
+        await _delete(message.bot, message.chat.id, message.message_id)
+        await message.answer("LIMIT REACHED — maximum 20 files. Tap GENERATE LINK.")
+        return
+    try:
+        origin = message.forward_origin
+        origin_chat = getattr(origin, "chat", None)
+        origin_id = getattr(origin, "message_id", None)
+        if origin_chat and origin_id and int(origin_chat.id) == int(settings.source_channel_id):
+            source_id = int(origin_id)
+        else:
+            copied = await message.bot.copy_message(
+                chat_id=settings.source_channel_id, from_chat_id=message.chat.id,
+                message_id=message.message_id,
+            )
+            source_id = int(copied.message_id)
+        collected.append({"source_message_id": source_id, "buttons": _url_keyboard(message)})
+        await state.update_data(collected=collected)
+        await _delete(message.bot, data.get("prompt_chat_id", message.chat.id), data.get("prompt_message_id", 0))
+        await _delete(message.bot, message.chat.id, message.message_id)
+        if data.get("panel_message_id"):
+            await _show_panel(message, state, edit=True)
+        else:
+            await _show_panel(message, state)
+    except TelegramAPIError:
+        log.exception("Could not collect file")
+        await message.answer("Couldn't store this file. Check storage channel permissions.")
