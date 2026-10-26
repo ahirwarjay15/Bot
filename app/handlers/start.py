@@ -557,28 +557,43 @@ def _pending_request_is_recent(pending: dict | None, now=None, max_age_seconds: 
 
 
 async def join_status(bot, user_id: int, channels: list[str], db=None) -> list[str]:
-    """Check memberships concurrently while preserving configured channel order."""
+    """Check memberships concurrently, avoiding an unnecessary getChat call for members."""
     async def check_channel(raw: str) -> str | None:
         channel = raw.strip()
         if not channel:
             return None
         try:
             chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
-            chat = await bot.get_chat(chat_arg)
-            member = await bot.get_chat_member(chat_id=chat.id, user_id=user_id)
-            # Always trust live membership first, including private channels;
-            # a pending request is only a fallback when the user is not a member.
-            verified = _is_member_status(member)
-            channel_cfg = (
-                await db.settings.find_one({"key": "force_join_channel", "channel": channel})
+            # Telegram accepts @channelusername or numeric chat IDs directly in
+            # getChatMember. Check membership first; resolving getChat on every
+            # /start added an extra network round trip for every required channel.
+            member_task = bot.get_chat_member(chat_id=chat_arg, user_id=user_id)
+            cfg_task = (
+                db.settings.find_one({"key": "force_join_channel", "channel": channel})
                 if db is not None else None
             )
+            if cfg_task is not None:
+                member, channel_cfg = await asyncio.gather(member_task, cfg_task)
+            else:
+                member, channel_cfg = await asyncio.gather(member_task, asyncio.sleep(0, result=None))
+            if _is_member_status(member):
+                return None
+
             mode = (channel_cfg or {}).get("mode", "join_request")
-            if not verified and _is_private_chat(chat) and mode == "join_request" and db is not None:
-                pending = await db.pending_join_requests.find_one({"chat_id": chat.id, "user_id": user_id})
-                verified = _pending_request_is_recent(pending)
-            return None if verified else channel
+            # Only resolve chat metadata when a non-member may have a pending
+            # private-channel join request. This preserves that fallback while
+            # removing getChat from the common already-member path.
+            if mode == "join_request" and db is not None:
+                chat = await bot.get_chat(chat_arg)
+                if _is_private_chat(chat):
+                    pending = await db.pending_join_requests.find_one(
+                        {"chat_id": chat.id, "user_id": user_id}
+                    )
+                    if _pending_request_is_recent(pending):
+                        return None
+            return channel
         except TelegramAPIError:
+            # Fail closed: an API failure must not accidentally bypass Force Sub.
             return channel
 
     results = await asyncio.gather(*(check_channel(channel) for channel in channels))
