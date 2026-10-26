@@ -2,6 +2,9 @@
 from datetime import datetime, timezone
 from secrets import choice
 from string import ascii_letters, digits
+import logging
+
+log = logging.getLogger(__name__)
 
 _CODE_ALPHABET = ascii_letters + digits
 
@@ -41,7 +44,7 @@ class FileRepository:
                         source_message_id: int, reply_markup: dict | None = None,
                         buttons: list | None = None) -> dict:
         # source_chat_id is accepted for backwards compatibility but isn't stored.
-        for _ in range(8):
+        for attempt in range(8):
             key = await self.reserve_code(7)
             doc = {"key": key, "id": int(source_message_id)}
             compact = buttons if buttons else None
@@ -54,8 +57,10 @@ class FileRepository:
                 return doc
             except Exception as exc:
                 if getattr(exc, "code", None) != 11000:
+                    log.exception("File record insert failed (attempt %s)", attempt + 1)
                     raise
-        raise RuntimeError("Could not allocate a unique file key")
+                log.warning("Duplicate file key collision on insert (attempt %s/8)", attempt + 1)
+        raise RuntimeError("Could not allocate a unique file key after duplicate-key retries")
 
     async def get_file(self, key: str) -> dict | None:
         return await self.db.files.find_one({"$or": [{"key": key}, {"file_key": key}]})
