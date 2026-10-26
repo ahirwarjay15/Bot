@@ -976,7 +976,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             # Flash and clear the blink before delivering the file/batch.
             await send_file_animation(bot, database.db, message.chat.id)
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
-            is_batch = isinstance(record.get("items"), list)
+            is_batch = isinstance(record.get("items"), list) or isinstance(record.get("source_message_id"), list)
             if is_batch and result[0]==0:
                 await message.answer("None of the batch files could be delivered. The source messages may be unavailable.")
             elif is_batch and result[1]:
