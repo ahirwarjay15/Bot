@@ -160,7 +160,7 @@ async def main():
                 (run_task_worker, (bot, database.db), "delivery-task-worker"),
                 (run_broadcast_worker, (bot, database.db), "broadcast-worker"),
                 (run_daily_database_cleanup_worker, (database.db,), "daily-database-cleanup-worker"),
-                (run_force_join_link_cleanup_worker, (bot, database.db), "force-join-link-cleanup-worker"),
+                (run_force_join_link_cleanup_worker, (bot, database.db, settings), "force-join-link-cleanup-worker"),
                 (run_force_join_link_rotation_worker, (bot, database.db, settings), "force-join-link-rotation-worker"),
             )
             for worker, args, name in workers:
