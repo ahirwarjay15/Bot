@@ -792,15 +792,15 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await query.answer("Selection expired. Please add the chat again.", show_alert=True)
             return
         await state.update_data(pending_forcejoin_access_mode=mode)
-        await tracked_answer(
-            query.message, state,
-            f"Choose link mode for <b>{html.escape(pending.get('pending_forcejoin_chat_title') or str(pending['pending_forcejoin_chat_id']))}</b>:",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Rotation Links", callback_data="settings:forcejoin_link_mode:rotation")],
-                [InlineKeyboardButton(text="Single Link", callback_data="settings:forcejoin_link_mode:single")],
-            ]),
-        )
+        if query.message:
+            await query.message.edit_text(
+                f"Choose link mode for <b>{html.escape(pending.get('pending_forcejoin_chat_title') or str(pending['pending_forcejoin_chat_id']))}</b>:",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="ʀᴏᴛᴀᴛɪᴏɴ ʟɪɴᴋꜱ", callback_data="settings:forcejoin_link_mode:rotation")],
+                    [InlineKeyboardButton(text="ꜱɪɴɢʟᴇ ʟɪɴᴋ", callback_data="settings:forcejoin_link_mode:single")],
+                ]),
+            )
         await query.answer("Access mode saved.")
         return
     if action.startswith("forcejoin_link_mode:"):
@@ -1564,8 +1564,8 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 f"Choose a mode for <b>{html.escape(chat.title or str(chat.id))}</b>:",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Normal Mode", callback_data="settings:forcejoin_mode:normal")],
-                    [InlineKeyboardButton(text="Join Request Mode", callback_data="settings:forcejoin_mode:join_request")],
+                    [InlineKeyboardButton(text="ɴᴏʀᴍᴀʟ ᴍᴏᴅᴇ", callback_data="settings:forcejoin_mode:normal")],
+                    [InlineKeyboardButton(text="ʀᴇQᴜᴇꜱᴛ ᴍᴏᴅᴇ", callback_data="settings:forcejoin_mode:join_request")],
                 ]),
             )
             await state.set_state(SettingInput.waiting)
