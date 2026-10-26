@@ -153,21 +153,34 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         )
 
     custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
-    custom_buttons = custom_cfg.get("buttons", [])
+    custom_buttons = custom_cfg.get("buttons", []) if custom_cfg.get("enabled", False) else []
+    is_batch = isinstance(batch.get("items"), list) and batch.get("batch_id") is not None
+    # Batch deliveries intentionally use the configured custom keyboard uniformly:
+    # source-message keyboards are not stored in batch items and must not affect
+    # whether a batch item receives custom buttons. Single-file behavior stays as-is.
+    valid_custom_buttons = [
+        InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
+        for button in custom_buttons[:2]
+        if button.get("text") and button.get("url")
+    ]
+    batch_markup_data = (
+        InlineKeyboardMarkup(inline_keyboard=[valid_custom_buttons]).model_dump(
+            mode="json", exclude_none=True
+        )
+        if valid_custom_buttons else None
+    )
     sent_count = failed_count = 0
     for item in items:
-        markup_data = None if item.get("disable_buttons") else item.get("reply_markup")
-        has_original_buttons = item.get("original_has_buttons", bool(markup_data))
-        if not item.get("disable_buttons") and not has_original_buttons and not markup_data:
-            valid_buttons = [
-                InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
-                for button in custom_buttons[:2]
-                if button.get("text") and button.get("url")
-            ]
-            if valid_buttons:
-                markup_data = InlineKeyboardMarkup(inline_keyboard=[valid_buttons]).model_dump(
-                    mode="json", exclude_none=True
-                )
+        if is_batch:
+            markup_data = batch_markup_data
+        else:
+            markup_data = None if item.get("disable_buttons") else item.get("reply_markup")
+            has_original_buttons = item.get("original_has_buttons", bool(markup_data))
+            if not item.get("disable_buttons") and not has_original_buttons and not markup_data:
+                if valid_custom_buttons:
+                    markup_data = InlineKeyboardMarkup(inline_keyboard=[valid_custom_buttons]).model_dump(
+                        mode="json", exclude_none=True
+                    )
         markup = None
         if markup_data:
             try:
