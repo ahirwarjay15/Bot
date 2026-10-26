@@ -59,7 +59,7 @@ class FileRepository:
                 if getattr(exc, "code", None) != 11000:
                     log.exception("File record insert failed (attempt %s)", attempt + 1)
                     raise
-                log.warning("Duplicate file key collision on insert (attempt %s/8)", attempt + 1)
+                log.warning("Duplicate-key insert conflict (attempt %s/8): %s", attempt + 1, exc)
         raise RuntimeError("Could not allocate a unique file key after duplicate-key retries")
 
     async def get_file(self, key: str) -> dict | None:
