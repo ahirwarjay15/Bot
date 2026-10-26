@@ -863,7 +863,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await patch(db, "force_join", {"enabled": not cfg.get("enabled", False)}, {"channels": [], "message": "Hey {mention}\nPlease Join My {remaining_count} Channel's To Use Me!"})
         await render_forcejoin(query, db, settings)
     elif action == "forcejoin_add":
-        panel_message = await edit_page(query, "ADD FORCE SUB\n\nChoose Group or Channel from the keyboard below. Public chats use Normal Mode automatically; private chats use Join Request Mode automatically.", kb([
+        panel_message = await edit_page(query, "ADD FORCE SUB\n\nChoose Group or Channel from the keyboard below. Public chats use Normal Mode automatically; private chats use Join Request Mode automatically.\n\nOr forward any message from the target Group/Channel here with its Forward tag.", kb([
             [("《 BACK", "settings:forcejoin")],
         ]))
         if panel_message:
@@ -1480,25 +1480,36 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
 
     if field == "forcejoin_wait_chat":
         shared = getattr(message, "chat_shared", None)
-        if not shared:
-            await tracked_answer(message, state, "Please use the Group or Channel buttons to select a chat, or send /cancel.")
+        forwarded_origin = getattr(message, "forward_origin", None)
+        forwarded_chat_id = None
+        if forwarded_origin:
+            # Telegram represents forwarded channel posts and group messages with
+            # chat-bearing origins. User-to-user forwards intentionally do not qualify.
+            origin_type = getattr(forwarded_origin, "type", None)
+            if origin_type == "channel":
+                forwarded_chat_id = getattr(getattr(forwarded_origin, "chat", None), "id", None)
+            elif origin_type == "chat":
+                forwarded_chat_id = getattr(getattr(forwarded_origin, "sender_chat", None), "id", None)
+        if not shared and forwarded_chat_id is None:
+            await tracked_answer(message, state, "Please use the Group/Channel buttons or forward a message from that Group/Channel with its Forward tag. Send /cancel to stop.")
             return
-        # Telegram's chat-shared update appears as a user-side message; remove it
-        # immediately so the “You shared … with …” line does not remain in chat.
+        # Remove the selection/forward message so the setup chat stays clean.
         try:
             await message.delete()
         except TelegramAPIError:
             pass
-        if shared.request_id not in (5101, 5102):
-            await tracked_answer(message, state, "That chat selection expired. Open /settings → Force Sub → Add again.")
-            await clear_state_preserving_prompts(state)
-            return
-        expected_type = "channel" if shared.request_id == 5102 else "group"
+        expected_type = None
+        if shared:
+            if shared.request_id not in (5101, 5102):
+                await tracked_answer(message, state, "That chat selection expired. Open /settings → Force Sub → Add again.")
+                await clear_state_preserving_prompts(state)
+                return
+            expected_type = "channel" if shared.request_id == 5102 else "group"
         try:
-            chat = await message.bot.get_chat(shared.chat_id)
-            allowed_types = {"channel"} if expected_type == "channel" else {"group", "supergroup"}
+            chat = await message.bot.get_chat(shared.chat_id if shared else forwarded_chat_id)
+            allowed_types = {"channel"} if expected_type == "channel" else {"group", "supergroup"} if expected_type == "group" else {"channel", "group", "supergroup"}
             if chat.type not in allowed_types:
-                await tracked_answer(message, state, "Please select the matching Group or Channel type.")
+                await tracked_answer(message, state, "Please forward a message from a Group or Channel, not a private user chat.")
                 return
             me = await message.bot.get_me()
             bot_member = await message.bot.get_chat_member(chat.id, me.id)
