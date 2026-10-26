@@ -199,7 +199,21 @@ class Database:
             await self.db.broadcast_jobs.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
             await self.db.broadcast_recipients.create_index([("job_id", ASCENDING), ("user_id", ASCENDING)], unique=True)
             await self.db.broadcast_recipients.create_index([("job_id", ASCENDING), ("status", ASCENDING)])
-            await self.db.users.create_index([("blocked", ASCENDING)])
+            # Remove the retired delivery-status flag and profile metadata. Admin
+            # bans remain represented by users.banned; Telegram delivery failures
+            # are tracked per broadcast recipient, not as a second user status.
+            user_indexes = await self.db.users.index_information()
+            if "blocked_1" in user_indexes:
+                await self.db.users.drop_index("blocked_1")
+            user_cleanup = await self.db.users.update_many(
+                {},
+                {"$unset": {
+                    "first_name": "", "last_name": "", "username": "",
+                    "created_at": "", "last_seen": "", "blocked": "",
+                    "last_delivery_error": "", "last_delivery_error_at": "",
+                }},
+            )
+            logger.info("Compacted user records; records updated=%s", user_cleanup.modified_count)
             if self.recover_interrupted_jobs:
                 # Never reset jobs just because a second worker started. Only reclaim
                 # work whose claim/heartbeat has been stale long enough to indicate a crash.
