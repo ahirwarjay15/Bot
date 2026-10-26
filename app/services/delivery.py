@@ -116,7 +116,7 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
         return (0, 1)
     item = {
         "source_chat_id": source_chat_id,
-        "source_message_id": file_doc["source_message_id"],
+        "source_message_id": file_doc.get("id", file_doc.get("source_message_id")),
     }
     markup_data = file_doc.get("reply_markup")
     if file_doc.get("buttons"):
@@ -131,7 +131,7 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
 async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: str, request_key: str | None = None):
     """Deliver directly; persist only message IDs and expiry metadata when Auto Delete is on."""
     items = list(batch.get("items", []))
-    if not items and ((isinstance(batch.get("source_message_id"), list) or isinstance(batch.get("id"), dict)) or isinstance(batch.get("id"), dict)):
+    if not items and (isinstance(batch.get("source_message_id"), list) or isinstance(batch.get("id"), dict)):
         channel_id = batch.get("source_chat_id") or batch.get("_source_chat_id")
         ids = batch.get("id") if isinstance(batch.get("id"), dict) else {f"{i:02d}": mid for i, mid in enumerate(batch["source_message_id"], 1)}
         saved_buttons = batch.get("buttons") or {}
@@ -174,7 +174,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
 
     custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
     custom_buttons = custom_cfg.get("buttons", [])
-    is_batch = (isinstance(batch.get("items"), list) and bool(batch.get("file_key"))) or isinstance(batch.get("source_message_id"), list)
+    is_batch = (isinstance(batch.get("items"), list) and bool(batch.get("file_key"))) or isinstance(batch.get("source_message_id"), list) or isinstance(batch.get("id"), dict)
     # Original supported URL buttons take priority. Custom buttons are only a fallback.
     valid_custom_buttons = [
         InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
