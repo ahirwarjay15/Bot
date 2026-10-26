@@ -902,7 +902,23 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             channel = channels[index]
             cfg = await db.settings.find_one({"key": "force_join_channel", "channel": channel}) or {}
             channel_title = cfg.get("channel_title") or channel.lstrip("@")
-            await edit_page(query, f"CHANNEL SETTINGS\n\n{channel_title}\n\nSelect an option below.", kb([
+            is_private = not bool(cfg.get("username")) and not str(channel).startswith("@")
+            if not cfg.get("chat_type"):
+                try:
+                    chat_obj = await query.bot.get_chat(int(channel) if str(channel).lstrip("-").isdigit() else channel)
+                    channel_title = chat_obj.title or channel_title
+                    is_private = not bool(chat_obj.username)
+                except (TelegramAPIError, ValueError):
+                    pass
+            mode = cfg.get("mode", "normal")
+            mode_label = "Request Mode" if mode in {"join_request", "request"} else "Normal Mode"
+            link_mode = cfg.get("link_mode", "rotation")
+            link_label = "Single Link" if link_mode == "single" else "Rotation Links"
+            details = f"Chat: {html.escape(str(channel_title))}"
+            if is_private:
+                details += f"\nMode: {mode_label}"
+            details += f"\n{link_label}"
+            await edit_page(query, f"CHANNEL SETTINGS\n\n{details}\n\nSelect an option below.", kb([
                 [("BUTTON TEXT", f"settings:forcejoin_label:{index}"), ("REMOVE", f"settings:forcejoin_remove_one:{index}")],
                 [("《 BACK", "settings:forcejoin")],
             ]))
