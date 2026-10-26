@@ -282,10 +282,10 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         return
     # No arbitrary 100-message cap: allow the full selected range. Telegram API
     # limits still apply, so large batches can take longer or need retries.
-    # Do not forward every post to the admin DM for range validation.
     # Keep source references only; individual unavailable messages are handled at delivery.
-    items = [{"source_chat_id": source_chat_id, "source_message_id": mid,
-              "disable_buttons": True}
+    # Leave buttons enabled so the configured custom buttons are added to every
+    # batch item that does not already have its own source keyboard.
+    items = [{"source_chat_id": source_chat_id, "source_message_id": mid}
              for mid in range(first_id, last_id + 1)]
     batch = None
     link_send_attempted = False
@@ -296,8 +296,28 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         keyboard = _link_keyboard(link)
         link_send_attempted = True
         sent_link = await message.answer(link, reply_markup=keyboard)
-        # Do not send source captions or source-post buttons alongside the batch link.
-        await mirror_deeplink(message.bot, settings, link, keyboard)
+
+        # Match /file behavior: reply with the first and last source captions
+        # beneath the generated link in the admin DM, preserving Telegram entities.
+        caption_items = []
+        for source_id in (first_id, last_id):
+            caption_text, caption_entities = await _source_post_content(
+                message, source_chat_id, source_id
+            )
+            if caption_text:
+                await message.bot.send_message(
+                    chat_id=message.chat.id,
+                    text=caption_text,
+                    entities=_entities_from_data(caption_entities) or None,
+                    parse_mode=None,
+                    reply_to_message_id=sent_link.message_id,
+                )
+                caption_items.append((caption_text, caption_entities))
+
+        # Mirror the link and both captions into the configured deeplink channel.
+        await mirror_deeplink(
+            message.bot, settings, link, keyboard, caption_items
+        )
         await state.clear()
     except Exception:
         if batch is not None and not link_send_attempted:
