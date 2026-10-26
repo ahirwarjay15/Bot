@@ -21,7 +21,6 @@ Set these environment variables in your hosting provider or a private `.env` fil
 - `MONGODB_URI`: MongoDB connection string.
 - `MONGODB_DB_NAME`: required database name for this bot instance. Choose a dedicated name (for example, `my_file_bot`) to keep this bot's data isolated. The code has no implicit database-name default.
 - `SOURCE_CHANNEL_ID`: private source channel ID (legacy `DB_CHANNEL_ID` is also accepted).
-- `DEEPLINK_CHANNEL`: optional numeric Telegram channel ID where generated deeplinks and their original formatted captions are mirrored; the bot must have permission to post there.
 - `FORCE_JOIN_CHANNELS`: optional comma-separated usernames or channel IDs.
 - `LOG_LEVEL`: optional logging level, defaults to `INFO`.
 - `PORT`: optional HTTP health-check port, defaults to `10000`.
