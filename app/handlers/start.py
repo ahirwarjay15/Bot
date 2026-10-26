@@ -932,7 +932,7 @@ async def delete_start_command_after(message: Message, db, *, delay: bool = True
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
     me=await bot.get_me();link=f"https://t.me/{me.username}?start={payload}"
     # New compact batches keep only ordered message IDs and optional button rows.
-    if isinstance(record.get("source_message_id"), list):
+    if isinstance(record.get("source_message_id"), list) or isinstance(record.get("id"), dict):
         record = {**record, "_source_chat_id": settings.source_channel_id}
         return await deliver_batch(bot,database.db,user_id=user_id,batch=record,deeplink=link,request_key=request_key)
     # Old batch records remain readable during the transition.
@@ -955,10 +955,10 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
     if await repo.is_banned(user.id):return
     payload=command.args or ""
     if payload:
-        # Public start links contain only the 20-character token. The first five
+        # Public start links contain only the 22-character token. The first seven
         # characters are the Deepcode; the remaining characters keep the URL
         # opaque without adding visible file/batch/deepcode prefixes.
-        record = await repo.get_file(payload[:5]) if len(payload) == 20 and payload.isalnum() else None
+        record = await repo.get_file(payload[:7]) if len(payload) == 22 and payload.isalnum() else None
         if not record:
             await message.answer("This link is invalid or expired.")
             await delete_start_command_after(message, database.db)
@@ -976,7 +976,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             # Flash and clear the blink before delivering the file/batch.
             await send_file_animation(bot, database.db, message.chat.id)
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
-            is_batch = isinstance(record.get("items"), list) or isinstance(record.get("source_message_id"), list)
+            is_batch = isinstance(record.get("items"), list) or isinstance(record.get("source_message_id"), list) or isinstance(record.get("id"), dict)
             if is_batch and result[0]==0:
                 await message.answer("None of the batch files could be delivered. The source messages may be unavailable.")
             elif is_batch and result[1]:
