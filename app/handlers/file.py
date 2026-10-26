@@ -165,7 +165,7 @@ async def generate_file_link(callback: CallbackQuery, state: FSMContext, setting
             offset = 0
             for text, entities in caption_parts:
                 if combined:
-                    combined.append("\\n\\n")
+                    combined.append("\n\n")
                     offset += 2
                 combined.append(text)
                 for entity in entities:
