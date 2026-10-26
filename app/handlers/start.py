@@ -931,8 +931,20 @@ async def delete_start_command_after(message: Message, db, *, delay: bool = True
 
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
     me=await bot.get_me();link=f"https://t.me/{me.username}?start={payload}"
-    if isinstance(record.get("items"), list):
+    # New compact batches keep only ordered message IDs and optional button rows.
+    if isinstance(record.get("source_message_id"), list):
+        record = {**record, "_source_chat_id": settings.source_channel_id}
         return await deliver_batch(bot,database.db,user_id=user_id,batch=record,deeplink=link,request_key=request_key)
+    # Old batch records remain readable during the transition.
+    if isinstance(record.get("items"), list):
+        normalized=[]
+        for item in record["items"]:
+            normalized.append({
+                "source_chat_id": item.get("source_chat_id") or settings.source_channel_id,
+                "source_message_id": item["source_message_id"],
+                **({"reply_markup": item["reply_markup"]} if item.get("reply_markup") else {}),
+            })
+        return await deliver_batch(bot,database.db,user_id=user_id,batch={**record,"items":normalized},deeplink=link,request_key=request_key)
     return await deliver_reference(bot,database.db,settings,user_id=user_id,file_doc=record,deeplink=link,request_key=request_key)
 
 @router.message(CommandStart())
