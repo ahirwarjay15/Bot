@@ -832,6 +832,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await _prepare_force_join_link(query.bot, db, channel_id, channel_cfg)
         except Exception:
             pass
+        await remove_temporary_prompts(query.bot, pending)
         await state.clear()
         panel_chat_id = pending.get("pending_forcejoin_panel_chat_id")
         panel_message_id = pending.get("pending_forcejoin_panel_message_id")
@@ -965,8 +966,18 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         channels = await effective_force_join_channels(database, settings)
         index = int(action.split(":", 1)[1])
         if 0 <= index < len(channels):
-            channels.pop(index)
+            channel = channels.pop(index)
             await patch(db, "force_join", {"channels": channels, "channels_override": True})
+            async for link in db.force_join_links.find({"channel": channel}):
+                try:
+                    if link.get("invite_link") and link.get("chat_id") is not None:
+                        await query.bot.revoke_chat_invite_link(
+                            chat_id=int(link["chat_id"]), invite_link=link["invite_link"]
+                        )
+                except TelegramAPIError:
+                    pass
+                await db.force_join_links.delete_one({"_id": link["_id"]})
+            await db.settings.delete_one({"key": "force_join_channel", "channel": channel})
         await render_forcejoin(query, db, settings)
     elif action == "custom_button": await render_custom_buttons(query, db)
     elif action == "custom_button_add":
