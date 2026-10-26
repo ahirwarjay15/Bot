@@ -154,7 +154,10 @@ class Database:
                 return
 
             await self.db.users.create_index([("user_id", ASCENDING)], unique=True)
-            await self.db.files.create_index([("file_key", ASCENDING)], unique=True)
+            file_indexes = await self.db.files.index_information()
+            if "file_key_1" in file_indexes:
+                await self.db.files.drop_index("file_key_1")
+            await self.db.files.create_index([("key", ASCENDING)], unique=True, sparse=True, name="key_unique")
             settings_indexes = await self.db.settings.index_information()
             await self.db.settings.create_index(
                 [("key", ASCENDING), ("channel", ASCENDING)],
