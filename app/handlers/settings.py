@@ -834,6 +834,20 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         except Exception:
             pass
         await remove_temporary_prompts(query.bot, pending)
+        try:
+            await query.bot.delete_message(
+                chat_id=query.from_user.id,
+                message_id=pending.get("pending_forcejoin_selected_message_id"),
+            )
+        except (TelegramAPIError, TypeError):
+            pass
+        try:
+            keyboard_removal = await query.bot.send_message(
+                chat_id=query.from_user.id, text=" ", reply_markup=ReplyKeyboardRemove()
+            )
+            await keyboard_removal.delete()
+        except TelegramAPIError:
+            pass
         await state.clear()
         panel_chat_id = pending.get("pending_forcejoin_panel_chat_id")
         panel_message_id = pending.get("pending_forcejoin_panel_message_id")
@@ -1529,6 +1543,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 pending_forcejoin_channel_id=channel_id,
                 pending_forcejoin_chat_title=chat.title or str(chat.id),
                 pending_forcejoin_chat_type=chat.type,
+                pending_forcejoin_selected_message_id=message.message_id,
                 pending_forcejoin_panel_chat_id=data.get("forcejoin_panel_chat_id"),
                 pending_forcejoin_panel_message_id=data.get("forcejoin_panel_message_id"),
             )
@@ -1550,6 +1565,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             pending_forcejoin_channel_id=channel_id,
             pending_forcejoin_chat_title=chat.title or str(chat.id),
             pending_forcejoin_chat_type=chat.type,
+            pending_forcejoin_selected_message_id=message.message_id,
             pending_forcejoin_access_mode="normal",
             pending_forcejoin_panel_chat_id=data.get("forcejoin_panel_chat_id"),
             pending_forcejoin_panel_message_id=data.get("forcejoin_panel_message_id"),
