@@ -902,23 +902,26 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             channel = channels[index]
             cfg = await db.settings.find_one({"key": "force_join_channel", "channel": channel}) or {}
             channel_title = cfg.get("channel_title") or channel.lstrip("@")
-            is_private = not bool(cfg.get("username")) and not str(channel).startswith("@")
-            if not cfg.get("chat_type"):
-                try:
-                    chat_obj = await query.bot.get_chat(int(channel) if str(channel).lstrip("-").isdigit() else channel)
-                    channel_title = chat_obj.title or channel_title
-                    is_private = not bool(chat_obj.username)
-                except (TelegramAPIError, ValueError):
-                    pass
+            chat_type = cfg.get("chat_type")
+            is_private = True
+            try:
+                chat_obj = await query.bot.get_chat(int(channel) if str(channel).lstrip("-").isdigit() else channel)
+                channel_title = chat_obj.title or channel_title
+                chat_type = chat_obj.type or chat_type
+                is_private = not bool(chat_obj.username)
+            except (TelegramAPIError, ValueError):
+                # Retain saved chat type and infer public chats from @username keys.
+                is_private = not str(channel).startswith("@")
             mode = cfg.get("mode", "normal")
             mode_label = "Request Mode" if mode in {"join_request", "request"} else "Normal Mode"
             link_mode = cfg.get("link_mode", "rotation")
             link_label = "Single Link" if link_mode == "single" else "Rotation Links"
+            chat_kind = "Group" if chat_type in {"group", "supergroup"} else "Channel"
             details = f"Chat: {html.escape(str(channel_title))}"
             if is_private:
                 details += f"\nMode: {mode_label}"
             details += f"\n{link_label}"
-            await edit_page(query, f"CHANNEL SETTINGS\n\n{details}\n\nSelect an option below.", kb([
+            await edit_page(query, f"{chat_kind} SETTINGS\n\n{details}\n\nSelect an option below.", kb([
                 [("BUTTON TEXT", f"settings:forcejoin_label:{index}"), ("REMOVE", f"settings:forcejoin_remove_one:{index}")],
                 [("《 BACK", "settings:forcejoin")],
             ]))
@@ -1530,8 +1533,20 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             me = await message.bot.get_me()
             bot_member = await message.bot.get_chat_member(chat.id, me.id)
             if bot_member.status not in ("administrator", "creator"):
-                await tracked_answer(message, state, "The bot is not an administrator in this chat. Add/promote the bot as admin, then try again.")
+                pending = await state.get_data()
+                await remove_temporary_prompts(message.bot, pending)
+                await remove_input_prompt(message.bot, pending)
                 await clear_state_preserving_prompts(state)
+                try:
+                    keyboard_removal = await message.answer(" ", reply_markup=ReplyKeyboardRemove())
+                    await keyboard_removal.delete()
+                except TelegramAPIError:
+                    pass
+                await tracked_answer(
+                    message, state,
+                    "The bot is not an administrator in this chat. Add/promote it as admin, then tap Add again.\n\nSetup cancelled.",
+                    reply_markup=kb([[("《 BACK", "settings:forcejoin")]]),
+                )
                 return
             # Public chats use their public t.me link and do not need a new invite link.
             # Private chats need invite-link permission because they are added in Join Request mode.
@@ -1540,8 +1555,20 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 await clear_state_preserving_prompts(state)
                 return
         except TelegramAPIError:
-            await tracked_answer(message, state, "The bot cannot access this chat. Make sure it is a chat where the bot is an administrator.")
+            pending = await state.get_data()
+            await remove_temporary_prompts(message.bot, pending)
+            await remove_input_prompt(message.bot, pending)
             await clear_state_preserving_prompts(state)
+            try:
+                keyboard_removal = await message.answer(" ", reply_markup=ReplyKeyboardRemove())
+                await keyboard_removal.delete()
+            except TelegramAPIError:
+                pass
+            await tracked_answer(
+                message, state,
+                "The bot cannot access this chat. Make sure it is a chat where the bot is an administrator.\n\nSetup cancelled. Add the bot as admin, then tap Add again.",
+                reply_markup=kb([[("《 BACK", "settings:forcejoin")]]),
+            )
             return
         await state.update_data(
             pending_chat_id=chat.id,
