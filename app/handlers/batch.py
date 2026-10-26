@@ -230,9 +230,10 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
         last_activity_at=time.time(),
     )
     asyncio.create_task(_expire_batch_session(state, session_token))
-    await message.answer(
-        "Forward The Batch First Message From Database Channel (With Forward Tag).. or Give Me Batch First Message link from Database channel"
+    prompt = await message.answer(
+        "Send/forward the FIRST post from the Database Channel, or send its message link."
     )
+    await state.update_data(prompt_message_id=prompt.message_id)
 
 
 @router.message(Command("cancel"))
@@ -264,11 +265,25 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
         log.exception("Bot cannot access the configured Database Channel")
         await message.answer("I couldn't access the Database Channel. Check the bot's channel permissions.")
         return
+    data = await state.get_data()
+    # Remove the first-step prompt and the admin's submitted forward/link to keep the chat clean.
+    try:
+        prompt_id = data.get("prompt_message_id")
+        if prompt_id:
+            await message.bot.delete_message(message.chat.id, int(prompt_id))
+    except TelegramAPIError:
+        log.debug("Could not delete first-step batch prompt", exc_info=True)
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        log.debug("Could not delete submitted first batch reference", exc_info=True)
+
     await state.update_data(first_message_id=first_id)
     await state.set_state(BatchState.waiting_last)
-    await message.answer(
-        "Forward The Batch Last Message From Database Channel (With Forward Tag).. or Give Me Batch last message link from your batch channel"
+    prompt = await message.answer(
+        "Now send/forward the LAST post from the Database Channel, or send its message link."
     )
+    await state.update_data(prompt_message_id=prompt.message_id)
 
 
 @router.message(BatchState.waiting_last)
@@ -310,7 +325,31 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         link = f"https://t.me/{me.username}?start={build_deeplink_token(batch['key'])}"
         keyboard = _link_keyboard(link)
         link_send_attempted = True
-        sent_link = await message.answer(link, reply_markup=keyboard)
+        data = await state.get_data()
+        prompt_id = data.get("prompt_message_id")
+        # Remove the submitted last reference, then turn the last-step prompt into the link.
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            log.debug("Could not delete submitted last batch reference", exc_info=True)
+        if prompt_id:
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=int(prompt_id),
+                    text=link,
+                    reply_markup=keyboard,
+                    parse_mode=None,
+                )
+                sent_link = await message.bot.get_chat(message.chat.id)
+                # Keep a lightweight message-like reference for the caption reply below.
+                sent_link_message_id = int(prompt_id)
+            except TelegramAPIError:
+                sent_link = await message.answer(link, reply_markup=keyboard)
+                sent_link_message_id = sent_link.message_id
+        else:
+            sent_link = await message.answer(link, reply_markup=keyboard)
+            sent_link_message_id = sent_link.message_id
 
         # Combine first and last captions into one reply, retaining each
         # caption's Telegram entities and adjusting offsets for the separator.
@@ -331,7 +370,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
                 text=combined_text,
                 entities=_entities_from_data(combined_entities) or None,
                 parse_mode=None,
-                reply_to_message_id=sent_link.message_id,
+                reply_to_message_id=sent_link_message_id,
             )
 
         await state.clear()
