@@ -213,8 +213,19 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
         return None
     now = datetime.now(timezone.utc)
     mode = channel_cfg.get("mode")
+    link_mode = channel_cfg.get("link_mode", "rotation")
+    if link_mode == "single":
+        single_query = {"channel": channel, "link_mode": "single"}
+        if mode in {"normal", "join_request"}:
+            single_query["mode"] = mode
+        single = await links_collection.find_one(single_query)
+        if single and single.get("invite_link"):
+            return single["invite_link"]
+        log.warning("No saved Single Link is currently available for %s", channel)
+        return None
     query = {
         "channel": channel,
+        "link_mode": "rotation",
         "is_rotation_current": True,
         "refresh_at": {"$gt": now},
         "expires_at": {"$gt": now},
@@ -226,7 +237,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
         return cached["invite_link"]
     # During an API outage, keep using the previous shared link until its real
     # Telegram expiry, even if its 25-minute rotation point has passed.
-    fallback_query = {"channel": channel, "expires_at": {"$gt": now}}
+    fallback_query = {"channel": channel, "link_mode": "rotation", "expires_at": {"$gt": now}}
     if mode in {"normal", "join_request"}:
         fallback_query["mode"] = mode
     fallback = await links_collection.find_one(fallback_query)
@@ -249,11 +260,20 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> 
     mode = channel_cfg.get("mode", "normal" if getattr(chat, "username", None) else "join_request")
     if mode not in {"normal", "join_request"}:
         mode = "normal" if getattr(chat, "username", None) else "join_request"
+    link_mode = channel_cfg.get("link_mode", "rotation")
     now = datetime.now(timezone.utc)
-    current = await links.find_one({
-        "channel": channel, "chat_id": chat_id, "mode": mode,
-        "is_rotation_current": True, "expires_at": {"$gt": now},
-    })
+    if link_mode == "single":
+        current = await links.find_one({
+            "channel": channel, "chat_id": chat_id, "mode": mode,
+            "link_mode": "single", "invite_link": {"$exists": True},
+        })
+        if current and current.get("invite_link"):
+            return True
+    else:
+        current = await links.find_one({
+            "channel": channel, "chat_id": chat_id, "mode": mode,
+            "link_mode": "rotation", "is_rotation_current": True, "expires_at": {"$gt": now},
+        })
     refresh_at = current.get("refresh_at") if current else None
     # MongoDB datetime decoding may return naive UTC datetimes when tz_aware is disabled.
     # Normalize to UTC-aware before comparing with the aware UTC clock.
@@ -262,11 +282,13 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> 
     if current and refresh_at and refresh_at > now:
         return True
     try:
-        invite = await bot.create_chat_invite_link(
-            chat_id=chat_id,
-            expire_date=int(now.timestamp()) + 1800,
-            creates_join_request=(mode == "join_request"),
-        )
+        invite_args = {
+            "chat_id": chat_id,
+            "creates_join_request": (mode == "join_request"),
+        }
+        if link_mode == "rotation":
+            invite_args["expire_date"] = int(now.timestamp()) + 1800
+        invite = await bot.create_chat_invite_link(**invite_args)
     except TelegramAPIError:
         log.warning("Could not pre-generate Force Sub link for %s; retaining old link until expiry", channel, exc_info=True)
         return False
@@ -277,19 +299,24 @@ async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict) -> 
         "chat_id": chat_id,
         "invite_link": invite.invite_link,
         "mode": mode,
+        "link_mode": link_mode,
         "created_at": created,
-        "refresh_at": created + timedelta(seconds=1500),
-        "expires_at": created + timedelta(seconds=1800),
-        "cleanup_at": created + timedelta(seconds=1800),
         "is_rotation_current": True,
     }
+    if link_mode == "rotation":
+        record.update({
+            "refresh_at": created + timedelta(seconds=1500),
+            "expires_at": created + timedelta(seconds=1800),
+            "cleanup_at": created + timedelta(seconds=1800),
+        })
     try:
         await links.insert_one(record)
-        await links.update_many(
-            {"channel": channel, "chat_id": chat_id, "mode": mode,
-             "is_rotation_current": True, "_id": {"$ne": record.get("_id")}},
-            {"$set": {"is_rotation_current": False}},
-        )
+        if link_mode == "rotation":
+            await links.update_many(
+                {"channel": channel, "chat_id": chat_id, "mode": mode,
+                 "link_mode": "rotation", "is_rotation_current": True, "_id": {"$ne": record.get("_id")}},
+                {"$set": {"is_rotation_current": False}},
+            )
     except Exception:
         try:
             await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
