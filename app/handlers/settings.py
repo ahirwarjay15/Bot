@@ -1536,13 +1536,13 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 await clear_state_preserving_prompts(state)
                 return
             expected_type = "channel" if shared.request_id == 5102 else "group"
+        me = await message.bot.get_me()
         try:
             chat = await message.bot.get_chat(shared.chat_id if shared else forwarded_chat_id)
             allowed_types = {"channel"} if expected_type == "channel" else {"group", "supergroup"} if expected_type == "group" else {"channel", "group", "supergroup"}
             if chat.type not in allowed_types:
                 await tracked_answer(message, state, "Please forward a message from a Group or Channel, not a private user chat.")
                 return
-            me = await message.bot.get_me()
             bot_member = await message.bot.get_chat_member(chat.id, me.id)
             if bot_member.status not in ("administrator", "creator"):
                 pending = await state.get_data()
