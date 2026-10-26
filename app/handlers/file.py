@@ -140,47 +140,6 @@ async def generate_file_link(callback: CallbackQuery, state: FSMContext, setting
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])
         sent_link = await callback.message.answer(link, reply_markup=keyboard)
-        # Reply to the link with source captions/text, preserving Telegram entities.
-        caption_parts = []
-        for source_id in ids:
-            source = None
-            try:
-                source = await callback.bot.forward_message(
-                    chat_id=callback.message.chat.id,
-                    from_chat_id=settings.source_channel_id,
-                    message_id=source_id,
-                )
-                text = source.caption if source.caption is not None else (source.text or "")
-                entities = source.caption_entities if source.caption is not None else (source.entities or [])
-                if text:
-                    caption_parts.append((text, entities or []))
-            except TelegramAPIError:
-                log.warning("Could not read caption for source message %s", source_id, exc_info=True)
-            finally:
-                if source is not None:
-                    await _delete(callback.bot, source.chat.id, source.message_id)
-        if caption_parts:
-            combined = []
-            combined_entities = []
-            offset = 0
-            for text, entities in caption_parts:
-                if combined:
-                    combined.append("\n\n")
-                    offset += 2
-                combined.append(text)
-                for entity in entities:
-                    item = entity.model_dump(mode="json", exclude_none=True)
-                    item["offset"] = int(item.get("offset", 0)) + offset
-                    combined_entities.append(item)
-                offset += len(text.encode("utf-16-le")) // 2
-            from aiogram.types import MessageEntity
-            await callback.bot.send_message(
-                chat_id=callback.message.chat.id,
-                text="".join(combined),
-                entities=[MessageEntity.model_validate(item) for item in combined_entities] or None,
-                parse_mode=None,
-                reply_to_message_id=sent_link.message_id,
-            )
         await _delete(callback.bot, data.get("prompt_chat_id", callback.message.chat.id), data.get("prompt_message_id", 0))
         await callback.message.delete()
         await state.clear()
