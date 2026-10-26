@@ -1633,15 +1633,23 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 pending_forcejoin_panel_message_id=data.get("forcejoin_panel_message_id"),
             )
             # Reuse module-level keyboard imports; local imports shadow names for the whole function.
-            await tracked_answer(
-                message, state,
-                f"Choose a mode for <b>{html.escape(chat.title or str(chat.id))}</b>:",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="ɴᴏʀᴍᴀʟ ᴍᴏᴅᴇ", callback_data="settings:forcejoin_mode:normal")],
-                    [InlineKeyboardButton(text="ʀᴇQᴜᴇꜱᴛ ᴍᴏᴅᴇ", callback_data="settings:forcejoin_mode:join_request")],
-                ]),
-            )
+            mode_text = f"Choose a mode for <b>{html.escape(chat.title or str(chat.id))}</b>:"
+            mode_markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="ɴᴏʀᴍᴀʟ ᴍᴏᴅᴇ", callback_data="settings:forcejoin_mode:normal")],
+                [InlineKeyboardButton(text="ʀᴇQᴜᴇꜱᴛ ᴍᴏᴅᴇ", callback_data="settings:forcejoin_mode:join_request")],
+            ])
+            carrier_chat_id = data.get("forcejoin_carrier_chat_id")
+            carrier_message_id = data.get("forcejoin_carrier_message_id")
+            edited_carrier = False
+            if carrier_chat_id and carrier_message_id:
+                try:
+                    await message.bot.edit_message_text(chat_id=carrier_chat_id, message_id=carrier_message_id,
+                        text=mode_text, parse_mode="HTML", reply_markup=mode_markup)
+                    edited_carrier = True
+                except TelegramAPIError:
+                    pass
+            if not edited_carrier:
+                await tracked_answer(message, state, mode_text, parse_mode="HTML", reply_markup=mode_markup)
             await state.set_state(SettingInput.waiting)
             await state.update_data(field="forcejoin_wait_mode")
             return
@@ -1655,15 +1663,23 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             pending_forcejoin_panel_chat_id=data.get("forcejoin_panel_chat_id"),
             pending_forcejoin_panel_message_id=data.get("forcejoin_panel_message_id"),
         )
-        await tracked_answer(
-            message, state,
-            f"Choose link mode for <b>{html.escape(chat.title or str(chat.id))}</b>:",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Rotation Links", callback_data="settings:forcejoin_link_mode:rotation")],
-                [InlineKeyboardButton(text="Single Link", callback_data="settings:forcejoin_link_mode:single")],
-            ]),
-        )
+        link_text = f"Choose link mode for <b>{html.escape(chat.title or str(chat.id))}</b>:"
+        link_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Rotation Links", callback_data="settings:forcejoin_link_mode:rotation")],
+            [InlineKeyboardButton(text="Single Link", callback_data="settings:forcejoin_link_mode:single")],
+        ])
+        carrier_chat_id = data.get("forcejoin_carrier_chat_id")
+        carrier_message_id = data.get("forcejoin_carrier_message_id")
+        edited_carrier = False
+        if carrier_chat_id and carrier_message_id:
+            try:
+                await message.bot.edit_message_text(chat_id=carrier_chat_id, message_id=carrier_message_id,
+                    text=link_text, parse_mode="HTML", reply_markup=link_markup)
+                edited_carrier = True
+            except TelegramAPIError:
+                pass
+        if not edited_carrier:
+            await tracked_answer(message, state, link_text, parse_mode="HTML", reply_markup=link_markup)
         await state.set_state(SettingInput.waiting)
         await state.update_data(field="forcejoin_wait_mode")
         return
