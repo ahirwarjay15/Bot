@@ -18,7 +18,6 @@ from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
 from app.database.files import FileRepository, build_deeplink_token
 from app.services.permissions import is_owner_or_moderator
-from app.services.deeplink_channel import mirror_deeplink
 
 router = Router(name="batch")
 log = logging.getLogger(__name__)
@@ -335,10 +334,6 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
                 reply_to_message_id=sent_link.message_id,
             )
 
-        # Mirror the combined caption reply into the configured deeplink channel.
-        await mirror_deeplink(
-            message.bot, settings, link, keyboard, caption_items
-        )
         await state.clear()
     except Exception:
         if batch is not None and not link_send_attempted:
