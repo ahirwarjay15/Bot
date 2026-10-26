@@ -831,7 +831,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             channel_cfg = await db.settings.find_one({"key": "force_join_channel", "channel": channel_id}) or {}
             await _prepare_force_join_link(query.bot, db, channel_id, channel_cfg)
         except Exception:
-            pass  # The rotation worker retries transient Telegram or database failures.
+            pass
         await state.clear()
         panel_chat_id = pending.get("pending_forcejoin_panel_chat_id")
         panel_message_id = pending.get("pending_forcejoin_panel_message_id")
@@ -1555,6 +1555,146 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await state.update_data(field="forcejoin_wait_mode")
         return
 
+    if field == "custom_button_text":
+        if not value or len(value) > 64:
+            await tracked_answer(message, state, "Button text must be between 1 and 64 characters.")
+            return
+        data = await state.get_data()
+        await state.update_data(custom_button_pending_text=value, field="custom_button_url")
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        await remove_input_prompt(message.bot, data)
+        prompt = await tracked_answer(message, state, "Now send the button URL (https://... or t.me/...).")
+        await state.update_data(
+            input_prompt_chat_id=prompt.chat.id,
+            input_prompt_message_id=prompt.message_id,
+        )
+        return
+    if field == "custom_button_url":
+        normalized = normalize_http_url(value)
+        if not normalized:
+            await tracked_answer(message, state, "Please send a valid http/https URL.")
+            return
+        prev = await state.get_data()
+        cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
+        buttons = list(cfg.get("buttons", []))
+        if len(buttons) >= 2:
+            await tracked_answer(message, state, "Maximum 2 custom buttons allowed.")
+            await clear_state_preserving_prompts(state)
+            return
+        buttons.append({"text": prev.get("custom_button_pending_text", ""), "url": normalized})
+        await patch(db, "custom_buttons", {"buttons": buttons})
+        await remove_input_prompt(message.bot, prev)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        # Refresh the original Custom Button panel in place after saving.
+        panel_chat = prev.get("custom_panel_chat_id")
+        panel_message = prev.get("custom_panel_message_id")
+        if panel_chat and panel_message:
+            current = buttons[:2]
+            rows = []
+            for i, item in enumerate(current):
+                rows.append([
+                    InlineKeyboardButton(text=str(item.get("text", f"Button {i+1}"))[:64], url=item.get("url")),
+                    InlineKeyboardButton(text="✖", callback_data=f"settings:custom_button_remove:{i}"),
+                ])
+            if len(current) < 2:
+                rows.append([InlineKeyboardButton(text="✚", callback_data="settings:custom_button_add")])
+            rows.append([InlineKeyboardButton(text="《 BACK", callback_data="settings:home")])
+            await refresh_settings_panel(
+                message.bot, panel_chat, panel_message,
+                "Custom Button:\n\nYou can add a custom buttons to your files.",
+                InlineKeyboardMarkup(inline_keyboard=rows),
+            )
+        await clear_state_preserving_prompts(state)
+        return
+    if field == "file_animation_text":
+        if not message.text or not value:
+            await tracked_answer(message, state, "Please send non-empty Blink text.")
+            return
+        panel_chat_id = data.get("animation_panel_chat_id")
+        panel_message_id = data.get("animation_panel_message_id")
+        await db.settings.update_one({"key": "animation"}, {"$set": {"file_animation_text": formatted_input_text(message, value)}}, upsert=True)
+        await clear_state_preserving_prompts(state)
+        await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
+        await tracked_answer(message, state, "✨ Blink text saved and enabled.")
+        return
+    if field == "animation_frames_collect":
+        frames = list(data.get("pending_frames", []))
+        if value.lower() == "/done":
+            if len(frames) < 4:
+                await tracked_answer(message, state, f"At least 4 frames are required. You have {len(frames)}; send more frames or /cancel.")
+                return
+            animation_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
+            await db.settings.update_one(
+                {"key": "animation"},
+                {"$set": {"key": "animation", "frames": frames, "speed": animation_cfg["speed"], "mode": animation_cfg["mode"], "enabled": animation_cfg["enabled"]},
+                 "$unset": {"prefix": "", "prefix_enabled": "", "frames_enabled": ""}},
+                upsert=True,
+            )
+            saved_cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
+            if saved_cfg.get("frames") != frames:
+                await tracked_answer(message, state, "❌ Frames could not be verified in the database. Please retry.")
+                return
+            panel_chat_id = data.get("animation_panel_chat_id")
+            panel_message_id = data.get("animation_panel_message_id")
+            await clear_state_preserving_prompts(state)
+            refreshed_id = await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)
+            if not refreshed_id and panel_chat_id:
+                text, markup = build_animation_page(saved_cfg)
+                await message.bot.send_message(chat_id=panel_chat_id, text=format_settings_page(text), parse_mode="HTML", reply_markup=markup, link_preview_options={"is_disabled": True})
+            await tracked_answer(message, state, f"✨ Saved {len(frames)} animation frames.")
+            return
+        if not message.text or not value:
+            await tracked_answer(message, state, "Please send a non-empty text frame.")
+            return
+        if len(frames) >= 6:
+            await tracked_answer(message, state, "Maximum 6 frames reached. Send /done to save them.")
+            return
+        frames.append(formatted_input_text(message, value))
+        await state.update_data(field="animation_frames_collect", pending_frames=frames)
+        await tracked_answer(message, state, f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 4 frames.")
+        return
+    if field == "forcejoin_label":
+        if not value or len(value) > 64:
+            await tracked_answer(message, state, "Button text must be between 1 and 64 characters.")
+            return
+        prev = await state.get_data()
+        channel = prev.get("channel")
+        if not channel:
+            await tracked_answer(message, state, "Channel setting expired. Please reopen it.")
+            await clear_state_preserving_prompts(state)
+            return
+        await save_force_join_channel_label(message.bot, db, channel, value)
+        await clear_state_preserving_prompts(state)
+        await tracked_answer(message, state, f"✨ Successfully updated button text for {channel} force-sub button.")
+        return
+    if field == "forcejoin_message":
+        value = formatted_input_text(message, value)
+        await patch(db, "force_join", {"message": value})
+        await finish_input_panel(message, state, "FORCE SUB CAPTION", "forcejoin")
+        await clear_state_preserving_prompts(state)
+        return
+    if field == "forcejoin_verify_text":
+        await patch(db, "force_join", {"verify_text": value})
+        await clear_state_preserving_prompts(state)
+        await tracked_answer(message, state, "✨ Successfully updated verification button text.")
+        return
+    if field == "forcejoin_media":
+        if message.animation:
+            await patch(db, "force_join", {"poster_file_id": message.animation.file_id, "poster_photo_id": None})
+        elif message.photo:
+            await patch(db, "force_join", {"poster_photo_id": message.photo[-1].file_id, "poster_file_id": None})
+        else:
+            await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
+            return
+        await clear_state_preserving_prompts(state)
+        await tracked_answer(message, state, "✨ Force-join poster updated successfully.")
+        return
     if field == "forcejoin_channel":
         await clear_state_preserving_prompts(state)
         await tracked_answer(message, state, "Please add a Group or Channel using the chat-selection keyboard from /settings → Force Sub → Add.")
