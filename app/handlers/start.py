@@ -334,13 +334,9 @@ async def run_force_join_link_rotation_worker(bot, db, settings, interval_second
             channels = await effective_force_join_channels(type("DatabaseProxy", (), {"db": db})(), settings)
             cfg = await db.settings.find_one({"key": "force_join"}) or {}
             active_channels = set(channels)
-            # A removed channel must never keep generating links. Revoke and remove
-            # every tracked invite for channels no longer in the effective config.
-            async for stale_link in db.force_join_links.find({"channel": {"$nin": list(active_channels)}}).limit(200):
-                try:
-                    await _revoke_tracked_force_join_link(bot, db, stale_link)
-                except Exception:
-                    log.warning("Could not revoke invite for removed Force Sub channel", exc_info=True)
+            # Removed channels are excluded from link generation immediately.
+            # Keep their existing rotation links valid until their recorded 30-minute
+            # expiry; the expiry cleanup worker will revoke and remove them afterward.
             if cfg.get("enabled", False):
                 channel_cfgs = await asyncio.gather(*(
                     db.settings.find_one({"key": "force_join_channel", "channel": channel})
