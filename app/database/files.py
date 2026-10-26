@@ -38,6 +38,7 @@ class FileRepository:
                 if getattr(exc, "code", None) != 11000:
                     raise
                 doc["key"] = await self.reserve_code(7)
+                doc["file_key"] = doc["key"]
         raise RuntimeError("Could not allocate a unique file key")
 
     async def save_file(self, *, source_chat_id: int | None = None,
@@ -46,7 +47,7 @@ class FileRepository:
         # source_chat_id is accepted for backwards compatibility but isn't stored.
         for attempt in range(8):
             key = await self.reserve_code(7)
-            doc = {"key": key, "id": int(source_message_id)}
+            doc = {"key": key, "file_key": key, "id": int(source_message_id)}
             compact = buttons if buttons else None
             if compact:
                 doc["buttons"] = compact
@@ -79,7 +80,7 @@ class FileRepository:
         if len(ids) < 2:
             raise ValueError("A batch must contain at least 2 messages")
         key = batch_id or await self.reserve_code(7)
-        doc = {"key": key, "id": {f"{i:02d}": mid for i, mid in enumerate(ids, 1)}}
+        doc = {"key": key, "file_key": key, "id": {f"{i:02d}": mid for i, mid in enumerate(ids, 1)}}
         if buttons:
             doc["buttons"] = {str(k): v for k, v in buttons.items() if v}
         if batch_id:
