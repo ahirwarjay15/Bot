@@ -91,6 +91,18 @@ def valid_button_text(value: str) -> bool:
     text = str(value or "").strip()
     return 1 <= len(text) <= 64
 
+def forcejoin_admin_error_keyboard(bot_username: str | None, chat_type: str | None):
+    """Offer Telegram add-bot flow with the relevant chat type and invite permission."""
+    rows = []
+    if bot_username:
+        if chat_type == "channel":
+            add_url = "https://t.me/" + bot_username + "?startchannel&admin=invite_users"
+        else:
+            add_url = "https://t.me/" + bot_username + "?startgroup&admin=invite_users"
+        rows.append([InlineKeyboardButton(text="➕ ADD BOT AS ADMIN", url=add_url)])
+    rows.append([InlineKeyboardButton(text="《 BACK", callback_data="settings:forcejoin")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 async def save_force_join_channel_label(bot, db, channel: str, label: str):
     """Save a label only on its channel and repair that channel's join URL if needed."""
     values = {"key": "force_join_channel", "channel": channel, "button_text": label}
@@ -1544,8 +1556,9 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                     pass
                 await tracked_answer(
                     message, state,
-                    "The bot is not an administrator in this chat. Add/promote it as admin, then tap Add again.\n\nSetup cancelled.",
-                    reply_markup=kb([[("《 BACK", "settings:forcejoin")]]),
+                    "The bot is not an administrator in this chat. Tap <b>ADD BOT AS ADMIN</b>, grant the requested permission, then return and tap Add again.\n\nSetup cancelled.",
+                    parse_mode="HTML",
+                    reply_markup=forcejoin_admin_error_keyboard(me.username, chat.type),
                 )
                 return
             # Public chats use their public t.me link and do not need a new invite link.
@@ -1566,8 +1579,11 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 pass
             await tracked_answer(
                 message, state,
-                "The bot cannot access this chat. Make sure it is a chat where the bot is an administrator.\n\nSetup cancelled. Add the bot as admin, then tap Add again.",
-                reply_markup=kb([[("《 BACK", "settings:forcejoin")]]),
+                "The bot cannot access this chat. Tap <b>ADD BOT AS ADMIN</b>, grant the requested permission, then return and tap Add again.\n\nSetup cancelled.",
+                parse_mode="HTML",
+                reply_markup=forcejoin_admin_error_keyboard(
+                    me.username, expected_type or (chat.type if "chat" in locals() else None)
+                ),
             )
             return
         await state.update_data(
