@@ -210,8 +210,16 @@ async def _revoke_tracked_force_join_link(bot, db, record: dict, owner_id=None) 
         try:
             await bot.revoke_chat_invite_link(chat_id=int(chat_id), invite_link=link)
         except TelegramAPIError as exc:
-            # Telegram's "already revoked/expired" response is treated as completed.
-            if isinstance(exc, (TelegramRetryAfter, TelegramNetworkError)):
+            # Only explicit "already revoked/expired" responses count as success.
+            # Permission, malformed-request, rate-limit, and transient API errors
+            # must remain tracked and be retried rather than silently dropping the link.
+            error_text = str(exc).lower()
+            already_gone = any(marker in error_text for marker in (
+                "invite link is invalid", "invite link has expired",
+                "invite link was revoked", "invite link is revoked",
+                "invite link not found", "already revoked", "already expired",
+            ))
+            if not already_gone:
                 attempts += 1
                 if attempts >= 3:
                     await db.force_join_links.update_one(
@@ -236,7 +244,7 @@ async def _revoke_tracked_force_join_link(bot, db, record: dict, owner_id=None) 
                     {"$set": {"revoke_attempts": attempts, "revoke_failed": True,
                               "revoke_last_error": str(exc), "revoke_failed_at": now}},
                 )
-                await _force_join_owner_alert(bot, db, record, "revoke", exc, attempts)
+                await _force_join_owner_alert(bot, db, record, "revoke", exc, attempts, owner_id)
                 return
             await db.force_join_links.update_one(
                 {"_id": record["_id"]},
