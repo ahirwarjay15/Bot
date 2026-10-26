@@ -93,12 +93,9 @@ class FileRepository:
     async def save_user(self, user) -> None:
         if user is None:
             return
-        now = _now()
         await self.db.users.update_one(
             {"user_id": user.id},
-            {"$set": {"first_name": user.first_name, "last_name": user.last_name,
-                      "username": user.username, "last_seen": now, "blocked": False},
-             "$setOnInsert": {"created_at": now, "banned": False}},
+            {"$setOnInsert": {"user_id": user.id, "banned": False}},
             upsert=True,
         )
 
