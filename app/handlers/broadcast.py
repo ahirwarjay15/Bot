@@ -255,10 +255,8 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
             await asyncio.sleep(float(exc.retry_after) + 0.5)
         except TelegramForbiddenError:
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "blocked", "finished_at": now()}})
-            await db.users.update_one({"user_id": uid}, {"$set": {"blocked": True, "last_delivery_error": "forbidden"}})
         except TelegramAPIError as exc:
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "failed", "error": type(exc).__name__, "finished_at": now()}})
-            await db.users.update_one({"user_id": uid}, {"$set": {"last_delivery_error": type(exc).__name__, "last_delivery_error_at": now()}})
         except Exception as exc:
             log.exception("Unexpected broadcast failure for user %s", uid)
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "failed", "error": type(exc).__name__, "finished_at": now()}})
