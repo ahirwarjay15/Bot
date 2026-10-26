@@ -34,7 +34,9 @@ def _url_keyboard(message):
         saved = []
         for button in row:
             if button.url and button.text:
-                saved.append({"text": button.text, "url": button.url})
+                # Keep all Telegram-supported button fields (including style/color)
+                # so the original post buttons can be reconstructed on delivery.
+                saved.append(button.model_dump(mode="json", exclude_none=True))
         if saved:
             rows.append(saved)
     return rows or None
@@ -43,7 +45,7 @@ def _markup_from_rows(rows):
     if not rows:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=b["text"], url=b["url"]) for b in row]
+        [InlineKeyboardButton.model_validate(b) for b in row]
         for row in rows if row
     ])
 
