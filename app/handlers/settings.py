@@ -889,7 +889,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         if query.message:
             # Telegram requires a message to display a request-chat keyboard;
             # keep that carrier visually empty instead of adding another prompt.
-            await tracked_answer(query.message, state,
+            carrier = await tracked_answer(query.message, state,
                 "\u2063",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[
@@ -898,6 +898,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
             )
+            await state.update_data(forcejoin_carrier_chat_id=carrier.chat.id, forcejoin_carrier_message_id=carrier.message_id)
         await state.set_state(SettingInput.waiting)
         await state.update_data(field="forcejoin_wait_chat")
     elif action == "forcejoin_join_request":
@@ -1560,11 +1561,17 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                     await keyboard_removal.delete()
                 except TelegramAPIError:
                     pass
-                await tracked_answer(
-                    message, state,
-                    "The bot is not an administrator in this chat. Setup cancelled.",
-                    parse_mode="HTML",
-                )
+                panel_chat_id = pending.get("forcejoin_panel_chat_id")
+                panel_message_id = pending.get("forcejoin_panel_message_id")
+                if panel_chat_id and panel_message_id:
+                    panel_text, panel_markup = await build_forcejoin_page(message.bot, db, settings)
+                    try:
+                        await message.bot.edit_message_text(chat_id=panel_chat_id, message_id=panel_message_id,
+                            text=format_settings_page(panel_text), parse_mode="HTML", reply_markup=panel_markup,
+                            link_preview_options={"is_disabled": True})
+                    except TelegramAPIError:
+                        pass
+                await tracked_answer(message, state, "The bot is not an administrator in this chat. Setup cancelled.")
                 return
             # Public chats use their public t.me link and do not need a new invite link.
             # Private chats need invite-link permission because they are added in Join Request mode.
@@ -1582,11 +1589,17 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 await keyboard_removal.delete()
             except TelegramAPIError:
                 pass
-            await tracked_answer(
-                message, state,
-                "The bot cannot access this chat. Setup cancelled.",
-                parse_mode="HTML",
-            )
+            panel_chat_id = pending.get("forcejoin_panel_chat_id")
+            panel_message_id = pending.get("forcejoin_panel_message_id")
+            if panel_chat_id and panel_message_id:
+                panel_text, panel_markup = await build_forcejoin_page(message.bot, db, settings)
+                try:
+                    await message.bot.edit_message_text(chat_id=panel_chat_id, message_id=panel_message_id,
+                        text=format_settings_page(panel_text), parse_mode="HTML", reply_markup=panel_markup,
+                        link_preview_options={"is_disabled": True})
+                except TelegramAPIError:
+                    pass
+            await tracked_answer(message, state, "The bot cannot access this chat. Setup cancelled.")
             return
         await state.update_data(
             pending_chat_id=chat.id,
