@@ -192,6 +192,22 @@ async def _source_post_content(message: Message, source_chat_id: int, message_id
                 log.warning("Could not delete temporary source-post lookup message %s", source.message_id, exc_info=True)
 
 
+def _combine_caption_data(first_text, first_entities, last_text, last_entities):
+    """Join first/last captions into one message and preserve Telegram entity offsets."""
+    if not first_text:
+        return last_text or "", list(last_entities or [])
+    if not last_text or first_text == last_text:
+        return first_text, list(first_entities or [])
+    separator = "\n\n"
+    offset = len((first_text + separator).encode("utf-16-le")) // 2
+    combined_entities = list(first_entities or [])
+    combined_entities.extend(
+        {**entity, "offset": int(entity.get("offset", 0)) + offset}
+        for entity in (last_entities or [])
+    )
+    return first_text + separator + last_text, combined_entities
+
+
 def _entities_from_data(data):
     from aiogram.types import MessageEntity
     return [MessageEntity.model_validate(item) for item in (data or [])]
@@ -297,24 +313,29 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         link_send_attempted = True
         sent_link = await message.answer(link, reply_markup=keyboard)
 
-        # Match /file behavior: reply with the first and last source captions
-        # beneath the generated link in the admin DM, preserving Telegram entities.
-        caption_items = []
-        for source_id in (first_id, last_id):
-            caption_text, caption_entities = await _source_post_content(
-                message, source_chat_id, source_id
+        # Combine first and last captions into one reply, retaining each
+        # caption's Telegram entities and adjusting offsets for the separator.
+        first_caption_text, first_caption_entities = await _source_post_content(
+            message, source_chat_id, first_id
+        )
+        last_caption_text, last_caption_entities = await _source_post_content(
+            message, source_chat_id, last_id
+        )
+        combined_text, combined_entities = _combine_caption_data(
+            first_caption_text, first_caption_entities,
+            last_caption_text, last_caption_entities,
+        )
+        caption_items = [(combined_text, combined_entities)] if combined_text else []
+        if combined_text:
+            await message.bot.send_message(
+                chat_id=message.chat.id,
+                text=combined_text,
+                entities=_entities_from_data(combined_entities) or None,
+                parse_mode=None,
+                reply_to_message_id=sent_link.message_id,
             )
-            if caption_text:
-                await message.bot.send_message(
-                    chat_id=message.chat.id,
-                    text=caption_text,
-                    entities=_entities_from_data(caption_entities) or None,
-                    parse_mode=None,
-                    reply_to_message_id=sent_link.message_id,
-                )
-                caption_items.append((caption_text, caption_entities))
 
-        # Mirror the link and both captions into the configured deeplink channel.
+        # Mirror the combined caption reply into the configured deeplink channel.
         await mirror_deeplink(
             message.bot, settings, link, keyboard, caption_items
         )
