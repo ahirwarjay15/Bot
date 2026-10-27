@@ -19,16 +19,17 @@ def now():
 
 
 def format_broadcast_report(counts: dict[str, int]) -> str:
-    """Show each mutually exclusive final recipient status and a reconciled total."""
+    """Show mutually exclusive outcomes for this broadcast and reconcile totals."""
     statuses = ("sent", "failed", "blocked", "unknown", "skipped_banned")
-    total = sum(max(0, int(counts.get(status, 0))) for status in statuses)
+    normalized = {status: max(0, int(counts.get(status, 0))) for status in statuses}
+    total = sum(normalized.values())
     return (
-        f"BROADCAST REPORT\nRecipients: {total}\n"
-        f"Sent successfully: {counts.get('sent', 0)}\n"
-        f"Failed: {counts.get('failed', 0)}\n"
-        f"Blocked/unreachable: {counts.get('blocked', 0)}\n"
-        f"Delivery unknown: {counts.get('unknown', 0)}\n"
-        f"Skipped (banned): {counts.get('skipped_banned', 0)}"
+        f"BROADCAST REPORT\nRecipients processed: {total}\n"
+        f"Sent successfully: {normalized['sent']}\n"
+        f"Failed: {normalized['failed']}\n"
+        f"Blocked/unreachable in this broadcast: {normalized['blocked']}\n"
+        f"Delivery unknown: {normalized['unknown']}\n"
+        f"Skipped (banned during broadcast): {normalized['skipped_banned']}"
     )
 
 
