@@ -2,7 +2,7 @@ import pytest
 
 from app.database.files import FileRepository
 from app.handlers.file import MAX_FILES
-from app.handlers.batch import same_source_channel
+from app.handlers.batch import MAX_BATCH_MESSAGES, same_source_channel
 
 
 class FakeFiles:
@@ -97,6 +97,10 @@ async def test_batch_requires_at_least_two_ids():
 
 def test_file_collection_limit_is_50():
     assert MAX_FILES == 50
+
+
+def test_batch_range_has_a_safe_upper_bound():
+    assert MAX_BATCH_MESSAGES == 1000
 
 
 def test_batch_rejects_endpoints_from_different_chats():
