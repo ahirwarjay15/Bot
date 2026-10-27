@@ -110,6 +110,14 @@ def ordered_batch_items(items):
     return sorted(items, key=lambda item: int(item.get("source_message_id", 0)))
 
 
+def same_source_channel(first_chat_id, last_chat_id) -> bool:
+    """A range batch must never span multiple Telegram chats."""
+    try:
+        return int(first_chat_id) == int(last_chat_id)
+    except (TypeError, ValueError):
+        return False
+
+
 async def _existing_source_message_ids(bot, destination_chat_id: int, source_chat_id: int,
                                        first_id: int, last_id: int) -> list[int]:
     """Return source IDs that can still be read; deleted posts are skipped safely."""
@@ -320,8 +328,11 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     data = await state.get_data()
     first_id = int(data["first_message_id"])
     source_chat_id = int(data.get("first_source_chat_id", data["source_chat_id"]))
-    if int(last_source_chat_id) != source_chat_id:
-        await message.answer("The first and last messages must come from the same channel. Send the last message again.")
+    if not same_source_channel(source_chat_id, last_source_chat_id):
+        await message.answer(
+            "These messages are from different channels. The first message is still selected; "
+            "send the last message again from that same channel."
+        )
         return
     if last_id < first_id:
         await message.answer("Last message must be after the first message in the selected source channel. Please send the last post again.")
