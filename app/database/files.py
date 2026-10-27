@@ -71,7 +71,7 @@ class FileRepository:
 
     async def save_batch(self, items: list, batch_id: str | None = None,
                          buttons: dict | None = None) -> dict:
-        ids = [int(item) for item in items]
+        ids = [int(item["source_message_id"]) if isinstance(item, dict) else int(item) for item in items]
         if len(ids) < 2:
             raise ValueError("A batch must contain at least 2 messages")
         key = batch_id or await self.reserve_code(7)
