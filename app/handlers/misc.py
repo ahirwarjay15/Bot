@@ -2,6 +2,7 @@
 import logging
 from html import escape
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramAPIError
 from app.config import Settings
@@ -125,6 +126,15 @@ async def _replace_about_post(bot, user_id, cfg, old_message, text, markup):
             await old_message.delete()
         except TelegramAPIError:
             pass
+
+
+@router.message(Command("cancel"))
+async def cancel_fallback(message: Message):
+    """Clean up /cancel even when no command-specific input flow is active."""
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
 
 
 @router.message()
