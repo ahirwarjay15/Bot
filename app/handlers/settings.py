@@ -194,12 +194,29 @@ def format_settings_page(text: str) -> str:
         body = f"<i>{body}</i>"
     return title + (f"\n\n{body}" if body else "")
 
+def format_input_prompt(prompt):
+    """Italicize plain settings prompts and render {template_variables} as copyable code."""
+    import re
+
+    text = str(prompt or "")
+    # Prompts containing intentional HTML already manage their own formatting.
+    if "<" in text and ">" in text:
+        return text
+    text = html.escape(text)
+    text = re.sub(
+        r"\{([A-Za-z_][A-Za-z0-9_]*)\}",
+        lambda match: "<code>{" + match.group(1) + "}</code>",
+        text,
+    )
+    return "<i>" + text + "</i>"
+
+
 async def show_input_prompt(query, state, field, prompt, back_action, **extra):
     """Send a separate prompt; remember its ID so Back/Cancel can remove it."""
     if not query.message:
         return
     prompt_message = await query.message.answer(
-        prompt,
+        format_input_prompt(prompt),
         parse_mode="HTML",
         link_preview_options={"is_disabled": True},
     )
@@ -224,6 +241,9 @@ async def track_temporary_prompt(state, message):
 
 async def tracked_answer(message, state, *args, **kwargs):
     """Send a settings-flow message and remember it for cleanup on page navigation."""
+    if args and isinstance(args[0], str) and kwargs.get("parse_mode") is None:
+        args = (format_input_prompt(args[0]), *args[1:])
+        kwargs["parse_mode"] = "HTML"
     sent = await message.answer(*args, **kwargs)
     await track_temporary_prompt(state, sent)
     return sent
@@ -1799,7 +1819,18 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             return
         frames.append(formatted_input_text(message, value))
         await state.update_data(field="animation_frames_collect", pending_frames=frames)
-        await tracked_answer(message, state, f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 1 frame.")
+        # Keep only the latest frame-status prompt visible while collecting frames.
+        latest_prompt = data.get("animation_status_prompt_id")
+        if latest_prompt:
+            try:
+                await message.bot.delete_message(chat_id=message.chat.id, message_id=latest_prompt)
+            except TelegramAPIError:
+                pass
+        status_prompt = await tracked_answer(
+            message, state,
+            f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 1 frame."
+        )
+        await state.update_data(animation_status_prompt_id=status_prompt.message_id)
         return
     if field == "forcejoin_label":
         if not value or len(value) > 64:
