@@ -86,7 +86,9 @@ def _database_channel_origin(message: Message, configured_chat_id):
 
 async def _bot_can_access_chat(bot, chat_id: int) -> bool:
     try:
-        await bot.get_chat(int(chat_id))
+        chat = await bot.get_chat(int(chat_id))
+        if getattr(chat, "type", None) != "channel":
+            return False
         me = await bot.get_me()
         member = await bot.get_chat_member(int(chat_id), me.id)
         return member.status in ("member", "administrator", "creator")
