@@ -134,7 +134,8 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
     # Show the new prompt first so the chat never goes blank during navigation.
     old_data = await state.get_data()
     prompt = await message.answer(
-        "<i>Send me the <b>message/file</b> you want to store.</i>",
+        "<b><u>Sᴛᴏʀᴇ Fɪʟᴇ</u></b>\n\n"
+        "<i>Send me the message/file you want to store.</i>",
         parse_mode="HTML",
     )
     await state.clear()
@@ -188,7 +189,7 @@ async def generate_file_link(
 
     await callback.answer()
     progress_message = callback.message
-    await progress_message.edit_text("Generating Link wait a sec...", reply_markup=None, parse_mode=None)
+    await progress_message.edit_text("<i>Generating Link Wait a sec...</i>", reply_markup=None, parse_mode="HTML")
     repo = FileRepository(database.db)
     copied_ids = []
     record = None
