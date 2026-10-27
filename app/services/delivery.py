@@ -110,13 +110,13 @@ def _notice(cfg, minutes):
 
 async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: dict, deeplink: str, request_key: str | None = None):
     """Use compact records while resolving the fixed source channel at runtime."""
-    source_chat_id = file_doc.get("source_chat_id") or getattr(settings, "source_channel_id", None)
+    source_chat_id = file_doc.get("chat") or file_doc.get("source_chat_id") or getattr(settings, "source_channel_id", None)
     if not source_chat_id:
         log.error("Source channel is missing for compact file record")
         return (0, 1)
     item = {
         "source_chat_id": source_chat_id,
-        "source_message_id": file_doc.get("id", file_doc.get("source_message_id")),
+        "source_message_id": (file_doc.get("id")[0] if isinstance(file_doc.get("id"), list) and file_doc.get("id") else file_doc.get("id", file_doc.get("source_message_id"))),
     }
     markup_data = file_doc.get("reply_markup")
     if file_doc.get("buttons"):
@@ -131,18 +131,19 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
 async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: str, request_key: str | None = None):
     """Deliver directly; persist only message IDs and expiry metadata when Auto Delete is on."""
     items = list(batch.get("items", []))
-    if not items and (isinstance(batch.get("source_message_id"), list) or isinstance(batch.get("id"), dict)):
-        channel_id = batch.get("source_chat_id") or batch.get("_source_chat_id")
-        ids = batch.get("id") if isinstance(batch.get("id"), dict) else {f"{i:02d}": mid for i, mid in enumerate(batch["source_message_id"], 1)}
-        saved_buttons = batch.get("buttons") or {}
-        items = []
-        for position, mid in ids.items():
-            index = int(position)
-            item = {"source_chat_id": channel_id, "source_message_id": int(mid)}
-            rows = saved_buttons.get(f"{index:02d}")
-            if rows:
-                item["reply_markup"] = {"inline_keyboard": rows}
-            items.append(item)
+    if not items and (
+        isinstance(batch.get("source_message_id"), list)
+        or isinstance(batch.get("id"), dict)
+        or (isinstance(batch.get("id"), list) and len(batch.get("id")) > 1)
+    ):
+        channel_id = batch.get("chat") or batch.get("source_chat_id") or batch.get("_source_chat_id")
+        raw_ids = batch.get("id") if isinstance(batch.get("id"), list) else (
+            list(batch["id"].values()) if isinstance(batch.get("id"), dict) else batch["source_message_id"]
+        )
+        items = [
+            {"source_chat_id": channel_id, "source_message_id": int(mid)}
+            for mid in raw_ids
+        ]
     if not items:
         return (0, 0)
 
