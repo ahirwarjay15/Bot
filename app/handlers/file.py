@@ -83,7 +83,7 @@ async def _show_panel(message, state, *, edit=False):
     else:
         text = (
             f"<i>LIMIT REACHED — maximum {MAX_FILES} files. Generate your link below.</i>"
-            ff"\n\n<i>Files added: {MAX_FILES}/{MAX_FILES}</i>"
+            f"\n\n<i>Files added: {MAX_FILES}/{MAX_FILES}</i>"
         )
 
     # Always create a fresh panel with the updated count, then remove the old
