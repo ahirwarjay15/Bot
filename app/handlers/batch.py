@@ -99,7 +99,7 @@ def ordered_batch_items(items):
 
 async def _existing_source_message_ids(bot, destination_chat_id: int, source_chat_id: int,
                                        first_id: int, last_id: int) -> list[int]:
-    """Return only existing media posts; abort on protection/permission/network errors."""
+    """Return source IDs that can still be read; deleted posts are skipped safely."""
     available = []
     for source_id in range(first_id, last_id + 1):
         temporary = None
@@ -109,31 +109,20 @@ async def _existing_source_message_ids(bot, destination_chat_id: int, source_cha
                 from_chat_id=source_chat_id,
                 message_id=source_id,
             )
-            if is_batch_file(temporary):
-                available.append(source_id)
+            available.append(source_id)
         except TelegramBadRequest as exc:
-            reason = str(exc).lower()
-            if "protected" in reason or "forwards_restricted" in reason or "can't be forwarded" in reason:
-                raise RuntimeError(
-                    "The selected range contains protected content. Telegram does not allow "
-                    "the bot to validate protected posts, so no batch link was created."
-                ) from exc
-            # Missing/deleted/service messages are not valid media items.
-            log.info("Skipping unavailable/non-forwardable source message %s: %s", source_id, exc)
+            # Telegram reports a deleted/unavailable source message as BadRequest.
+            log.info("Skipping unavailable source message %s: %s", source_id, exc)
         except TelegramAPIError:
-            # Permission/network failures are not evidence that a source post is absent.
+            # Permission/network failures are not evidence that the source is deleted.
             raise
         finally:
             if temporary is not None:
                 try:
                     await bot.delete_message(destination_chat_id, temporary.message_id)
                 except TelegramAPIError:
-                    log.error("Could not remove temporary batch validation message %s",
-                              temporary.message_id, exc_info=True)
-                    raise RuntimeError(
-                        "Batch validation could not clean up a temporary message; "
-                        "creation was stopped to avoid leaving an incomplete batch."
-                    )
+                    log.warning("Could not remove temporary batch validation message %s",
+                                temporary.message_id, exc_info=True)
     return available
 
 
@@ -325,20 +314,24 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     if last_id < first_id:
         await message.answer("Last message must be after the first message in the Database Channel. Please send the last post again.")
         return
-    range_count = last_id - first_id + 1
-    if range_count < 2:
-        await message.answer("Please choose a range containing at least two messages. Send the last post again.")
+    count = last_id - first_id + 1
+    if count < 2:
+        await message.answer("Please choose at least two messages. Send the last post again.")
         return
-    # The Bot API has no getMessage/history endpoint. Validate each source post by
-    # forwarding it temporarily, retaining only actual media and deleting each
-    # temporary copy before persisting anything. If validation fails, no batch is saved.
-    items = []
+    # No arbitrary 100-message cap: allow the full selected range. Telegram API
+    # limits still apply, so large batches can take longer or need retries.
+    # Keep source references only; individual unavailable messages are handled at delivery.
+    # Leave buttons enabled so the configured custom buttons are added to every
+    # batch item that does not already have its own source keyboard.
+    items = [{"source_chat_id": source_chat_id, "source_message_id": mid}
+             for mid in range(first_id, last_id + 1)]
     batch = None
     link_send_attempted = False
     progress_text = (
-        "Checking selected messages, please wait...\n\n"
-        f"➛ Range Messages: {range_count}\n"
-        "➛ Verified media: 0"
+        "Generating link, please wait...\n\n"
+        f"➛ Total Messages: {count}\n"
+        "➛ Completed: 0\n"
+        f"➛ Remaining: {count}"
     )
     try:
         data = await state.get_data()
@@ -356,29 +349,6 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
             prompt_id = progress.message_id
             await state.update_data(prompt_message_id=prompt_id)
 
-        verified_ids = await _existing_source_message_ids(
-            message.bot, message.chat.id, source_chat_id, first_id, last_id
-        )
-        count = len(verified_ids)
-        if count < 2:
-            raise ValueError(
-                f"Only {count} usable media post(s) were found in this range. "
-                "Choose a range containing at least two accessible media posts."
-            )
-        items = [{"source_chat_id": source_chat_id, "source_message_id": mid}
-                 for mid in verified_ids]
-        await message.bot.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=int(prompt_id),
-            text=(
-                "Saving verified batch...\n\n"
-                f"➛ Range Messages: {range_count}\n"
-                f"➛ Verified Media: {count}\n"
-                "➛ Saved: 0"
-            ),
-            parse_mode=None,
-            reply_markup=None,
-        )
         batch = await FileRepository(database.db).save_batch(items)
         me = await message.bot.get_me()
         link = f"https://t.me/{me.username}?start={build_deeplink_token(batch['key'])}"
@@ -427,4 +397,4 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
             except Exception:
                 log.warning("Could not clean up an unlinked batch record", exc_info=True)
         log.exception("Range batch generation failed")
-        await message.answer("Batch creation stopped. No batch link was created. Check that the selected range contains accessible media posts and that the bot can access the Database Channel.")
+        await message.answer("Batch link generation failed. Check that the message links are valid and the bot can access the Database Channel.")
