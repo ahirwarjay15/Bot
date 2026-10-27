@@ -33,6 +33,7 @@ def _now():
 
 
 BATCH_SESSION_TIMEOUT = 10 * 60
+MAX_BATCH_MESSAGES = 1000
 
 
 async def _expire_batch_session(state: FSMContext, session_token: str):
@@ -341,8 +342,14 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     if count < 2:
         await message.answer("Please choose at least two messages. Send the last post again.")
         return
-    # No arbitrary 100-message cap: allow the full selected range. Telegram API
-    # limits still apply, so large batches can take longer or need retries.
+    if count > MAX_BATCH_MESSAGES:
+        await message.answer(
+            f"This batch contains {count} messages. The maximum batch size is "
+            f"{MAX_BATCH_MESSAGES}; please choose a smaller range."
+        )
+        return
+    # Bound the range before allocating IDs so an accidental huge message ID
+    # range cannot exhaust memory or create an impractically large MongoDB doc.
     # Keep source references only; individual unavailable messages are handled at delivery.
     # Leave buttons enabled so the configured custom buttons are added to every
     # batch item that does not already have its own source keyboard.
