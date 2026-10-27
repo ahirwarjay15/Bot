@@ -78,18 +78,25 @@ async def del_mod(message: Message, settings: Settings, database):
     await message.answer("Moderator removed." if result.deleted_count else "That user is not a moderator.")
 
 async def build_stats_text(bot, db):
-    """Build one shared stats message for /stats and Settings > Stats."""
-    total, banned = await asyncio.gather(
+    """Build the same stats content for /stats and Settings > Stats."""
+    total, banned, blocked = await asyncio.gather(
         db.users.count_documents({}),
         db.users.count_documents({"banned": True}),
+        db.users.count_documents({"blocked": True}),
     )
-    return f"⛦ Total Users: {total}\n⛦ Banned Users: {banned}"
+    return (
+        f"⛦ Total Users: {total}\n"
+        f"⛦ Banned Users: {banned}\n"
+        f"⛦ Blocked Users: {blocked}"
+    )
 
 
 @router.message(Command("stats"))
 async def stats(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
+    # Telegram popup alerts are only available for callback queries, not commands.
+    # Keep /stats content identical to Settings > Stats.
     await message.answer(await build_stats_text(message.bot, database.db))
 
 
