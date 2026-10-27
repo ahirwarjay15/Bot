@@ -99,7 +99,7 @@ class FileRepository:
     async def get_batch(self, batch_id: str) -> dict | None:
         return await self.db.files.find_one({"key": batch_id, "$or": [
             {"id": {"$type": "object"}},
-            {"id": {"$type": "array", "$ne": []}},
+            {"id.1": {"$exists": True}},
             {"source_message_id": {"$type": "array"}},
             {"items": {"$exists": True}},
         ]})
