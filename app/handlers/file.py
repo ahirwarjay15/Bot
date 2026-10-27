@@ -84,20 +84,16 @@ async def _show_panel(message, state, *, edit=False):
             "<i>LIMIT REACHED — maximum 20 files. Generate your link below.</i>"
             "\n\n<i>Files added: 20/20</i>"
         )
-    if edit and data.get("panel_message_id"):
-        try:
-            await message.bot.edit_message_text(
-                chat_id=data["panel_chat_id"],
-                message_id=data["panel_message_id"],
-                text=text,
-                reply_markup=_panel_keyboard(count),
-                parse_mode="HTML",
-            )
-            return
-        except TelegramAPIError:
-            log.debug("Could not edit file collection panel; replacing it", exc_info=True)
+
+    # Always create a fresh panel with the updated count, then remove the old
+    # one immediately. Telegram has no atomic replace operation, so this order
+    # keeps the panel visible while minimizing any flicker.
+    old_chat_id = data.get("panel_chat_id")
+    old_message_id = data.get("panel_message_id")
     panel = await message.answer(text, reply_markup=_panel_keyboard(count), parse_mode="HTML")
     await state.update_data(panel_message_id=panel.message_id, panel_chat_id=panel.chat.id)
+    if old_message_id and old_chat_id:
+        await _delete(message.bot, old_chat_id, old_message_id)
 
 
 async def _skip_command_and_cancel_collection(message: Message, state: FSMContext):
