@@ -2,6 +2,7 @@ import pytest
 
 from app.database.files import FileRepository
 from app.handlers.file import MAX_FILES
+from app.handlers.batch import same_source_channel
 
 
 class FakeFiles:
@@ -41,6 +42,7 @@ async def test_single_file_stores_id_as_array_and_omits_empty_fields():
     assert saved["id"] == [381]
     assert "buttons" not in saved
     assert "reply_markup" not in saved
+    assert "message_id" not in saved
 
 
 @pytest.mark.asyncio
@@ -51,6 +53,7 @@ async def test_batch_stores_ordered_ids_without_buttons_or_chat_by_default():
     assert saved["id"] == [381, 379, 382]
     assert "buttons" not in saved
     assert "chat" not in saved
+    assert "message_id" not in saved
 
 
 @pytest.mark.asyncio
@@ -60,6 +63,7 @@ async def test_external_channel_batch_saves_numeric_chat_id_but_no_buttons():
 
     assert saved == {"key": saved["key"], "id": [381, 379], "chat": -1001234567890}
     assert "buttons" not in saved
+    assert "message_id" not in saved
 
 
 @pytest.mark.asyncio
@@ -93,3 +97,9 @@ async def test_batch_requires_at_least_two_ids():
 
 def test_file_collection_limit_is_50():
     assert MAX_FILES == 50
+
+
+def test_batch_rejects_endpoints_from_different_chats():
+    assert same_source_channel(-1001234567890, -1001234567890) is True
+    assert same_source_channel(-1001234567890, -1009876543210) is False
+    assert same_source_channel(None, -1009876543210) is False
