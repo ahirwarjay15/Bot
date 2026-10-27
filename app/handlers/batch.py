@@ -235,7 +235,11 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
         raise SkipHandler
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
-        await message.answer(\n            "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\\n\\n"\n            "<i>Please forward the first Database Channel post with its forward tag, or send its message link.</i>",\n            parse_mode="HTML",\n        )
+        await message.answer(
+            "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\n\n"
+            "<i>Please forward the first Database Channel post with its forward tag, or send its message link.</i>",
+            parse_mode="HTML",
+        )
         return
     first_id, first_caption = parsed
     # Avoid forwarding posts into the admin DM just to inspect captions/entities.
@@ -277,7 +281,11 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         raise SkipHandler
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
-        await message.answer(\n            "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\\n\\n"\n            "<i>Please forward the last Database Channel post with its forward tag, or send its message link.</i>",\n            parse_mode="HTML",\n        )
+        await message.answer(
+            "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\n\n"
+            "<i>Please forward the last Database Channel post with its forward tag, or send its message link.</i>",
+            parse_mode="HTML",
+        )
         return
     last_id, last_caption = parsed
     # Do not temporarily forward the last post into the admin DM.
