@@ -179,7 +179,9 @@ async def generate_file_link(
         await callback.answer("This collection has already ended. Start again with /file.", show_alert=True)
         return
 
-    await callback.answer("Generating link…")
+    await callback.answer()
+    progress_message = callback.message
+    await progress_message.edit_text("Generating Link wait a sec...", reply_markup=None, parse_mode=None)
     repo = FileRepository(database.db)
     copied_ids = []
     record = None
@@ -218,7 +220,7 @@ async def generate_file_link(
         me = await callback.bot.get_me()
         token = build_deeplink_token(record.get("key", record.get("file_key")))
         link = f"https://t.me/{me.username}?start={token}"
-        await callback.message.answer(link, reply_markup=_link_keyboard(link))
+        await progress_message.edit_text(link, reply_markup=_link_keyboard(link), parse_mode=None)
 
         # Only remove submitted originals after storage, DB record, and link succeeded.
         for item in collected:
@@ -245,10 +247,18 @@ async def generate_file_link(
                 log.warning("Could not remove incomplete file record", exc_info=True)
         for copied_id in copied_ids:
             await _delete(callback.bot, settings.source_channel_id, copied_id)
-        await callback.message.answer(
-            "Link generation failed. No new files should remain in the storage channel; "
-            "check bot logs and try again."
-        )
+        try:
+            await progress_message.edit_text(
+                "Link generation failed. No new files should remain in the storage channel; "
+                "check bot logs and try again.",
+                reply_markup=None,
+                parse_mode=None,
+            )
+        except TelegramAPIError:
+            await callback.message.answer(
+                "Link generation failed. No new files should remain in the storage channel; "
+                "check bot logs and try again."
+            )
 
 
 @router.message(FileStates.waiting_for_message)
