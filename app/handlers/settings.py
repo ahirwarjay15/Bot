@@ -1348,9 +1348,8 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         if query.message: await tracked_answer(query.message, state, "✨ Successfully removed moderator." if result.deleted_count else "Moderator not found.")
         await render_mods(query, db)
     elif action == "stats":
-        total = await db.users.count_documents({})
-        blocked = await db.users.count_documents({"blocked": True})
-        await query.answer(f"⛦ Total Users: {total}\n⛦ Banned Users: {blocked}", show_alert=True)
+        from app.handlers.admin import build_stats_text
+        await query.answer(await build_stats_text(query.bot, db), show_alert=True)
         return
     await query.answer()
 
