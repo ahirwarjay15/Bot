@@ -80,13 +80,11 @@ async def build_stats_text(bot, db):
     """Build the same compact stats alert for /stats and the Settings > Stats button."""
     total = await db.users.count_documents({})
     banned = await db.users.count_documents({"banned": True})
-    # Telegram only reveals that a user blocked/cannot receive messages when a
-    # send is attempted. Track those outcomes per broadcast, not on users.
-    blocked_ids = await db.broadcast_recipients.distinct(
-        "user_id", {"status": "blocked"}
-    )
+    # Keep blocked delivery state on the user record so Stats remains correct
+    # after temporary broadcast recipient rows are deleted.
+    blocked = await db.users.count_documents({"blocked": True})
     me = await bot.get_me()
-    return f"{me.full_name}\n\n⛦ Total Users: {total}\n⛦ Banned Users: {banned}\n⛦ Blocked / Unreachable: {len(blocked_ids)}"
+    return f"{me.full_name}\n\n⛦ Total Users: {total}\n⛦ Banned Users: {banned}\n⛦ Blocked / Unreachable: {blocked}"
 
 
 @router.message(Command("stats"))
