@@ -193,7 +193,8 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
         return
     old_data = await state.get_data()
     prompt = await message.answer(
-        "<i>Forward The Batch First Message From Your Database Channel <b>(With Forward Tag)</b>.. or Give Me Batch First Message <b>link</b> from your Database channel</i>",
+        "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\n\n"
+        "<i>Forward the batch first message from your database channel (with forward tag), or send its message link.</i>",
         parse_mode="HTML"
     )
     await state.clear()
@@ -249,7 +250,8 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
     await state.update_data(first_message_id=first_id)
     await state.set_state(BatchState.waiting_last)
     prompt = await message.answer(
-        "<i>Forward The Batch Last Message From Your Database Channel <b>(With Forward Tag)</b>.. or Give Me Batch Last Message <b>link</b> from your Database channel</i>",
+        "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\n\n"
+        "<i>Forward the batch last message from your database channel (with forward tag), or send its message link.</i>",
         parse_mode="HTML"
     )
     await state.update_data(prompt_message_id=prompt.message_id)
