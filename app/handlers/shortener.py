@@ -43,6 +43,10 @@ async def _shorten_and_reply(message: Message, settings: Settings, database, tar
     cfg = await database.db.settings.find_one({"key": "shortener", "enabled": True})
     if not cfg:
         await message.answer("Shortener isn't configured. Open /settings → Link Shortener → ADD.")
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
         return
     try:
         result = await shorten_url(cfg.get("url", ""), cfg.get("token", ""), target)
@@ -64,10 +68,6 @@ async def _shorten_and_reply(message: Message, settings: Settings, database, tar
 async def shortener_command(
     message: Message, settings: Settings, database, command: CommandObject, state: FSMContext
 ):
-    try:
-        await message.delete()
-    except TelegramAPIError:
-        pass
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     cfg = await database.db.settings.find_one({"key": "shortener", "enabled": True})
@@ -81,19 +81,27 @@ async def shortener_command(
     if target:
         await state.clear()
         await _shorten_and_reply(message, settings, database, target)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
         return
     await state.set_state(ShortenerState.waiting_for_url)
     await message.answer("Send the URL you want to shorten, or use /cancel to stop.")
-
-
-@router.message(ShortenerState.waiting_for_url, Command("cancel"))
-async def cancel_shortener(message: Message, state: FSMContext):
     try:
         await message.delete()
     except TelegramAPIError:
         pass
+
+
+@router.message(ShortenerState.waiting_for_url, Command("cancel"))
+async def cancel_shortener(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("URL shortening cancelled.")
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
 
 
 @router.message(ShortenerState.waiting_for_url, F.text.startswith("/"))
