@@ -46,7 +46,7 @@ class FileRepository:
         # source_chat_id is accepted for backwards compatibility but isn't stored.
         for attempt in range(8):
             key = await self.reserve_code(7)
-            doc = {"key": key, "id": int(source_message_id)}
+            doc = {"key": key, "id": [int(source_message_id)]}
             compact = buttons if buttons else None
             if compact:
                 doc["buttons"] = compact
@@ -66,29 +66,40 @@ class FileRepository:
         return await self.db.files.find_one({"key": key})
 
     async def is_batch_record(self, record: dict) -> bool:
-        return bool(record and (isinstance(record.get("items"), list)
-                                or isinstance(record.get("source_message_id"), list)
-                                or isinstance(record.get("id"), dict)))
+        ids = record.get("id") if record else None
+        return bool(record and (
+            isinstance(record.get("items"), list)
+            or isinstance(record.get("source_message_id"), list)
+            or isinstance(ids, dict)
+            or (isinstance(ids, list) and len(ids) > 1)
+        ))
 
     async def save_batch(self, items: list, batch_id: str | None = None,
-                         buttons: dict | None = None) -> dict:
-        # New compact API accepts a list of message IDs. Legacy dict items are normalized.
-        ids = []
-        for item in items:
-            ids.append(int(item.get("source_message_id")) if isinstance(item, dict) else int(item))
+                         chat_id: int | None = None) -> dict:
+        # Batch records deliberately store only ordered message IDs and, for
+        # non-database channels, the numeric source chat ID. Buttons are never saved.
+        ids = [
+            int(item.get("source_message_id")) if isinstance(item, dict) else int(item)
+            for item in items
+        ]
         if len(ids) < 2:
             raise ValueError("A batch must contain at least 2 messages")
         key = batch_id or await self.reserve_code(7)
-        doc = {"key": key, "id": {f"{i:02d}": mid for i, mid in enumerate(ids, 1)}}
-        if buttons:
-            doc["buttons"] = {str(k): v for k, v in buttons.items() if v}
+        doc = {"key": key, "id": ids}
+        if chat_id is not None:
+            doc["chat"] = int(chat_id)
         if batch_id:
             await self.db.files.update_one({"key": batch_id}, {"$set": doc}, upsert=True)
             return await self.db.files.find_one({"key": batch_id})
         return await self._insert_unique(doc)
 
     async def get_batch(self, batch_id: str) -> dict | None:
-        return await self.db.files.find_one({"$and": [{"key": batch_id}, {"$or": [{"id": {"$type": "object"}}, {"source_message_id": {"$type": "array"}}, {"items": {"$exists": True}}]}]})
+        return await self.db.files.find_one({"key": batch_id, "$or": [
+            {"id": {"$type": "object"}},
+            {"id": {"$type": "array", "$ne": []}},
+            {"source_message_id": {"$type": "array"}},
+            {"items": {"$exists": True}},
+        ]})
 
     async def save_user(self, user) -> None:
         if user is None:
