@@ -114,13 +114,15 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
     if not source_chat_id:
         log.error("Source channel is missing for compact file record")
         return (0, 1)
+    ids = file_doc.get("id")
+    if not isinstance(ids, list) or len(ids) != 1:
+        log.error("File record must contain exactly one source message ID")
+        return (0, 1)
     item = {
         "source_chat_id": source_chat_id,
-        "source_message_id": file_doc.get("id", file_doc.get("source_message_id")),
+        "source_message_id": int(ids[0]),
     }
-    markup_data = file_doc.get("reply_markup")
-    if file_doc.get("buttons"):
-        markup_data = {"inline_keyboard": file_doc["buttons"]}
+    markup_data = {"inline_keyboard": file_doc["buttons"]} if file_doc.get("buttons") else None
     if markup_data:
         item["reply_markup"] = markup_data
     return await deliver_batch(
@@ -131,13 +133,11 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
 async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: str, request_key: str | None = None):
     """Deliver directly; persist only message IDs and expiry metadata when Auto Delete is on."""
     items = list(batch.get("items", []))
-    if not items and (isinstance(batch.get("source_message_id"), list) or isinstance(batch.get("id"), dict)):
+    ids = batch.get("id")
+    if not items and isinstance(ids, list) and len(ids) > 1:
         channel_id = batch.get("source_chat_id") or batch.get("_source_chat_id")
-        ids = batch.get("id") if isinstance(batch.get("id"), dict) else {f"{i:02d}": mid for i, mid in enumerate(batch["source_message_id"], 1)}
         saved_buttons = batch.get("buttons") or {}
-        items = []
-        for position, mid in ids.items():
-            index = int(position)
+        for index, mid in enumerate(ids, 1):
             item = {"source_chat_id": channel_id, "source_message_id": int(mid)}
             rows = saved_buttons.get(f"{index:02d}")
             if rows:
@@ -174,7 +174,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
 
     custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
     custom_buttons = custom_cfg.get("buttons", [])
-    is_batch = (isinstance(batch.get("items"), list) and bool(batch.get("file_key"))) or isinstance(batch.get("source_message_id"), list) or isinstance(batch.get("id"), dict)
+    is_batch = isinstance(batch.get("id"), list) and len(batch["id"]) > 1
     # Original supported URL buttons take priority. Custom buttons are only a fallback.
     valid_custom_buttons = [
         InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
