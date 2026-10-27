@@ -134,7 +134,7 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
     await _clear_collection_ui(message.bot, state, message.chat.id)
     await state.set_state(FileStates.waiting_for_message)
     prompt = await message.answer(
-        "<b><i>Send me the messages/file you want to store.</i></b>",
+        "<i>Send me the <b>message/file</b> you want to store.</i>",
         parse_mode="HTML",
     )
     await state.update_data(
