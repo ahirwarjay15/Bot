@@ -1,4 +1,4 @@
-"""Collect up to 20 files, then create one compact deeplink."""
+"""Collect up to 50 files, then create one compact deeplink."""
 import asyncio
 import logging
 
@@ -19,7 +19,7 @@ from app.services.permissions import is_owner_or_moderator
 
 router = Router(name="file")
 log = logging.getLogger(__name__)
-MAX_FILES = 20
+MAX_FILES = 50
 PANEL_TEXT = (
     "<i>Send more files to create your collection. When you're done, generate your link below.\n"
     "You can also tap BACK to cancel this process.</i>"
@@ -79,11 +79,11 @@ async def _show_panel(message, state, *, edit=False):
     data = await state.get_data()
     count = len(data.get("collected", []))
     if count < MAX_FILES:
-        text = PANEL_TEXT + f"\n\n<i>Files added: {count}/{MAX_FILES}</i>"
+        text = PANEL_TEXT + f"\n\n<i>Files added: {count}</i>"
     else:
         text = (
-            "<i>LIMIT REACHED — maximum 20 files. Generate your link below.</i>"
-            "\n\n<i>Files added: 20/20</i>"
+            f"<i>LIMIT REACHED — maximum {MAX_FILES} files. Generate your link below.</i>"
+            f"\n\n<i>Files added: {MAX_FILES}</i>"
         )
 
     # Always create a fresh panel with the updated count, then remove the old
@@ -182,7 +182,7 @@ async def cancel_file(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "file:limit")
 async def file_limit(callback: CallbackQuery):
-    await callback.answer("LIMIT REACHED — maximum 20 files.", show_alert=True)
+    await callback.answer(f"LIMIT REACHED — maximum {MAX_FILES} files.", show_alert=True)
 
 
 @router.callback_query(F.data == "file:back")
@@ -266,7 +266,8 @@ async def generate_file_link(
                 source_message_id=ids[0], buttons=buttons.get("01")
             )
         else:
-            record = await repo.save_batch(ids, buttons=buttons)
+            # Batch documents intentionally never persist source button data.
+            record = await repo.save_batch(ids)
 
         me = await callback.bot.get_me()
         token = build_deeplink_token(record.get("key", record.get("file_key")))
@@ -336,7 +337,7 @@ async def _receive_collected(message: Message, state: FSMContext, settings: Sett
     data = await state.get_data()
     collected = list(data.get("collected", []))
     if len(collected) >= MAX_FILES:
-        await message.answer("LIMIT REACHED — maximum 20 files. Tap GENERATE LINK.")
+        await message.answer(f"LIMIT REACHED — maximum {MAX_FILES} files. Tap GENERATE LINK.")
         return
 
     try:
