@@ -947,7 +947,7 @@ async def delete_start_command_after(message: Message, db, *, delay: bool = True
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
     me=await bot.get_me();link=f"https://t.me/{me.username}?start={payload}"
     # New compact batches keep only ordered message IDs and optional button rows.
-    if isinstance(record.get("source_message_id"), list) or isinstance(record.get("id"), dict):
+    if isinstance(record.get("source_message_id"), list) or isinstance(record.get("id"), (dict, list)):
         record = {**record, "_source_chat_id": settings.source_channel_id}
         return await deliver_batch(bot,database.db,user_id=user_id,batch=record,deeplink=link,request_key=request_key)
     # Old batch records remain readable during the transition.
@@ -991,7 +991,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             # Flash and clear the blink before delivering the file/batch.
             await send_file_animation(bot, database.db, message.chat.id)
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
-            is_batch = isinstance(record.get("items"), list) or isinstance(record.get("id"), dict) or isinstance(record.get("source_message_id"), list) or isinstance(record.get("source_message_id"), list) or isinstance(record.get("id"), dict)
+            is_batch = isinstance(record.get("items"), list) or isinstance(record.get("id"), (dict, list)) or isinstance(record.get("source_message_id"), list) or isinstance(record.get("source_message_id"), list) or isinstance(record.get("id"), dict)
             if is_batch and result[0]==0:
                 await message.answer("None of the batch files could be delivered. The source messages may be unavailable.")
             elif is_batch and result[1]:
