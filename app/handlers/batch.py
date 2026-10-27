@@ -64,24 +64,35 @@ async def _touch_batch_session(message: Message, state: FSMContext) -> bool:
     return True
 
 
-def _origin(message: Message, configured_chat_id):
+def _origin(message: Message, configured_chat_id=None):
     origin = getattr(message, "forward_origin", None)
     chat = getattr(origin, "chat", None)
     message_id = getattr(origin, "message_id", None)
     if chat is None or not message_id:
         return None
     try:
-        if int(chat.id) != int(configured_chat_id):
-            return None
         return int(chat.id), int(message_id)
     except (TypeError, ValueError, AttributeError):
         return None
 
 
-
 def _database_channel_origin(message: Message, configured_chat_id):
-    """Compatibility name for the strict forwarded-origin validator."""
-    return _origin(message, configured_chat_id)
+    """Return the forwarded origin only when it is the configured database channel."""
+    origin = _origin(message)
+    if origin and int(origin[0]) == int(configured_chat_id):
+        return origin
+    return None
+
+
+async def _bot_can_access_chat(bot, chat_id: int) -> bool:
+    try:
+        await bot.get_chat(int(chat_id))
+        me = await bot.get_me()
+        member = await bot.get_chat_member(int(chat_id), me.id)
+        return member.status in ("member", "administrator", "creator")
+    except (TelegramAPIError, TypeError, ValueError):
+        log.info("Bot cannot access batch source chat %s", chat_id, exc_info=True)
+        return False
 
 
 def is_batch_file(message) -> bool:
@@ -127,10 +138,15 @@ async def _existing_source_message_ids(bot, destination_chat_id: int, source_cha
 
 
 async def _parse_message_reference(message: Message, bot, configured_chat_id):
-    """Accept a forwarded post or a t.me/<channel>/<id> / t.me/c/<id>/<id> link."""
-    origin = _origin(message, configured_chat_id)
+    """Accept forwarded posts and public/private Telegram message links from accessible chats."""
+    origin = _origin(message)
     if origin:
-        return origin[1], (message.caption if message.caption is not None else (message.text or ""))
+        source_chat_id, message_id = origin
+        if await _bot_can_access_chat(bot, source_chat_id):
+            return source_chat_id, message_id, (
+                message.caption if message.caption is not None else (message.text or "")
+            )
+        return None
 
     raw = (message.text or message.caption or "").strip()
     match = re.search(r"(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me)/([^\s]+)", raw)
@@ -140,7 +156,6 @@ async def _parse_message_reference(message: Message, bot, configured_chat_id):
     parts = path.split("/")
     try:
         if len(parts) >= 3 and parts[0] == "c":
-            # Internal channel IDs in t.me/c links omit Telegram's -100 prefix.
             channel_id = int("-100" + parts[1])
             message_id = int(parts[2])
         elif len(parts) >= 2 and parts[0] not in ("+", "joinchat"):
@@ -151,9 +166,9 @@ async def _parse_message_reference(message: Message, bot, configured_chat_id):
             return None
     except (ValueError, TelegramAPIError):
         return None
-    if channel_id != int(configured_chat_id):
+    if not await _bot_can_access_chat(bot, channel_id):
         return None
-    return message_id, ""
+    return channel_id, message_id, ""
 
 
 def _link_keyboard(link: str):
@@ -197,7 +212,7 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
         return
     # Show the new prompt first so /batch feels immediate; clean up old UI afterward.
     prompt = await message.answer(
-        "<i>Forward the batch first message from your database channel <b>(with forward tag)</b>.. or send its message link.</i>",
+        "<i>Forward the batch first message from the Database Channel or another channel where the bot is a member (with forward tag), or send its message link.</i>",
         parse_mode="HTML"
     )
     old_data = await state.get_data()
@@ -262,20 +277,12 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
             parse_mode="HTML",
         )
         return
-    first_id, first_caption = parsed
-    # Avoid forwarding posts into the admin DM just to inspect captions/entities.
-    try:
-        await message.bot.get_chat(int(settings.source_channel_id))
-    except TelegramAPIError:
-        log.exception("Bot cannot access the configured Database Channel")
-        await message.answer("I couldn't access the Database Channel. Check the bot's channel permissions.")
-        return
+    first_source_chat_id, first_id, first_caption = parsed
     data = await state.get_data()
-    # Post the next-step prompt first; then clean up the previous prompt/reference.
-    await state.update_data(first_message_id=first_id)
+    await state.update_data(first_source_chat_id=int(first_source_chat_id), first_message_id=int(first_id))
     await state.set_state(BatchState.waiting_last)
     prompt = await message.answer(
-        "<i>Forward the batch last message from your database channel <b>(with forward tag)</b>.. or send its message link.</i>",
+        "<i>Forward the batch last message from the same source channel (with forward tag), or send its message link.</i>",
         parse_mode="HTML"
     )
     await state.update_data(prompt_message_id=prompt.message_id)
@@ -306,11 +313,14 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
             parse_mode="HTML",
         )
         return
-    last_id, last_caption = parsed
-    # Do not temporarily forward the last post into the admin DM.
+    last_source_chat_id, last_id, last_caption = parsed
+    # Both endpoints must belong to the same accessible source channel.
     data = await state.get_data()
     first_id = int(data["first_message_id"])
-    source_chat_id = int(data["source_chat_id"])
+    source_chat_id = int(data.get("first_source_chat_id", data["source_chat_id"]))
+    if int(last_source_chat_id) != source_chat_id:
+        await message.answer("The first and last messages must come from the same channel. Send the last message again.")
+        return
     if last_id < first_id:
         await message.answer("Last message must be after the first message in the Database Channel. Please send the last post again.")
         return
@@ -349,7 +359,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
             prompt_id = progress.message_id
             await state.update_data(prompt_message_id=prompt_id)
 
-        batch = await FileRepository(database.db).save_batch(items)
+        batch = await FileRepository(database.db).save_batch(\n            items, chat_id=(source_chat_id if source_chat_id != int(settings.source_channel_id) else None)\n        )
         me = await message.bot.get_me()
         link = f"https://t.me/{me.username}?start={build_deeplink_token(batch['key'])}"
         keyboard = _link_keyboard(link)
@@ -397,4 +407,4 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
             except Exception:
                 log.warning("Could not clean up an unlinked batch record", exc_info=True)
         log.exception("Range batch generation failed")
-        await message.answer("Batch link generation failed. Check that the message links are valid and the bot can access the Database Channel.")
+        await message.answer("Batch link generation failed. Check that the message links are valid and the bot is a member of the source channel.")
