@@ -186,6 +186,10 @@ def _entities_from_data(data):
 
 @router.message(Command("batch"))
 async def batch_start(message: Message, state: FSMContext, settings: Settings, database):
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     if not settings.source_channel_id:
@@ -228,6 +232,10 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
 
 @router.message(Command("cancel"))
 async def cancel_batch(message: Message, state: FSMContext):
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
     current = await state.get_state()
     if current not in (BatchState.waiting_first.state, BatchState.waiting_last.state):
         return
