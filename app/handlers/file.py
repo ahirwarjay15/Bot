@@ -13,7 +13,7 @@ from app.services.permissions import is_owner_or_moderator
 router = Router(name="file")
 log = logging.getLogger(__name__)
 MAX_FILES = 20
-PANEL_TEXT = ("<i>Send more files to create your collection. When you're done, generate your link below.\n"
+PANEL_TEXT = ("<i>Send more files to create your collection. When you're done, generate your link below.\\n"
               "You can also tap BACK to cancel this process.</i>")
 class FileStates(StatesGroup):
     waiting_for_message = State()
@@ -49,6 +49,8 @@ def _markup_from_rows(rows):
     ])
 
 async def _delete(bot, chat_id, message_id):
+    if not message_id:
+        return
     try:
         await bot.delete_message(chat_id=chat_id, message_id=message_id)
     except TelegramAPIError:
@@ -57,8 +59,8 @@ async def _delete(bot, chat_id, message_id):
 async def _show_panel(message, state, *, edit=False):
     data = await state.get_data()
     count = len(data.get("collected", []))
-    text = (PANEL_TEXT + f"\n\n<i>Files added: {count}/{MAX_FILES}</i>" if count < MAX_FILES
-            else "<i>LIMIT REACHED — maximum 20 files. Generate your link below.</i>\n\n<i>Files added: 20/20</i>")
+    text = (PANEL_TEXT + f"\\n\\n<i>Files added: {count}/{MAX_FILES}</i>" if count < MAX_FILES
+            else "<i>LIMIT REACHED — maximum 20 files. Generate your link below.</i>\\n\\n<i>Files added: 20/20</i>")
     if edit and data.get("panel_message_id"):
         try:
             await message.bot.edit_message_text(
@@ -70,6 +72,22 @@ async def _show_panel(message, state, *, edit=False):
             pass
     panel = await message.answer(text, reply_markup=_panel_keyboard(count), parse_mode="HTML")
     await state.update_data(panel_message_id=panel.message_id, panel_chat_id=panel.chat.id)
+
+async def _interrupt_collection_for_command(handler, event, data):
+    """Clear file-collection FSM before dispatching any other command normally."""
+    state = data.get("state")
+    if isinstance(event, Message) and event.text and event.text.startswith("/") and state:
+        command = event.text.split(maxsplit=1)[0].split("@", 1)[0].lower()
+        current = await state.get_state()
+        if current in (FileStates.waiting_for_message.state, FileStates.collecting.state) and command != "/cancel":
+            saved = await state.get_data()
+            await state.clear()
+            await _delete(event.bot, saved.get("prompt_chat_id", event.chat.id), saved.get("prompt_message_id"))
+            await _delete(event.bot, saved.get("panel_chat_id", event.chat.id), saved.get("panel_message_id"))
+            await event.answer("File collection cancelled. Running your command now…")
+    return await handler(event, data)
+
+router.message.outer_middleware(_interrupt_collection_for_command)
 
 @router.message(Command("file"))
 async def file_command(message: Message, state: FSMContext, settings: Settings, database):
@@ -99,19 +117,9 @@ async def cancel_file(message: Message, state: FSMContext):
     if await state.get_state() not in (FileStates.waiting_for_message.state, FileStates.collecting.state):
         return
     await state.clear()
-    await _delete(message.bot, data.get("prompt_chat_id", message.chat.id), data.get("prompt_message_id", 0))
-    await _delete(message.bot, data.get("panel_chat_id", message.chat.id), data.get("panel_message_id", 0))
+    await _delete(message.bot, data.get("prompt_chat_id", message.chat.id), data.get("prompt_message_id"))
+    await _delete(message.bot, data.get("panel_chat_id", message.chat.id), data.get("panel_message_id"))
     await message.answer("File link creation cancelled.")
-
-@router.message(FileStates.waiting_for_message, Command())
-@router.message(FileStates.collecting, Command())
-async def command_during_file_creation(message: Message):
-    """Never leave commands sent during file collection without a response."""
-    command = (message.text or "").split(maxsplit=1)[0].split("@", 1)[0]
-    await message.answer(
-        f"File generation is in progress, so {command} wasn't run.\n"
-        "Send the file(s) and tap GENERATE LINK, or use /cancel to stop."
-    )
 
 @router.callback_query(F.data == "file:limit")
 async def file_limit(callback: CallbackQuery):
@@ -121,7 +129,7 @@ async def file_limit(callback: CallbackQuery):
 async def file_back(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     await state.clear()
-    await _delete(callback.bot, data.get("prompt_chat_id", callback.message.chat.id), data.get("prompt_message_id", 0))
+    await _delete(callback.bot, data.get("prompt_chat_id", callback.message.chat.id), data.get("prompt_message_id"))
     try:
         await callback.message.delete()
     except TelegramAPIError:
@@ -149,8 +157,8 @@ async def generate_file_link(callback: CallbackQuery, state: FSMContext, setting
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
         ]])
-        sent_link = await callback.message.answer(link, reply_markup=keyboard)
-        await _delete(callback.bot, data.get("prompt_chat_id", callback.message.chat.id), data.get("prompt_message_id", 0))
+        await callback.message.answer(link, reply_markup=keyboard)
+        await _delete(callback.bot, data.get("prompt_chat_id", callback.message.chat.id), data.get("prompt_message_id"))
         await callback.message.delete()
         await state.clear()
     except Exception:
@@ -161,16 +169,12 @@ async def generate_file_link(callback: CallbackQuery, state: FSMContext, setting
 async def receive_first(message: Message, state: FSMContext, settings: Settings):
     if not message.from_user:
         return
-    if message.text and message.text.startswith("/"):
-        return
     await state.set_state(FileStates.collecting)
     await _receive_collected(message, state, settings)
 
 @router.message(FileStates.collecting)
 async def receive_more(message: Message, state: FSMContext, settings: Settings):
     if not message.from_user:
-        return
-    if message.text and message.text.startswith("/"):
         return
     await _receive_collected(message, state, settings)
 
@@ -195,7 +199,7 @@ async def _receive_collected(message: Message, state: FSMContext, settings: Sett
             source_id = int(copied.message_id)
         collected.append({"source_message_id": source_id, "buttons": _url_keyboard(message)})
         await state.update_data(collected=collected)
-        await _delete(message.bot, data.get("prompt_chat_id", message.chat.id), data.get("prompt_message_id", 0))
+        await _delete(message.bot, data.get("prompt_chat_id", message.chat.id), data.get("prompt_message_id"))
         await _delete(message.bot, message.chat.id, message.message_id)
         if data.get("panel_message_id"):
             await _show_panel(message, state, edit=True)
