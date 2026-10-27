@@ -68,7 +68,7 @@ class FileRepository:
     async def is_batch_record(self, record: dict) -> bool:
         return bool(record and (isinstance(record.get("items"), list)
                                 or isinstance(record.get("source_message_id"), list)
-                                or isinstance(record.get("id"), dict)))
+                                or isinstance(record.get("id"), (dict, list))))
 
     async def save_batch(self, items: list, batch_id: str | None = None,
                          buttons: dict | None = None) -> dict:
@@ -79,7 +79,7 @@ class FileRepository:
         if len(ids) < 2:
             raise ValueError("A batch must contain at least 2 messages")
         key = batch_id or await self.reserve_code(7)
-        doc = {"key": key, "id": {f"{i:02d}": mid for i, mid in enumerate(ids, 1)}}
+        doc = {"key": key, "id": ids}
         if buttons:
             doc["buttons"] = {str(k): v for k, v in buttons.items() if v}
         if batch_id:
@@ -88,7 +88,7 @@ class FileRepository:
         return await self._insert_unique(doc)
 
     async def get_batch(self, batch_id: str) -> dict | None:
-        return await self.db.files.find_one({"$and": [{"key": batch_id}, {"$or": [{"id": {"$type": "object"}}, {"source_message_id": {"$type": "array"}}, {"items": {"$exists": True}}]}]})
+        return await self.db.files.find_one({"$and": [{"key": batch_id}, {"$or": [{"id": {"$type": "object"}}, {"id": {"$type": "array"}}, {"source_message_id": {"$type": "array"}}, {"items": {"$exists": True}}]}]})
 
     async def save_user(self, user) -> None:
         if user is None:
