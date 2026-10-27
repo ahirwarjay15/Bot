@@ -19,12 +19,15 @@ def now():
 
 
 def format_broadcast_report(counts: dict[str, int]) -> str:
-    """Report every recipient outcome, including users banned while a job runs."""
-    total = sum(counts.get(status, 0) for status in ("sent", "failed", "blocked", "unknown", "skipped_banned"))
+    """Show each mutually exclusive final recipient status and a reconciled total."""
+    statuses = ("sent", "failed", "blocked", "unknown", "skipped_banned")
+    total = sum(max(0, int(counts.get(status, 0))) for status in statuses)
     return (
-        f"BROADCAST REPORT\nRecipients: {total}\nSent successfully: {counts.get('sent', 0)}\n"
-        f"Failed: {counts.get('failed', 0) + counts.get('unknown', 0)}\n"
+        f"BROADCAST REPORT\nRecipients: {total}\n"
+        f"Sent successfully: {counts.get('sent', 0)}\n"
+        f"Failed: {counts.get('failed', 0)}\n"
         f"Blocked/unreachable: {counts.get('blocked', 0)}\n"
+        f"Delivery unknown: {counts.get('unknown', 0)}\n"
         f"Skipped (banned): {counts.get('skipped_banned', 0)}"
     )
 
@@ -275,4 +278,4 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
         except Exception as exc:
             log.exception("Unexpected broadcast failure for user %s", uid)
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "failed", "error": type(exc).__name__, "finished_at": now()}})
-        await asyncio.sleep(0.05)
+        # Avoid a fixed per-recipient delay; RetryAfter is handled explicitly above.
