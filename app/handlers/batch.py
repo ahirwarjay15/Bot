@@ -290,15 +290,47 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
              for mid in range(first_id, last_id + 1)]
     batch = None
     link_send_attempted = False
+    progress_text = (
+        "<i>Generating Link Wait a sec...</i>\\n\\n"
+        f"➛ Total Messages: {count}\\n"
+        "➛ Completed: 0\\n"
+        f"➛ Remaining: {count}"
+    )
     try:
+        data = await state.get_data()
+        prompt_id = data.get("prompt_message_id")
+        if prompt_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=int(prompt_id),
+                text=progress_text,
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+        else:
+            progress = await message.answer(progress_text, parse_mode="HTML")
+            prompt_id = progress.message_id
+            await state.update_data(prompt_message_id=prompt_id)
+
         batch = await FileRepository(database.db).save_batch(items)
         me = await message.bot.get_me()
         link = f"https://t.me/{me.username}?start={build_deeplink_token(batch['key'])}"
         keyboard = _link_keyboard(link)
         link_send_attempted = True
-        data = await state.get_data()
-        prompt_id = data.get("prompt_message_id")
-        # Remove the submitted last reference, then turn the last-step prompt into the link.
+        if prompt_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=int(prompt_id),
+                text=(
+                    "<i>Generating Link Wait a sec...</i>\\n\\n"
+                    f"➛ Total Messages: {count}\\n"
+                    f"➛ Completed: {count}\\n"
+                    "➛ Remaining: 0"
+                ),
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+        # Remove the submitted last reference, then turn the progress message into the link.
         try:
             await message.delete()
         except TelegramAPIError:
