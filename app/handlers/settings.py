@@ -1462,15 +1462,15 @@ async def cancel_setting_input(message: Message, state: FSMContext):
     await remove_temporary_prompts(message.bot, pending)
     await remove_input_prompt(message.bot, pending)
     await clear_state_preserving_prompts(state)
+    # Reply first; remove the user's command only after the cancellation UI exists.
+    await tracked_answer(message, state,
+        "Input cancelled. Use Back to return to settings.",
+        reply_markup=kb([[("《 BACK", f"settings:{back_action}")]]),
+    )
     try:
         await message.delete()
     except TelegramAPIError:
         pass
-    # Never leave the user at a dead end after cancelling an input prompt.
-    await tracked_answer(message, state, 
-        "Input cancelled. Use Back to return to settings.",
-        reply_markup=kb([[("《 BACK", f"settings:{back_action}")]]),
-    )
 
 @router.message(SettingInput.waiting)
 async def receive_setting_input(message: Message, state: FSMContext, settings: Settings, database):
