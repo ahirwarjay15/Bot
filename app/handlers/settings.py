@@ -199,9 +199,12 @@ def format_input_prompt(prompt):
     import re
 
     text = str(prompt or "")
-    # Prompts containing intentional HTML already manage their own formatting.
+    # Keep intentional Telegram HTML (especially <code> variables) intact,
+    # while applying italic to the complete prompt without exposing raw tags.
     if "<" in text and ">" in text:
-        return text
+        if "<i>" in text.lower() and "</i>" in text.lower():
+            return text
+        return "<i>" + text + "</i>"
     text = html.escape(text)
     text = re.sub(
         r"\{([A-Za-z_][A-Za-z0-9_]*)\}",
