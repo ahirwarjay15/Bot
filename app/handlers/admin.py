@@ -1,4 +1,5 @@
 """Owner/moderator administration, ban controls, and stats popup."""
+import asyncio
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -77,28 +78,19 @@ async def del_mod(message: Message, settings: Settings, database):
     await message.answer("Moderator removed." if result.deleted_count else "That user is not a moderator.")
 
 async def build_stats_text(bot, db):
-    """Build the same compact stats alert for /stats and the Settings > Stats button."""
-    total = await db.users.count_documents({})
-    banned = await db.users.count_documents({"banned": True})
-    # Keep blocked delivery state on the user record so Stats remains correct
-    # after temporary broadcast recipient rows are deleted.
-    blocked = await db.users.count_documents({"blocked": True})
-    me = await bot.get_me()
-    return f"{me.full_name}\n\n⛦ Total Users: {total}\n⛦ Banned Users: {banned}\n⛦ Blocked / Unreachable: {blocked}"
+    """Build one shared stats message for /stats and Settings > Stats."""
+    total, banned = await asyncio.gather(
+        db.users.count_documents({}),
+        db.users.count_documents({"banned": True}),
+    )
+    return f"⛦ Total Users: {total}\n⛦ Banned Users: {banned}"
 
 
 @router.message(Command("stats"))
 async def stats(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
-    # Telegram alert popups can only be opened from a callback button.
-    # Keep this command response minimal; the button shows the stats in an alert.
-    await message.answer(
-        "📊 View bot statistics",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="STATS", callback_data="stats:show")]
-        ]),
-    )
+    await message.answer(await build_stats_text(message.bot, database.db))
 
 
 @router.callback_query(F.data == "stats:show")
