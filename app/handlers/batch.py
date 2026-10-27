@@ -191,11 +191,12 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
     if not settings.source_channel_id:
         await message.answer("Configure SOURCE_CHANNEL_ID first.")
         return
-    old_data = await state.get_data()
+    # Show the new prompt first so /batch feels immediate; clean up old UI afterward.
     prompt = await message.answer(
         "<i>Forward the batch first message from your database channel <b>(with forward tag)</b>.. or send its message link.</i>",
         parse_mode="HTML"
     )
+    old_data = await state.get_data()
     await state.clear()
     await state.set_state(BatchState.waiting_first)
     session_token = token_urlsafe(8)
@@ -207,12 +208,22 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
         prompt_message_id=prompt.message_id,
     )
     asyncio.create_task(_expire_batch_session(state, session_token))
+
+    # Remove any previous batch/file prompt or collection panel only after the
+    # new batch prompt is visible, so the chat never appears blank.
     old_prompt_id = old_data.get("prompt_message_id")
+    old_panel_id = old_data.get("panel_message_id")
+    old_panel_chat_id = old_data.get("panel_chat_id", message.chat.id)
     if old_prompt_id and int(old_prompt_id) != prompt.message_id:
         try:
             await message.bot.delete_message(message.chat.id, int(old_prompt_id))
         except TelegramAPIError:
             log.debug("Could not delete previous batch prompt", exc_info=True)
+    if old_panel_id and int(old_panel_id) != prompt.message_id:
+        try:
+            await message.bot.delete_message(old_panel_chat_id, int(old_panel_id))
+        except TelegramAPIError:
+            log.debug("Could not delete previous collection panel", exc_info=True)
 
 
 @router.message(Command("cancel"))
