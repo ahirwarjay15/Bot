@@ -76,23 +76,47 @@ async def del_mod(message: Message, settings: Settings, database):
     result = await database.db.moderators.delete_one({"user_id": int(parts[1])})
     await message.answer("Moderator removed." if result.deleted_count else "That user is not a moderator.")
 
+async def build_stats_text(bot, db):
+    """Build the same compact stats alert for /stats and the Settings > Stats button."""
+    total = await db.users.count_documents({})
+    banned = await db.users.count_documents({"banned": True})
+    # Telegram only reveals that a user blocked/cannot receive messages when a
+    # send is attempted. Track those outcomes per broadcast, not on users.
+    blocked_ids = await db.broadcast_recipients.distinct(
+        "user_id", {"status": "blocked"}
+    )
+    me = await bot.get_me()
+    return f"{me.full_name}\n\n⛦ Total Users: {total}\n⛦ Banned Users: {banned}\n⛦ Blocked / Unreachable: {len(blocked_ids)}"
+
+
 @router.message(Command("stats"))
 async def stats(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
-    total = await database.db.users.count_documents({})
-    banned = await database.db.users.count_documents({"banned": True})
-    me = await message.bot.get_me()
-    text = f"{me.full_name}\n\nUSERS: {total}\n\nBANNED: {banned}"
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="OK", callback_data="stats:ok")]])
-    await message.answer(text, reply_markup=keyboard)
+    await message.answer("Stats", reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="OK", callback_data="stats:ok")]]
+    ))
+    # Keep the command response as a popup notification, matching Settings > Stats.
+    await message.bot.delete_message(message.chat.id, message.message_id)
+    await message.bot.send_message(
+        message.chat.id, "Tap OK to view stats.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📊 STATS", callback_data="stats:show")]
+        ])
+    )
+
+
+@router.callback_query(F.data == "stats:show")
+async def stats_show(query: CallbackQuery, settings: Settings, database):
+    if not query.from_user or not await is_owner_or_moderator(database.db, query.from_user.id, settings):
+        await query.answer("Not authorized.", show_alert=True)
+        return
+    await query.answer(await build_stats_text(query.bot, database.db), show_alert=True)
+
 
 @router.callback_query(F.data == "stats:ok")
 async def stats_ok(query: CallbackQuery, settings: Settings, database):
     if not query.from_user or not await is_owner_or_moderator(database.db, query.from_user.id, settings):
         await query.answer("Not authorized.", show_alert=True)
         return
-    total = await database.db.users.count_documents({})
-    banned = await database.db.users.count_documents({"banned": True})
-    me = await query.bot.get_me()
-    await query.answer(f"{me.full_name}\n\nUSERS: {total}\n\nBANNED: {banned}", show_alert=True)
+    await query.answer(await build_stats_text(query.bot, database.db), show_alert=True)
