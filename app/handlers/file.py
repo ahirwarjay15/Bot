@@ -113,6 +113,10 @@ async def _skip_command_and_cancel_collection(message: Message, state: FSMContex
 
 @router.message(Command("file"))
 async def file_command(message: Message, state: FSMContext, settings: Settings, database):
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     if not settings.source_channel_id:
@@ -152,6 +156,10 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
 
 @router.message(Command("cancel"))
 async def cancel_file(message: Message, state: FSMContext):
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
     if await state.get_state() not in (
         FileStates.waiting_for_message.state, FileStates.collecting.state
     ):
