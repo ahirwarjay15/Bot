@@ -135,7 +135,7 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
     old_data = await state.get_data()
     prompt = await message.answer(
         "<b><u>Sᴛᴏʀᴇ Fɪʟᴇ</u></b>\n\n"
-        "<i>Send me the message/file you want to store.</i>",
+        "<i>Send me the <b>message/file</b> you want to store.</i>",
         parse_mode="HTML",
     )
     await state.clear()
