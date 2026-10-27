@@ -89,7 +89,10 @@ class FileRepository:
         if chat_id is not None:
             doc["chat"] = int(chat_id)
         if batch_id:
-            await self.db.files.update_one({"key": batch_id}, {"$set": doc}, upsert=True)
+            update = {"$set": doc, "$unset": {"buttons": ""}}
+            if chat_id is None:
+                update["$unset"]["chat"] = ""
+            await self.db.files.update_one({"key": batch_id}, update, upsert=True)
             return await self.db.files.find_one({"key": batch_id})
         return await self._insert_unique(doc)
 
