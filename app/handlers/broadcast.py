@@ -250,11 +250,15 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
                     # A pin failure should not mark a successfully delivered broadcast as failed.
                     log.warning("Could not pin /pbroadcast message for user %s", uid, exc_info=True)
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "sent", "finished_at": now()}})
+            # Successful delivery means this user is reachable again.
+            await db.users.update_one({"user_id": uid}, {"$set": {"blocked": False}})
         except RetryAfter as exc:
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "pending", "retry_after": float(exc.retry_after)}})
             await asyncio.sleep(float(exc.retry_after) + 0.5)
         except TelegramForbiddenError:
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "blocked", "finished_at": now()}})
+            # This is Telegram delivery status, not an admin ban.
+            await db.users.update_one({"user_id": uid}, {"$set": {"blocked": True}})
         except TelegramAPIError as exc:
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "failed", "error": type(exc).__name__, "finished_at": now()}})
         except Exception as exc:
