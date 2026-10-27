@@ -64,6 +64,10 @@ async def _shorten_and_reply(message: Message, settings: Settings, database, tar
 async def shortener_command(
     message: Message, settings: Settings, database, command: CommandObject, state: FSMContext
 ):
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     cfg = await database.db.settings.find_one({"key": "shortener", "enabled": True})
@@ -84,6 +88,10 @@ async def shortener_command(
 
 @router.message(ShortenerState.waiting_for_url, Command("cancel"))
 async def cancel_shortener(message: Message, state: FSMContext):
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
     await state.clear()
     await message.answer("URL shortening cancelled.")
 
