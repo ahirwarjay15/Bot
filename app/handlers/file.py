@@ -113,14 +113,14 @@ async def _skip_command_and_cancel_collection(message: Message, state: FSMContex
 
 @router.message(Command("file"))
 async def file_command(message: Message, state: FSMContext, settings: Settings, database):
-    try:
-        await message.delete()
-    except TelegramAPIError:
-        pass
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     if not settings.source_channel_id:
         await message.answer("Storage isn't configured. Set SOURCE_CHANNEL_ID to your private storage channel.")
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
         return
     try:
         chat = await message.bot.get_chat(settings.source_channel_id)
@@ -129,10 +129,18 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
         )
         if member.status not in ("administrator", "creator"):
             await message.answer(f"Bot must be an admin in {chat.title or 'the storage channel'}.")
+            try:
+                await message.delete()
+            except TelegramAPIError:
+                pass
             return
     except TelegramAPIError:
         log.exception("Storage channel preflight failed")
         await message.answer("Storage channel check failed. Verify SOURCE_CHANNEL_ID and bot admin access.")
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
         return
 
     # Show the new prompt first so the chat never goes blank during navigation.
@@ -152,20 +160,24 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
     old_panel_id = old_data.get("panel_message_id")
     if old_panel_id != prompt.message_id:
         await _delete(message.bot, old_data.get("panel_chat_id", message.chat.id), old_panel_id)
-
-
-@router.message(Command("cancel"))
-async def cancel_file(message: Message, state: FSMContext):
     try:
         await message.delete()
     except TelegramAPIError:
         pass
+
+
+@router.message(Command("cancel"))
+async def cancel_file(message: Message, state: FSMContext):
     if await state.get_state() not in (
         FileStates.waiting_for_message.state, FileStates.collecting.state
     ):
-        return
+        raise SkipHandler
     await _clear_collection_ui(message.bot, state, message.chat.id)
     await message.answer("File link creation cancelled.")
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
 
 
 @router.callback_query(F.data == "file:limit")
