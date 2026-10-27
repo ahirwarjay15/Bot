@@ -76,8 +76,9 @@ class FileRepository:
             raise ValueError("A batch must contain at least 2 messages")
         key = batch_id or await self.reserve_code(7)
         doc = {"key": key, "id": ids}
-        if buttons:
-            doc["buttons"] = {str(k): v for k, v in buttons.items() if v}
+        compact_buttons = {str(k): v for k, v in (buttons or {}).items() if v}
+        if compact_buttons:
+            doc["buttons"] = compact_buttons
         if batch_id:
             await self.db.files.update_one({"key": batch_id}, {"$set": doc}, upsert=True)
             return await self.db.files.find_one({"key": batch_id})
