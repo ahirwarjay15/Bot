@@ -191,6 +191,11 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
     if not settings.source_channel_id:
         await message.answer("Configure SOURCE_CHANNEL_ID first.")
         return
+    old_data = await state.get_data()
+    prompt = await message.answer(
+        "<i>Forward The Batch First Message From Your Database Channel <b>(With Forward Tag)</b>.. or Give Me Batch First Message <b>link</b> from your Database channel</i>",
+        parse_mode="HTML"
+    )
     await state.clear()
     await state.set_state(BatchState.waiting_first)
     session_token = token_urlsafe(8)
@@ -199,13 +204,15 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
         source_chat_id=int(settings.source_channel_id),
         session_token=session_token,
         last_activity_at=time.time(),
+        prompt_message_id=prompt.message_id,
     )
     asyncio.create_task(_expire_batch_session(state, session_token))
-    prompt = await message.answer(
-        "<i>Forward The Batch First Message From Your Database Channel <b>(With Forward Tag)</b>.. or Give Me Batch First Message <b>link</b> from your Database channel</i>",
-        parse_mode="HTML"
-    )
-    await state.update_data(prompt_message_id=prompt.message_id)
+    old_prompt_id = old_data.get("prompt_message_id")
+    if old_prompt_id and int(old_prompt_id) != prompt.message_id:
+        try:
+            await message.bot.delete_message(message.chat.id, int(old_prompt_id))
+        except TelegramAPIError:
+            log.debug("Could not delete previous batch prompt", exc_info=True)
 
 
 @router.message(Command("cancel"))
@@ -238,18 +245,7 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
         await message.answer("I couldn't access the Database Channel. Check the bot's channel permissions.")
         return
     data = await state.get_data()
-    # Remove the first-step prompt and the admin's submitted forward/link to keep the chat clean.
-    try:
-        prompt_id = data.get("prompt_message_id")
-        if prompt_id:
-            await message.bot.delete_message(message.chat.id, int(prompt_id))
-    except TelegramAPIError:
-        log.debug("Could not delete first-step batch prompt", exc_info=True)
-    try:
-        await message.delete()
-    except TelegramAPIError:
-        log.debug("Could not delete submitted first batch reference", exc_info=True)
-
+    # Post the next-step prompt first; then clean up the previous prompt/reference.
     await state.update_data(first_message_id=first_id)
     await state.set_state(BatchState.waiting_last)
     prompt = await message.answer(
@@ -257,6 +253,16 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
         parse_mode="HTML"
     )
     await state.update_data(prompt_message_id=prompt.message_id)
+    try:
+        prompt_id = data.get("prompt_message_id")
+        if prompt_id and int(prompt_id) != prompt.message_id:
+            await message.bot.delete_message(message.chat.id, int(prompt_id))
+    except TelegramAPIError:
+        log.debug("Could not delete first-step batch prompt", exc_info=True)
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        log.debug("Could not delete submitted first batch reference", exc_info=True)
 
 
 @router.message(BatchState.waiting_last)
