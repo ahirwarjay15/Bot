@@ -223,8 +223,6 @@ async def generate_file_link(
                     first_error = outcome
                 continue
             final_items.append(outcome)
-            if not any(item.get("from_storage_channel") for item in collected):
-                pass
         copied_ids.extend(
             int(outcome["source_message_id"])
             for item, outcome in zip(collected, outcomes)
