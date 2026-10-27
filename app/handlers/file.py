@@ -134,7 +134,6 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
     # Show the new prompt first so the chat never goes blank during navigation.
     old_data = await state.get_data()
     prompt = await message.answer(
-        "<b><u>Sᴛᴏʀᴇ Fɪʟᴇ</u></b>\n\n"
         "<i>Send me the <b>message/file</b> you want to store.</i>",
         parse_mode="HTML",
     )
