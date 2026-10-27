@@ -186,14 +186,14 @@ def _entities_from_data(data):
 
 @router.message(Command("batch"))
 async def batch_start(message: Message, state: FSMContext, settings: Settings, database):
-    try:
-        await message.delete()
-    except TelegramAPIError:
-        pass
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     if not settings.source_channel_id:
         await message.answer("Configure SOURCE_CHANNEL_ID first.")
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
         return
     # Show the new prompt first so /batch feels immediate; clean up old UI afterward.
     prompt = await message.answer(
@@ -228,19 +228,23 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
             await message.bot.delete_message(old_panel_chat_id, int(old_panel_id))
         except TelegramAPIError:
             log.debug("Could not delete previous collection panel", exc_info=True)
-
-
-@router.message(Command("cancel"))
-async def cancel_batch(message: Message, state: FSMContext):
     try:
         await message.delete()
     except TelegramAPIError:
         pass
+
+
+@router.message(Command("cancel"))
+async def cancel_batch(message: Message, state: FSMContext):
     current = await state.get_state()
     if current not in (BatchState.waiting_first.state, BatchState.waiting_last.state):
-        return
+        raise SkipHandler
     await state.clear()
     await message.answer("Batch creation cancelled.")
+    try:
+        await message.delete()
+    except TelegramAPIError:
+        pass
 
 
 @router.message(BatchState.waiting_first)
