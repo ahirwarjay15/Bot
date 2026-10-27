@@ -273,7 +273,7 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
         await message.answer(
-            "<i>Please forward the first Database Channel post with its forward tag, or send its message link.</i>",
+            "<i>Please forward the first post from the Database Channel or another channel where the bot is a member, or send its message link.</i>",
             parse_mode="HTML",
         )
         return
@@ -309,7 +309,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
         await message.answer(
-            "<i>Please forward the last Database Channel post with its forward tag, or send its message link.</i>",
+            "<i>Please forward the last post from the same source channel, or send its message link.</i>",
             parse_mode="HTML",
         )
         return
@@ -322,7 +322,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         await message.answer("The first and last messages must come from the same channel. Send the last message again.")
         return
     if last_id < first_id:
-        await message.answer("Last message must be after the first message in the Database Channel. Please send the last post again.")
+        await message.answer("Last message must be after the first message in the selected source channel. Please send the last post again.")
         return
     count = last_id - first_id + 1
     if count < 2:
@@ -359,7 +359,9 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
             prompt_id = progress.message_id
             await state.update_data(prompt_message_id=prompt_id)
 
-        batch = await FileRepository(database.db).save_batch(\n            items, chat_id=(source_chat_id if source_chat_id != int(settings.source_channel_id) else None)\n        )
+        batch = await FileRepository(database.db).save_batch(
+            items, chat_id=(source_chat_id if source_chat_id != int(settings.source_channel_id) else None)
+        )
         me = await message.bot.get_me()
         link = f"https://t.me/{me.username}?start={build_deeplink_token(batch['key'])}"
         keyboard = _link_keyboard(link)
