@@ -99,6 +99,10 @@ async def stats(message: Message, settings: Settings, database):
     # Telegram popup alerts are only available for callback queries, not commands.
     # Keep /stats content identical to Settings > Stats.
     await message.answer(await build_stats_text(message.bot, database.db))
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "stats:show")
