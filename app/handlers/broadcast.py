@@ -207,9 +207,20 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
             sort=[("user_id", 1)],
         )
         if not recipient:
-            # Another worker may currently be sending a recipient for this same job.
-            # Do not publish a final report until all claimed sends have finished.
-            if await db.broadcast_recipients.count_documents({"job_id": job_id, "status": "sending"}):
+            # A job can be observed by multiple workers. Wait for every claimed send
+            # to finish and atomically claim report finalization exactly once.
+            outstanding = await db.broadcast_recipients.count_documents(
+                {"job_id": job_id, "status": {"$in": ["pending", "sending"]}}
+            )
+            if outstanding:
+                await asyncio.sleep(0.1)
+                continue
+            finalized = await db.broadcast_jobs.update_one(
+                {"_id": job_id, "status": {"$in": ["preparing", "pending", "processing"]}},
+                {"$set": {"status": "reporting", "reporting_at": now()}},
+            )
+            if not finalized.modified_count:
+                # Another worker is already publishing this job report.
                 await asyncio.sleep(0.1)
                 continue
             counts = {}
@@ -223,7 +234,7 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
                     await bot.send_message(job["report_chat_id"], report)
             except TelegramAPIError:
                 log.exception("Could not send broadcast report for job %s", job_id)
-            # Completion report has been sent; all queue/history data is disposable.
+            # Keep counts based on the durable per-recipient outcomes until the report is built.
             await db.broadcast_drafts.delete_one({"_id": job["draft_id"]})
             await db.broadcast_recipients.delete_many({"job_id": job_id})
             await db.broadcast_jobs.delete_one({"_id": job_id})
