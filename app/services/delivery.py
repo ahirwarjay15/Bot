@@ -132,9 +132,9 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
 
 async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: str, request_key: str | None = None):
     """Deliver directly; persist only message IDs and expiry metadata when Auto Delete is on."""
+    items = list(batch.get("items", []))
     ids = batch.get("id")
-    items = []
-    if isinstance(ids, list) and len(ids) > 1:
+    if not items and isinstance(ids, list) and len(ids) > 1:
         channel_id = batch.get("source_chat_id") or batch.get("_source_chat_id")
         saved_buttons = batch.get("buttons") or {}
         for index, mid in enumerate(ids, 1):
