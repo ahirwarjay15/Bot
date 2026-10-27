@@ -202,7 +202,8 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
     )
     asyncio.create_task(_expire_batch_session(state, session_token))
     prompt = await message.answer(
-        "<i>Forward The Batch First Message From Your Database Channel <b>(With Forward Tag)</b>.. or Give Me Batch First Message <b>link</b> from your Database channel</i>"
+        "<i>Forward The Batch First Message From Your Database Channel <b>(With Forward Tag)</b>.. or Give Me Batch First Message <b>link</b> from your Database channel</i>",
+        parse_mode="HTML"
     )
     await state.update_data(prompt_message_id=prompt.message_id)
 
@@ -252,7 +253,8 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
     await state.update_data(first_message_id=first_id)
     await state.set_state(BatchState.waiting_last)
     prompt = await message.answer(
-        "<i>Forward The Batch Last Message From Your Database Channel <b>(With Forward Tag)</b>.. or Give Me Batch Last Message <b>link</b> from your Database channel</i>"
+        "<i>Forward The Batch Last Message From Your Database Channel <b>(With Forward Tag)</b>.. or Give Me Batch Last Message <b>link</b> from your Database channel</i>",
+        parse_mode="HTML"
     )
     await state.update_data(prompt_message_id=prompt.message_id)
 
