@@ -131,18 +131,23 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
         await message.answer("Storage channel check failed. Verify SOURCE_CHANNEL_ID and bot admin access.")
         return
 
-    # A fresh /file starts a new session and removes any previous collection panel.
-    await _clear_collection_ui(message.bot, state, message.chat.id)
-    await state.set_state(FileStates.waiting_for_message)
+    # Show the new prompt first so the chat never goes blank during navigation.
+    old_data = await state.get_data()
     prompt = await message.answer(
         "<i>Send me the <b>message/file</b> you want to store.</i>",
         parse_mode="HTML",
     )
+    await state.clear()
+    await state.set_state(FileStates.waiting_for_message)
     await state.update_data(
         prompt_message_id=prompt.message_id,
         prompt_chat_id=prompt.chat.id,
         collected=[],
     )
+    await _delete(message.bot, old_data.get("prompt_chat_id", message.chat.id), old_data.get("prompt_message_id"))
+    old_panel_id = old_data.get("panel_message_id")
+    if old_panel_id != prompt.message_id:
+        await _delete(message.bot, old_data.get("panel_chat_id", message.chat.id), old_panel_id)
 
 
 @router.message(Command("cancel"))
@@ -258,10 +263,13 @@ async def generate_file_link(
             callback.bot, data.get("prompt_chat_id", callback.message.chat.id),
             data.get("prompt_message_id"),
         )
-        await _delete(
-            callback.bot, data.get("panel_chat_id", callback.message.chat.id),
-            data.get("panel_message_id"),
-        )
+        # The progress message is edited into the final link; never delete it
+        # as though it were the old collection panel.
+        if data.get("panel_message_id") != progress_message.message_id:
+            await _delete(
+                callback.bot, data.get("panel_chat_id", callback.message.chat.id),
+                data.get("panel_message_id"),
+            )
         await state.clear()
     except Exception:
         log.exception("Collection link generation failed")
@@ -337,16 +345,15 @@ async def _receive_collected(message: Message, state: FSMContext, settings: Sett
             }
         collected.append(item)
         await state.update_data(collected=collected)
-        # Remove the now-obsolete first prompt, but leave file messages intact
-        # until successful link generation or cancellation.
-        await _delete(
-            message.bot, data.get("prompt_chat_id", message.chat.id),
-            data.get("prompt_message_id"),
-        )
+        # Replace the UI first; only then remove the obsolete prompt.
         if data.get("panel_message_id"):
             await _show_panel(message, state, edit=True)
         else:
             await _show_panel(message, state)
+        await _delete(
+            message.bot, data.get("prompt_chat_id", message.chat.id),
+            data.get("prompt_message_id"),
+        )
     except TelegramAPIError:
         log.exception("Could not collect file")
         await message.answer("Couldn't add this file to the collection. Please try again.")
