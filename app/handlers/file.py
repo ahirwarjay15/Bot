@@ -103,6 +103,16 @@ async def cancel_file(message: Message, state: FSMContext):
     await _delete(message.bot, data.get("panel_chat_id", message.chat.id), data.get("panel_message_id", 0))
     await message.answer("File link creation cancelled.")
 
+@router.message(FileStates.waiting_for_message, Command())
+@router.message(FileStates.collecting, Command())
+async def command_during_file_creation(message: Message):
+    """Never leave commands sent during file collection without a response."""
+    command = (message.text or "").split(maxsplit=1)[0].split("@", 1)[0]
+    await message.answer(
+        f"File generation is in progress, so {command} wasn't run.\n"
+        "Send the file(s) and tap GENERATE LINK, or use /cancel to stop."
+    )
+
 @router.callback_query(F.data == "file:limit")
 async def file_limit(callback: CallbackQuery):
     await callback.answer("LIMIT REACHED — maximum 20 files.", show_alert=True)
@@ -193,4 +203,7 @@ async def _receive_collected(message: Message, state: FSMContext, settings: Sett
             await _show_panel(message, state)
     except TelegramAPIError:
         log.exception("Could not collect file")
-        await message.answer("Couldn't store this file. Check storage channel permissions.")
+        await message.answer("Couldn't store this file. Check storage channel permissions, then try again.")
+    except Exception:
+        log.exception("Unexpected error while collecting file")
+        await message.answer("Something went wrong while processing this message. Your collection is still open; try again or use /cancel.")
