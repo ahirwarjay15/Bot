@@ -209,7 +209,7 @@ class Database:
                 {},
                 {"$unset": {
                     "first_name": "", "last_name": "", "username": "",
-                    "created_at": "", "last_seen": "", "blocked": "",
+                    "created_at": "", "last_seen": "",
                     "last_delivery_error": "", "last_delivery_error_at": "",
                 }},
             )
