@@ -226,11 +226,10 @@ async def generate_file_link(
 
         # Only remove submitted originals after storage, DB record, and link succeeded.
         for item in collected:
-            if not item.get("from_storage_channel"):
-                await _delete(
-                    callback.bot, item.get("original_chat_id"),
-                    item.get("original_message_id"),
-                )
+            await _delete(
+                callback.bot, item.get("original_chat_id"),
+                item.get("original_message_id"),
+            )
         await _delete(
             callback.bot, data.get("prompt_chat_id", callback.message.chat.id),
             data.get("prompt_message_id"),
@@ -291,6 +290,8 @@ async def _receive_collected(message: Message, state: FSMContext, settings: Sett
             item = {
                 "source_message_id": source_id,
                 "from_storage_channel": True,
+                "original_chat_id": int(message.chat.id),
+                "original_message_id": int(message.message_id),
                 "buttons": _url_keyboard(message),
             }
         else:
