@@ -78,16 +78,17 @@ async def del_mod(message: Message, settings: Settings, database):
     await message.answer("Moderator removed." if result.deleted_count else "That user is not a moderator.")
 
 async def build_stats_text(bot, db):
-    """Build the same stats content for /stats and Settings > Stats."""
-    total, banned, blocked = await asyncio.gather(
+    """Build the same stats content for /stats and Settings > Stats.
+
+    Telegram delivery failures are broadcast outcomes, not a user statistic.
+    """
+    total, banned = await asyncio.gather(
         db.users.count_documents({}),
         db.users.count_documents({"banned": True}),
-        db.users.count_documents({"blocked": True}),
     )
     return (
         f"⛦ Total Users: {total}\n"
-        f"⛦ Banned Users: {banned}\n"
-        f"⛦ Blocked Users: {blocked}"
+        f"⛦ Banned Users: {banned}"
     )
 
 
