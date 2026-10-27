@@ -5,7 +5,7 @@ Async Telegram file and batch-delivery bot built with Python 3.12, aiogram 3 and
 ## Features
 
 - Single-file and batch deeplinks with durable delivery progress.
-- Force Join membership checks, configurable start/about and invalid-post messages.
+- Force Sub membership checks, configurable start/about and invalid-post messages.
 - Auto Delete, After Delete, shortener integration, moderator controls and statistics.
 - Persistent expiry, delivery and broadcast queues with restart recovery.
 - Background-worker supervision and readiness-aware HTTP health checks.
