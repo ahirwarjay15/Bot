@@ -62,6 +62,22 @@ async def test_batch_ids_are_stored_as_compact_ordered_array():
 
 
 @pytest.mark.asyncio
+async def test_batch_accepts_current_handler_item_references_without_changing_batch_flow():
+    db = FakeDatabase()
+    repo = FileRepository(db)
+
+    saved = await repo.save_batch([
+        {"source_chat_id": -100123, "source_message_id": 3},
+        {"source_chat_id": -100123, "source_message_id": 4},
+        {"source_chat_id": -100123, "source_message_id": 5},
+    ])
+
+    assert saved["id"] == [3, 4, 5]
+    assert "source_chat_id" not in saved
+    assert "buttons" not in saved
+
+
+@pytest.mark.asyncio
 async def test_only_multi_id_array_is_a_batch_record():
     repo = FileRepository(FakeDatabase())
 
