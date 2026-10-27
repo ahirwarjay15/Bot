@@ -293,9 +293,9 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     batch = None
     link_send_attempted = False
     progress_text = (
-        "<i>Generating Link Wait a sec...</i>\\n\\n"
-        f"➛ Total Messages: {count}\\n"
-        "➛ Completed: 0\\n"
+        "Generating link, please wait...\n\n"
+        f"➛ Total Messages: {count}\n"
+        "➛ Completed: 0\n"
         f"➛ Remaining: {count}"
     )
     try:
@@ -306,11 +306,11 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
                 chat_id=message.chat.id,
                 message_id=int(prompt_id),
                 text=progress_text,
-                parse_mode="HTML",
+                parse_mode=None,
                 reply_markup=None,
             )
         else:
-            progress = await message.answer(progress_text, parse_mode="HTML")
+            progress = await message.answer(progress_text, parse_mode=None)
             prompt_id = progress.message_id
             await state.update_data(prompt_message_id=prompt_id)
 
@@ -324,12 +324,12 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
                 chat_id=message.chat.id,
                 message_id=int(prompt_id),
                 text=(
-                    "<i>Generating Link Wait a sec...</i>\\n\\n"
-                    f"➛ Total Messages: {count}\\n"
-                    f"➛ Completed: {count}\\n"
+                    "Generating link, please wait...\n\n"
+                    f"➛ Total Messages: {count}\n"
+                    f"➛ Completed: {count}\n"
                     "➛ Remaining: 0"
                 ),
-                parse_mode="HTML",
+                parse_mode=None,
                 reply_markup=None,
             )
         # Remove the submitted last reference, then turn the progress message into the link.
