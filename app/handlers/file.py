@@ -182,7 +182,7 @@ async def cancel_file(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "file:limit")
 async def file_limit(callback: CallbackQuery):
-    await callback.answer(ff"LIMIT REACHED — maximum {MAX_FILES} files.", show_alert=True)
+    await callback.answer(f"LIMIT REACHED — maximum {MAX_FILES} files.", show_alert=True)
 
 
 @router.callback_query(F.data == "file:back")
@@ -336,7 +336,7 @@ async def _receive_collected(message: Message, state: FSMContext, settings: Sett
     data = await state.get_data()
     collected = list(data.get("collected", []))
     if len(collected) >= MAX_FILES:
-        await message.answer(ff"LIMIT REACHED — maximum {MAX_FILES} files. Tap GENERATE LINK.")
+        await message.answer(f"LIMIT REACHED — maximum {MAX_FILES} files. Tap GENERATE LINK.")
         return
 
     try:
