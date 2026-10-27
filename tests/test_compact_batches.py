@@ -21,7 +21,33 @@ class FakeDatabase:
 
 
 @pytest.mark.asyncio
-async def test_new_batch_ids_are_stored_as_compact_ordered_array():
+async def test_single_file_uses_one_id_array_and_omits_empty_fields():
+    db = FakeDatabase()
+    repo = FileRepository(db)
+
+    saved = await repo.save_file(source_message_id=381)
+
+    assert saved == {"key": saved["key"], "id": [381]}
+    assert db.files.documents[0]["id"] == [381]
+    assert "buttons" not in saved
+    assert "reply_markup" not in saved
+
+
+@pytest.mark.asyncio
+async def test_single_file_preserves_button_rows_without_extra_fields():
+    db = FakeDatabase()
+    repo = FileRepository(db)
+    buttons = [[{"text": "Open", "url": "https://example.org", "style": "primary"}]]
+
+    saved = await repo.save_file(source_message_id=381, buttons=buttons)
+
+    assert saved["id"] == [381]
+    assert saved["buttons"] == buttons
+    assert "reply_markup" not in saved
+
+
+@pytest.mark.asyncio
+async def test_batch_ids_are_stored_as_compact_ordered_array():
     db = FakeDatabase()
     repo = FileRepository(db)
 
@@ -31,18 +57,25 @@ async def test_new_batch_ids_are_stored_as_compact_ordered_array():
     )
 
     assert saved["id"] == [381, 379, 382]
-    assert list(saved["id"]) == [381, 379, 382]
     assert saved["buttons"]["01"] == [[{"text": "Open", "url": "https://example.org"}]]
     assert db.files.documents[0]["id"] == [381, 379, 382]
 
 
 @pytest.mark.asyncio
-async def test_compact_batch_is_recognized_as_batch_record():
+async def test_only_multi_id_array_is_a_batch_record():
     repo = FileRepository(FakeDatabase())
 
     assert await repo.is_batch_record({"key": "abc1234", "id": [11, 12]}) is True
-    assert await repo.is_batch_record({"key": "abc1234", "id": {"01": 11, "02": 12}}) is True
+    assert await repo.is_batch_record({"key": "abc1234", "id": [11]}) is False
     assert await repo.is_batch_record({"key": "abc1234", "id": 11}) is False
+
+
+@pytest.mark.asyncio
+async def test_batch_requires_at_least_two_ids():
+    repo = FileRepository(FakeDatabase())
+
+    with pytest.raises(ValueError, match="at least 2"):
+        await repo.save_batch([381])
 
 
 def test_file_collection_limit_is_50():
