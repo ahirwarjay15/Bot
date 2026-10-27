@@ -194,7 +194,7 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
     old_data = await state.get_data()
     prompt = await message.answer(
         "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\n\n"
-        "<i>Forward the batch first message from your database channel (with forward tag), or send its message link.</i>",
+        "<i>Forward the batch first message from your database channel <b><i>(with forward tag)</i></b>, or send its message link.</i>",
         parse_mode="HTML"
     )
     await state.clear()
@@ -235,7 +235,7 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
         raise SkipHandler
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
-        await message.answer("Please forward the first Database Channel post with its forward tag, or send its message link.")
+        await message.answer(\n            "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\\n\\n"\n            "<i>Please forward the first Database Channel post with its forward tag, or send its message link.</i>",\n            parse_mode="HTML",\n        )
         return
     first_id, first_caption = parsed
     # Avoid forwarding posts into the admin DM just to inspect captions/entities.
@@ -251,7 +251,7 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
     await state.set_state(BatchState.waiting_last)
     prompt = await message.answer(
         "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\n\n"
-        "<i>Forward the batch last message from your database channel (with forward tag), or send its message link.</i>",
+        "<i>Forward the batch last message from your database channel <b><i>(with forward tag)</i></b>, or send its message link.</i>",
         parse_mode="HTML"
     )
     await state.update_data(prompt_message_id=prompt.message_id)
@@ -277,7 +277,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         raise SkipHandler
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
-        await message.answer("Please forward the last Database Channel post with its forward tag, or send its message link.")
+        await message.answer(\n            "<b><u>Sᴛᴏʀᴇ Bᴀᴛᴄʜ</u></b>\\n\\n"\n            "<i>Please forward the last Database Channel post with its forward tag, or send its message link.</i>",\n            parse_mode="HTML",\n        )
         return
     last_id, last_caption = parsed
     # Do not temporarily forward the last post into the admin DM.
