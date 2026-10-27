@@ -1819,13 +1819,17 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             return
         frames.append(formatted_input_text(message, value))
         await state.update_data(field="animation_frames_collect", pending_frames=frames)
-        # Keep only the latest frame-status prompt visible while collecting frames.
-        latest_prompt = data.get("animation_status_prompt_id")
-        if latest_prompt:
-            try:
-                await message.bot.delete_message(chat_id=message.chat.id, message_id=latest_prompt)
-            except TelegramAPIError:
-                pass
+        # Remove the initial instruction and previous frame-status prompts so only
+        # one current instruction remains visible during frame collection.
+        for prompt_item in data.get("temporary_prompt_ids", []):
+            if prompt_item.get("chat_id") == message.chat.id and prompt_item.get("message_id"):
+                try:
+                    await message.bot.delete_message(
+                        chat_id=prompt_item["chat_id"],
+                        message_id=prompt_item["message_id"],
+                    )
+                except TelegramAPIError:
+                    pass
         status_prompt = await tracked_answer(
             message, state,
             f"Frame {len(frames)} received. Send another frame (up to 6), or /done to save. Minimum: 1 frame."
