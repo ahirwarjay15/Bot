@@ -134,7 +134,8 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
     await _clear_collection_ui(message.bot, state, message.chat.id)
     await state.set_state(FileStates.waiting_for_message)
     prompt = await message.answer(
-        "Send the first file. Then you can add up to 20 files before generating the link."
+        "<b><i>Send me the messages/file you want to store.</i></b>",
+        parse_mode="HTML",
     )
     await state.update_data(
         prompt_message_id=prompt.message_id,
