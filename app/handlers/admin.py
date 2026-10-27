@@ -93,16 +93,13 @@ async def build_stats_text(bot, db):
 async def stats(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
-    await message.answer("Stats", reply_markup=InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="OK", callback_data="stats:ok")]]
-    ))
-    # Keep the command response as a popup notification, matching Settings > Stats.
-    await message.bot.delete_message(message.chat.id, message.message_id)
-    await message.bot.send_message(
-        message.chat.id, "Tap OK to view stats.",
+    # Telegram alert popups can only be opened from a callback button.
+    # Keep this command response minimal; the button shows the stats in an alert.
+    await message.answer(
+        "📊 View bot statistics",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📊 STATS", callback_data="stats:show")]
-        ])
+            [InlineKeyboardButton(text="STATS", callback_data="stats:show")]
+        ]),
     )
 
 
