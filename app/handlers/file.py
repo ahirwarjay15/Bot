@@ -1,4 +1,5 @@
 """Collect up to 20 files, then create one compact deeplink."""
+import asyncio
 import logging
 
 from aiogram import Router, F
@@ -189,22 +190,48 @@ async def generate_file_link(
     try:
         # Copy normal incoming messages only now, after GENERATE LINK is pressed.
         # Forwarded posts originating in the storage channel already have valid IDs.
-        final_items = []
-        for item in collected:
+        async def prepare_item(item, semaphore):
             if item.get("from_storage_channel"):
-                source_id = int(item["source_message_id"])
-            else:
+                return {
+                    "source_message_id": int(item["source_message_id"]),
+                    "buttons": item.get("buttons"),
+                }
+            async with semaphore:
                 copied = await callback.bot.copy_message(
                     chat_id=settings.source_channel_id,
                     from_chat_id=int(item["original_chat_id"]),
                     message_id=int(item["original_message_id"]),
                 )
-                source_id = int(copied.message_id)
-                copied_ids.append(source_id)
-            final_items.append({
-                "source_message_id": source_id,
+            return {
+                "source_message_id": int(copied.message_id),
                 "buttons": item.get("buttons"),
-            })
+            }
+
+        # Copy a few files concurrently instead of waiting for each Telegram API
+        # round-trip one by one. Collect all outcomes so successful copies can be
+        # cleaned up if any item fails.
+        semaphore = asyncio.Semaphore(4)
+        outcomes = await asyncio.gather(
+            *(prepare_item(item, semaphore) for item in collected),
+            return_exceptions=True,
+        )
+        final_items = []
+        first_error = None
+        for outcome in outcomes:
+            if isinstance(outcome, Exception):
+                if first_error is None:
+                    first_error = outcome
+                continue
+            final_items.append(outcome)
+            if not any(item.get("from_storage_channel") for item in collected):
+                pass
+        copied_ids.extend(
+            int(outcome["source_message_id"])
+            for item, outcome in zip(collected, outcomes)
+            if not item.get("from_storage_channel") and not isinstance(outcome, Exception)
+        )
+        if first_error is not None:
+            raise first_error
 
         ids = [int(item["source_message_id"]) for item in final_items]
         buttons = {
