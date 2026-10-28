@@ -109,24 +109,27 @@ def _notice(cfg, minutes):
 
 
 def _compact_buttons_markup(buttons):
-    """Convert compact entries [row, column, text, URL, color] to Telegram keyboard JSON."""
+    """Build a keyboard from flat button rows: message_id|row|column|text|URL|color."""
     if not isinstance(buttons, list) or not buttons:
         return None
     rows = {}
     for entry in buttons:
-        if not isinstance(entry, (list, tuple)) or len(entry) < 4:
+        if not isinstance(entry, str):
             continue
+        parts = entry.split("|", 5)
+        if len(parts) != 6:
+            continue
+        _, row_raw, col_raw, text, url, color = parts
         try:
-            row_index, column_index = int(entry[0]), int(entry[1])
+            row_index, column_index = int(row_raw), int(col_raw)
         except (TypeError, ValueError):
             continue
-        if row_index < 1 or column_index < 0 or not entry[2] or not entry[3]:
+        if row_index < 1 or column_index < 0 or not text or not url:
             continue
-        button = {"text": str(entry[2]), "url": str(entry[3])}
-        if len(entry) > 4:
-            style = {"D": "danger", "S": "success", "P": "primary"}.get(str(entry[4]).upper())
-            if style:
-                button["style"] = style
+        button = {"text": text, "url": url}
+        style = {"D": "danger", "S": "success", "P": "primary"}.get(color.upper())
+        if style:
+            button["style"] = style
         rows.setdefault(row_index, []).append((column_index, button))
     keyboard = [
         [button for _, button in sorted(rows[row_index], key=lambda pair: pair[0])]
@@ -135,24 +138,37 @@ def _compact_buttons_markup(buttons):
     return {"inline_keyboard": keyboard} if keyboard else None
 
 
+def _stored_message_ids(raw_ids):
+    """Read comma-separated message IDs."""
+    if isinstance(raw_ids, str):
+        return [int(part) for part in raw_ids.split(",") if part.strip().isdigit()]
+    if isinstance(raw_ids, list):
+        return [int(part) for part in raw_ids]
+    if isinstance(raw_ids, dict):
+        return [int(value) for value in raw_ids.values()]
+    if raw_ids is None:
+        return []
+    return [int(raw_ids)]
+
+
 async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: dict, deeplink: str, request_key: str | None = None):
     """Use compact records while resolving the fixed source channel at runtime."""
     source_chat_id = file_doc.get("chat") or file_doc.get("source_chat_id") or getattr(settings, "source_channel_id", None)
     if not source_chat_id:
         log.error("Source channel is missing for compact file record")
         return (0, 1)
-    message_id = (file_doc.get("id")[0] if isinstance(file_doc.get("id"), list) and file_doc.get("id") else file_doc.get("id", file_doc.get("source_message_id")))
+    stored_ids = _stored_message_ids(file_doc.get("id", file_doc.get("source_message_id")))
+    message_id = stored_ids[0] if stored_ids else file_doc.get("source_message_id")
     item = {"source_chat_id": source_chat_id, "source_message_id": message_id}
     markup_data = file_doc.get("reply_markup")
     button_data = file_doc.get("buttons")
-    if isinstance(button_data, dict):
-        # Prefer this message's compact URL buttons when present, but do not
-        # erase a valid legacy reply_markup if the compact map has no entry.
-        saved_markup = _compact_buttons_markup(button_data.get(str(message_id)))
+    if isinstance(button_data, list):
+        saved_markup = _compact_buttons_markup([
+            entry for entry in button_data
+            if isinstance(entry, str) and entry.split("|", 1)[0] == str(message_id)
+        ])
         if saved_markup:
             markup_data = saved_markup
-    elif button_data:
-        markup_data = {"inline_keyboard": button_data}
     if markup_data:
         item["reply_markup"] = markup_data
     return await deliver_batch(
@@ -167,16 +183,18 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         isinstance(batch.get("source_message_id"), list)
         or isinstance(batch.get("id"), dict)
         or (isinstance(batch.get("id"), list) and len(batch.get("id")) > 1)
+        or (isinstance(batch.get("id"), str) and "," in batch.get("id"))
     ):
         channel_id = batch.get("chat") or batch.get("source_chat_id") or batch.get("_source_chat_id")
-        raw_ids = batch.get("id") if isinstance(batch.get("id"), list) else (
-            list(batch["id"].values()) if isinstance(batch.get("id"), dict) else batch["source_message_id"]
-        )
-        compact_buttons = batch.get("buttons") if isinstance(batch.get("buttons"), dict) else {}
+        raw_ids = _stored_message_ids(batch.get("id", batch.get("source_message_id")))
+        compact_buttons = batch.get("buttons") if isinstance(batch.get("buttons"), list) else []
         items = []
         for mid in raw_ids:
             item = {"source_chat_id": channel_id, "source_message_id": int(mid)}
-            markup_data = _compact_buttons_markup(compact_buttons.get(str(mid)))
+            markup_data = _compact_buttons_markup([
+                entry for entry in compact_buttons
+                if isinstance(entry, str) and entry.split("|", 1)[0] == str(mid)
+            ])
             if markup_data:
                 item["reply_markup"] = markup_data
             items.append(item)
