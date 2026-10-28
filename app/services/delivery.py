@@ -109,22 +109,22 @@ def _notice(cfg, minutes):
 
 
 def _compact_buttons_markup(buttons):
-    """Convert per-message compact button tuples into Telegram inline-keyboard JSON."""
-    if not isinstance(buttons, dict) or not buttons:
+    """Convert compact entries [row, column, text, URL, color] to Telegram keyboard JSON."""
+    if not isinstance(buttons, list) or not buttons:
         return None
     rows = {}
-    for key, values in buttons.items():
-        if not isinstance(values, (list, tuple)) or len(values) < 2:
+    for entry in buttons:
+        if not isinstance(entry, (list, tuple)) or len(entry) < 4:
             continue
         try:
-            parts = str(key).split(".")
-            row_index = int(parts[0])
-            column_index = int(parts[1]) if len(parts) > 1 else 0
+            row_index, column_index = int(entry[0]), int(entry[1])
         except (TypeError, ValueError):
             continue
-        button = {"text": str(values[0]), "url": str(values[1])}
-        if len(values) > 2:
-            style = {"D": "danger", "S": "success", "P": "primary"}.get(str(values[2]).upper())
+        if row_index < 1 or column_index < 0 or not entry[2] or not entry[3]:
+            continue
+        button = {"text": str(entry[2]), "url": str(entry[3])}
+        if len(entry) > 4:
+            style = {"D": "danger", "S": "success", "P": "primary"}.get(str(entry[4]).upper())
             if style:
                 button["style"] = style
         rows.setdefault(row_index, []).append((column_index, button))
