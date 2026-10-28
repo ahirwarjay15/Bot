@@ -39,18 +39,27 @@ def _panel_keyboard(count):
 
 
 def _url_keyboard(message):
+    """Encode URL buttons using compact row/column keys (1, 1.1, 1.2, 2...)."""
     markup = getattr(message, "reply_markup", None)
     if not markup:
         return None
-    rows = []
-    for row in markup.inline_keyboard:
-        saved = []
+    saved = {}
+    for row_index, row in enumerate(markup.inline_keyboard, start=1):
+        column_index = 0
         for button in row:
-            if button.url and button.text:
-                saved.append(button.model_dump(mode="json", exclude_none=True))
-        if saved:
-            rows.append(saved)
-    return rows or None
+            if not button.url or not button.text:
+                continue
+            key = str(row_index) if column_index == 0 else f"{row_index}.{column_index}"
+            values = [button.text, button.url]
+            style = getattr(button, "style", None)
+            style_code = {"danger": "D", "success": "S", "primary": "P"}.get(
+                str(style).lower() if style is not None else ""
+            )
+            if style_code:
+                values.append(style_code)
+            saved[key] = values
+            column_index += 1
+    return saved or None
 
 
 def _link_keyboard(link):
@@ -258,16 +267,15 @@ async def generate_file_link(
 
         ids = [int(item["source_message_id"]) for item in final_items]
         buttons = {
-            f"{i + 1:02d}": item["buttons"]
-            for i, item in enumerate(final_items) if item.get("buttons")
+            str(item["source_message_id"]): item["buttons"]
+            for item in final_items if item.get("buttons")
         }
         if len(ids) == 1:
             record = await repo.save_file(
-                source_message_id=ids[0], buttons=buttons.get("01")
+                source_message_id=ids[0], buttons=buttons.get(str(ids[0]))
             )
         else:
-            # Batch documents intentionally never persist source button data.
-            record = await repo.save_batch(ids)
+            record = await repo.save_batch(ids, buttons=buttons)
 
         me = await callback.bot.get_me()
         token = build_deeplink_token(record.get("key", record.get("file_key")))
