@@ -266,12 +266,14 @@ async def generate_file_link(
             str(item["source_message_id"]): item["buttons"]
             for item in final_items if item.get("buttons")
         }
-        if len(ids) == 1:
-            record = await repo.save_file(
-                source_message_id=ids[0], buttons=buttons.get(str(ids[0]))
-            )
-        else:
-            record = await repo.save_batch(ids, buttons=buttons)
+        # Use one canonical per-message compact button format for both
+        # single-file and multiple-files records. Each button entry is
+        # [row, column, text, URL, color].
+        record = await repo.save_batch(
+            ids, buttons=buttons if buttons else None
+        ) if len(ids) > 1 else await repo.save_file(
+            source_message_id=ids[0], buttons=buttons.get(str(ids[0]))
+        )
 
         me = await callback.bot.get_me()
         token = build_deeplink_token(record.get("key", record.get("file_key")))
