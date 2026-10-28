@@ -42,14 +42,16 @@ class FileRepository:
 
     async def save_file(self, *, source_chat_id: int | None = None,
                         source_message_id: int, reply_markup: dict | None = None,
-                        buttons: list | None = None) -> dict:
+                        buttons: dict | list | None = None) -> dict:
         # source_chat_id is accepted for backwards compatibility but isn't stored.
         for attempt in range(8):
             key = await self.reserve_code(7)
             doc = {"key": key, "id": [int(source_message_id)]}
-            compact = buttons if buttons else None
-            if compact:
-                doc["buttons"] = compact
+            if buttons:
+                doc["buttons"] = (
+                    {str(int(source_message_id)): buttons}
+                    if isinstance(buttons, list) else buttons
+                )
             elif reply_markup:
                 doc["reply_markup"] = reply_markup
             try:
@@ -75,9 +77,9 @@ class FileRepository:
         ))
 
     async def save_batch(self, items: list, batch_id: str | None = None,
-                         chat_id: int | None = None) -> dict:
-        # Batch records deliberately store only ordered message IDs and, for
-        # non-database channels, the numeric source chat ID. Buttons are never saved.
+                         chat_id: int | None = None,
+                         buttons: dict | None = None) -> dict:
+        # Store per-message compact button maps only when supplied.
         ids = [
             int(item.get("source_message_id")) if isinstance(item, dict) else int(item)
             for item in items
@@ -88,8 +90,18 @@ class FileRepository:
         doc = {"key": key, "id": ids}
         if chat_id is not None:
             doc["chat"] = int(chat_id)
+        if buttons:
+            compact_buttons = {
+                str(mid): buttons[str(mid)]
+                for mid in ids if str(mid) in buttons and buttons[str(mid)]
+            }
+            if compact_buttons:
+                doc["buttons"] = compact_buttons
         if batch_id:
-            update = {"$set": doc, "$unset": {"buttons": ""}}
+            unset_fields = {}
+            if not doc.get("buttons"):
+                unset_fields["buttons"] = ""
+            update = {"$set": doc, "$unset": unset_fields}
             if chat_id is None:
                 update["$unset"]["chat"] = ""
             await self.db.files.update_one({"key": batch_id}, update, upsert=True)
