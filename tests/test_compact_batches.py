@@ -46,6 +46,33 @@ async def test_single_file_stores_id_as_array_and_omits_empty_fields():
 
 
 @pytest.mark.asyncio
+async def test_single_file_stores_compact_buttons_by_source_message_id():
+    db = FakeDatabase()
+    buttons = {
+        "1": ["Join Channel", "https://t.me/example"],
+        "1.1": ["Join Channel", "https://t.me/example", "D"],
+        "1.2": ["Join Channel", "https://t.me/example", "S"],
+        "1.3": ["Join Channel", "https://t.me/example", "P"],
+        "2": ["Join Channel", "https://t.me/example"],
+    }
+    saved = await FileRepository(db).save_file(source_message_id=678, buttons=buttons)
+
+    assert saved == {"key": saved["key"], "id": [678], "buttons": {"678": buttons}}
+
+
+@pytest.mark.asyncio
+async def test_batch_stores_compact_buttons_per_source_message_id():
+    db = FakeDatabase()
+    buttons = {
+        "678": {"1": ["Join Channel", "https://t.me/example"]},
+        "532": {"1": ["Join Channel", "https://t.me/example", "P"]},
+    }
+    saved = await FileRepository(db).save_batch([678, 532], buttons=buttons)
+
+    assert saved == {"key": saved["key"], "id": [678, 532], "buttons": buttons}
+
+
+@pytest.mark.asyncio
 async def test_batch_stores_ordered_ids_without_buttons_or_chat_by_default():
     db = FakeDatabase()
     saved = await FileRepository(db).save_batch([381, 379, 382])
