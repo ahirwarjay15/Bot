@@ -39,25 +39,21 @@ def _panel_keyboard(count):
 
 
 def _url_keyboard(message):
-    """Encode URL buttons using compact row/column keys (1, 1.1, 1.2, 2...)."""
+    """Store each URL button as one compact entry: [row, column, text, URL, color]."""
     markup = getattr(message, "reply_markup", None)
     if not markup:
         return None
-    saved = {}
+    saved = []
     for row_index, row in enumerate(markup.inline_keyboard, start=1):
         column_index = 0
         for button in row:
             if not button.url or not button.text:
                 continue
-            key = str(row_index) if column_index == 0 else f"{row_index}.{column_index}"
-            values = [button.text, button.url]
             style = getattr(button, "style", None)
             style_code = {"danger": "D", "success": "S", "primary": "P"}.get(
                 str(style).lower() if style is not None else ""
-            )
-            if style_code:
-                values.append(style_code)
-            saved[key] = values
+            ) or ""
+            saved.append([row_index, column_index, button.text, button.url, style_code])
             column_index += 1
     return saved or None
 
