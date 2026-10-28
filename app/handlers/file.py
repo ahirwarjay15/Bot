@@ -162,10 +162,7 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
         collected=[],
     )
     await _delete(message.bot, old_data.get("prompt_chat_id", message.chat.id), old_data.get("prompt_message_id"))
-    # Never delete a prior panel ID here: it may already have been edited
-    # into a generated file link. Only delete the prior prompt, which is
-    # explicitly tracked as a temporary collection prompt.
-    # Final /file links are durable messages and must remain in chat.
+    await _delete(message.bot, old_data.get("panel_chat_id", message.chat.id), old_data.get("panel_message_id"))
     try:
         await message.delete()
     except TelegramAPIError:
@@ -288,6 +285,10 @@ async def generate_file_link(
         link = f"https://t.me/{me.username}?start={token}"
         await progress_message.edit_text(link, reply_markup=_link_keyboard(link), parse_mode=None)
 
+        # The panel has become a permanent link. Drop FSM tracking immediately
+        # so future cleanup handlers cannot target this message.
+        await state.clear()
+
         # Only remove submitted originals after storage, DB record, and link succeeded.
         for item in collected:
             await _delete(
@@ -298,14 +299,12 @@ async def generate_file_link(
             callback.bot, data.get("prompt_chat_id", callback.message.chat.id),
             data.get("prompt_message_id"),
         )
-        # The progress message is edited into the final link; never delete it
-        # as though it were the old collection panel.
+        # The progress message is the permanent link; only clean up a distinct old panel.
         if data.get("panel_message_id") != progress_message.message_id:
             await _delete(
                 callback.bot, data.get("panel_chat_id", callback.message.chat.id),
                 data.get("panel_message_id"),
             )
-        await state.clear()
     except Exception:
         log.exception("Collection link generation failed")
         # Compensate for partial failure so abandoned attempts don't pollute storage.
