@@ -213,18 +213,13 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
     # Remove any previous batch/file prompt or collection panel only after the
     # new batch prompt is visible, so the chat never appears blank.
     old_prompt_id = old_data.get("prompt_message_id")
-    old_panel_id = old_data.get("panel_message_id")
-    old_panel_chat_id = old_data.get("panel_chat_id", message.chat.id)
+    # Clean up only the previous temporary prompt. Do not delete panel_message_id:
+    # a generated /file link may have replaced that panel and must remain visible.
     if old_prompt_id and int(old_prompt_id) != prompt.message_id:
         try:
             await message.bot.delete_message(message.chat.id, int(old_prompt_id))
         except TelegramAPIError:
             log.debug("Could not delete previous batch prompt", exc_info=True)
-    if old_panel_id and int(old_panel_id) != prompt.message_id:
-        try:
-            await message.bot.delete_message(old_panel_chat_id, int(old_panel_id))
-        except TelegramAPIError:
-            log.debug("Could not delete previous collection panel", exc_info=True)
     try:
         await message.delete()
     except TelegramAPIError:
