@@ -113,6 +113,7 @@ def _compact_buttons_markup(buttons):
     if not isinstance(buttons, list) or not buttons:
         return None
     rows = {}
+    seen_buttons = set()
     for entry in buttons:
         if not isinstance(entry, str):
             continue
@@ -126,6 +127,10 @@ def _compact_buttons_markup(buttons):
             continue
         if row_index < 1 or column_index < 0 or not text or not url:
             continue
+        identity = (row_index, column_index, text, url, color.upper())
+        if identity in seen_buttons:
+            continue
+        seen_buttons.add(identity)
         button = {"text": text, "url": url}
         style = {"D": "danger", "S": "success", "P": "primary"}.get(color.upper())
         if style:
@@ -139,18 +144,16 @@ def _compact_buttons_markup(buttons):
 
 
 def _stored_message_ids(raw_ids):
-    """Read IDs and deduplicate repeated references while preserving order."""
+    """Read stored IDs preserving repeated selections and their original order."""
     if isinstance(raw_ids, str):
-        values = [int(part.strip()) for part in raw_ids.split(",") if part.strip().isdigit()]
-    elif isinstance(raw_ids, list):
-        values = [int(part) for part in raw_ids]
-    elif isinstance(raw_ids, dict):
-        values = [int(value) for value in raw_ids.values()]
-    elif raw_ids is None:
-        values = []
-    else:
-        values = [int(raw_ids)]
-    return list(dict.fromkeys(values))
+        return [int(part.strip()) for part in raw_ids.split(",") if part.strip().isdigit()]
+    if isinstance(raw_ids, list):
+        return [int(part) for part in raw_ids]
+    if isinstance(raw_ids, dict):
+        return [int(value) for value in raw_ids.values()]
+    if raw_ids is None:
+        return []
+    return [int(raw_ids)]
 
 
 async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: dict, deeplink: str, request_key: str | None = None):
