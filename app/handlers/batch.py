@@ -194,7 +194,7 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
         return
     # Show the new prompt first so /batch feels immediate; clean up old UI afterward.
     prompt = await message.answer(
-        "<i>Forward the batch first message from the Database Channel or another channel where the bot is a member (with forward tag), or send its message link.</i>",
+        "<i>Forward the batch first message from the Database Channel or another channel where the bot is an Admin <b><i>(with forward tag)..</i></b> or send its message link.</i>",
         parse_mode="HTML"
     )
     old_data = await state.get_data()
@@ -257,7 +257,7 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
         await message.answer(
-            "<i>Please forward the first post from the Database Channel or another channel where the bot is a member, or send its message link.</i>",
+            "<i>Forward the batch first message from the Database Channel or another channel where the bot is an Admin <b><i>(with forward tag)..</i></b> or send its message link.</i>",
             parse_mode="HTML",
         )
         return
@@ -266,7 +266,7 @@ async def receive_first(message: Message, state: FSMContext, settings: Settings)
     await state.update_data(first_source_chat_id=int(first_source_chat_id), first_message_id=int(first_id))
     await state.set_state(BatchState.waiting_last)
     prompt = await message.answer(
-        "<i>Forward the batch last message from the same source channel (with forward tag), or send its message link.</i>",
+        "<i>Forward the batch last message from the Database Channel or another channel where the bot is an Admin <b><i>(with forward tag)..</i></b> or send its message link.</i>",
         parse_mode="HTML"
     )
     await state.update_data(prompt_message_id=prompt.message_id)
@@ -293,7 +293,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
     parsed = await _parse_message_reference(message, message.bot, settings.source_channel_id)
     if not parsed:
         await message.answer(
-            "<i>Please forward the last post from the same source channel, or send its message link.</i>",
+            "<i>Forward the batch last message from the Database Channel or another channel where the bot is an Admin <b><i>(with forward tag)..</i></b> or send its message link.</i>",
             parse_mode="HTML",
         )
         return
