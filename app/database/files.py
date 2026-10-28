@@ -87,6 +87,7 @@ class FileRepository:
             for item in items
         ]
         # Preserve repeated selections and their order; each occurrence is delivered.
+        ids = raw_ids
         if len(ids) < 2:
             raise ValueError("A batch must contain at least 2 messages")
         key = batch_id or await self.reserve_code(7)
@@ -96,7 +97,7 @@ class FileRepository:
         if buttons:
             doc["buttons"] = [
                 "|".join([str(mid), *[str(part) for part in entry]])
-                for mid in ids
+                for mid in dict.fromkeys(ids)
                 for entry in buttons.get(str(mid), [])
                 if isinstance(entry, (list, tuple)) and len(entry) >= 4
             ] or None
