@@ -162,9 +162,10 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
         collected=[],
     )
     await _delete(message.bot, old_data.get("prompt_chat_id", message.chat.id), old_data.get("prompt_message_id"))
-    old_panel_id = old_data.get("panel_message_id")
-    if old_panel_id != prompt.message_id:
-        await _delete(message.bot, old_data.get("panel_chat_id", message.chat.id), old_panel_id)
+    # Never delete a prior panel ID here: it may already have been edited
+    # into a generated file link. Only delete the prior prompt, which is
+    # explicitly tracked as a temporary collection prompt.
+    # Final /file links are durable messages and must remain in chat.
     try:
         await message.delete()
     except TelegramAPIError:
