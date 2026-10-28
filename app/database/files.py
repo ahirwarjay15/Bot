@@ -116,6 +116,7 @@ class FileRepository:
         return await self.db.files.find_one({"key": batch_id, "$or": [
             {"id": {"$type": "object"}},
             {"id.1": {"$exists": True}},
+            {"id": {"$regex": ","}},
             {"source_message_id": {"$type": "array"}},
             {"items": {"$exists": True}},
         ]})
