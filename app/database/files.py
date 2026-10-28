@@ -46,12 +46,13 @@ class FileRepository:
         # source_chat_id is accepted for backwards compatibility but isn't stored.
         for attempt in range(8):
             key = await self.reserve_code(7)
-            doc = {"key": key, "id": [int(source_message_id)]}
+            doc = {"key": key, "id": str(int(source_message_id))}
             if buttons:
-                doc["buttons"] = (
-                    {str(int(source_message_id)): buttons}
-                    if isinstance(buttons, list) else (buttons if isinstance(buttons.get(str(int(source_message_id))), dict) else {str(int(source_message_id)): buttons})
-                )
+                doc["buttons"] = [
+                    "|".join([str(int(source_message_id)), *[str(part) for part in entry]])
+                    for entry in buttons
+                    if isinstance(entry, (list, tuple)) and len(entry) >= 4
+                ]
             elif reply_markup:
                 doc["reply_markup"] = reply_markup
             try:
@@ -74,6 +75,7 @@ class FileRepository:
             or isinstance(record.get("source_message_id"), list)
             or isinstance(ids, dict)
             or (isinstance(ids, list) and len(ids) > 1)
+            or (isinstance(ids, str) and "," in ids)
         ))
 
     async def save_batch(self, items: list, batch_id: str | None = None,
@@ -87,16 +89,18 @@ class FileRepository:
         if len(ids) < 2:
             raise ValueError("A batch must contain at least 2 messages")
         key = batch_id or await self.reserve_code(7)
-        doc = {"key": key, "id": ids}
+        doc = {"key": key, "id": ",".join(str(mid) for mid in ids)}
         if chat_id is not None:
             doc["chat"] = int(chat_id)
         if buttons:
-            compact_buttons = {
-                str(mid): buttons[str(mid)]
-                for mid in ids if str(mid) in buttons and buttons[str(mid)]
-            }
-            if compact_buttons:
-                doc["buttons"] = compact_buttons
+            doc["buttons"] = [
+                "|".join([str(mid), *[str(part) for part in entry]])
+                for mid in ids
+                for entry in buttons.get(str(mid), [])
+                if isinstance(entry, (list, tuple)) and len(entry) >= 4
+            ] or None
+            if doc.get("buttons") is None:
+                doc.pop("buttons", None)
         if batch_id:
             unset_fields = {}
             if not doc.get("buttons"):
