@@ -139,16 +139,18 @@ def _compact_buttons_markup(buttons):
 
 
 def _stored_message_ids(raw_ids):
-    """Read comma-separated message IDs."""
+    """Read IDs and deduplicate repeated references while preserving order."""
     if isinstance(raw_ids, str):
-        return [int(part) for part in raw_ids.split(",") if part.strip().isdigit()]
-    if isinstance(raw_ids, list):
-        return [int(part) for part in raw_ids]
-    if isinstance(raw_ids, dict):
-        return [int(value) for value in raw_ids.values()]
-    if raw_ids is None:
-        return []
-    return [int(raw_ids)]
+        values = [int(part.strip()) for part in raw_ids.split(",") if part.strip().isdigit()]
+    elif isinstance(raw_ids, list):
+        values = [int(part) for part in raw_ids]
+    elif isinstance(raw_ids, dict):
+        values = [int(value) for value in raw_ids.values()]
+    elif raw_ids is None:
+        values = []
+    else:
+        values = [int(raw_ids)]
+    return list(dict.fromkeys(values))
 
 
 async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: dict, deeplink: str, request_key: str | None = None):
