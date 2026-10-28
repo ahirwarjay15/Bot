@@ -50,7 +50,7 @@ class FileRepository:
             if buttons:
                 doc["buttons"] = (
                     {str(int(source_message_id)): buttons}
-                    if isinstance(buttons, list) else ({str(int(source_message_id)): buttons} if str(int(source_message_id)) not in buttons else buttons)
+                    if isinstance(buttons, list) else (buttons if isinstance(buttons.get(str(int(source_message_id))), dict) else {str(int(source_message_id)): buttons})
                 )
             elif reply_markup:
                 doc["reply_markup"] = reply_markup
