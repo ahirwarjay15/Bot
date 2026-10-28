@@ -86,8 +86,7 @@ class FileRepository:
             int(item.get("source_message_id")) if isinstance(item, dict) else int(item)
             for item in items
         ]
-        # Preserve order but store each Telegram message ID only once.
-        ids = list(dict.fromkeys(raw_ids))
+        # Preserve repeated selections and their order; each occurrence is delivered.
         if len(ids) < 2:
             raise ValueError("A batch must contain at least 2 messages")
         key = batch_id or await self.reserve_code(7)
