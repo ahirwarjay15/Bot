@@ -146,7 +146,11 @@ async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: d
     markup_data = file_doc.get("reply_markup")
     button_data = file_doc.get("buttons")
     if isinstance(button_data, dict):
-        markup_data = _compact_buttons_markup(button_data.get(str(message_id)))
+        # Prefer this message's compact URL buttons when present, but do not
+        # erase a valid legacy reply_markup if the compact map has no entry.
+        saved_markup = _compact_buttons_markup(button_data.get(str(message_id)))
+        if saved_markup:
+            markup_data = saved_markup
     elif button_data:
         markup_data = {"inline_keyboard": button_data}
     if markup_data:
