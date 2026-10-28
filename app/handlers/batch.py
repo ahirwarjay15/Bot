@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -117,35 +117,6 @@ def same_source_channel(first_chat_id, last_chat_id) -> bool:
         return int(first_chat_id) == int(last_chat_id)
     except (TypeError, ValueError):
         return False
-
-
-async def _existing_source_message_ids(bot, destination_chat_id: int, source_chat_id: int,
-                                       first_id: int, last_id: int) -> list[int]:
-    """Return source IDs that can still be read; deleted posts are skipped safely."""
-    available = []
-    for source_id in range(first_id, last_id + 1):
-        temporary = None
-        try:
-            temporary = await bot.forward_message(
-                chat_id=destination_chat_id,
-                from_chat_id=source_chat_id,
-                message_id=source_id,
-            )
-            available.append(source_id)
-        except TelegramBadRequest as exc:
-            # Telegram reports a deleted/unavailable source message as BadRequest.
-            log.info("Skipping unavailable source message %s: %s", source_id, exc)
-        except TelegramAPIError:
-            # Permission/network failures are not evidence that the source is deleted.
-            raise
-        finally:
-            if temporary is not None:
-                try:
-                    await bot.delete_message(destination_chat_id, temporary.message_id)
-                except TelegramAPIError:
-                    log.warning("Could not remove temporary batch validation message %s",
-                                temporary.message_id, exc_info=True)
-    return available
 
 
 async def _parse_message_reference(message: Message, bot, configured_chat_id):
