@@ -229,7 +229,13 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
 
     custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
     custom_buttons = custom_cfg.get("buttons", [])
-    is_batch = (isinstance(batch.get("items"), list) and bool(batch.get("file_key"))) or isinstance(batch.get("source_message_id"), list) or isinstance(batch.get("id"), dict)
+    is_batch = (
+        (isinstance(batch.get("items"), list) and bool(batch.get("file_key")))
+        or isinstance(batch.get("source_message_id"), list)
+        or isinstance(batch.get("id"), dict)
+        or (isinstance(batch.get("id"), list) and len(batch.get("id")) > 1)
+        or (isinstance(batch.get("id"), str) and "," in batch.get("id"))
+    )
     # Original supported URL buttons take priority. Custom buttons are only a fallback.
     valid_custom_buttons = [
         InlineKeyboardButton(text=str(button.get("text", "")), url=str(button.get("url", "")))
