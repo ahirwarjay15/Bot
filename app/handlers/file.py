@@ -261,21 +261,19 @@ async def generate_file_link(
         if first_error is not None:
             raise first_error
 
-        # Deduplicate repeated source IDs while preserving their original order.
-        # A repeated ID represents the same Telegram post and must be delivered once.
-        unique_items = []
-        seen_ids = set()
+        # Preserve repeated selections: three selections of the same source
+        # message must produce three delivery entries. Button data is keyed by
+        # source ID and normalized separately so repeats do not multiply buttons.
+        final_items = [
+            {**item, "source_message_id": int(item["source_message_id"])}
+            for item in final_items
+        ]
+        ids = [int(item["source_message_id"]) for item in final_items]
+        buttons = {}
         for item in final_items:
-            mid = int(item["source_message_id"])
-            if mid in seen_ids:
-                continue
-            seen_ids.add(mid)
-            unique_items.append({**item, "source_message_id": mid})
-        ids = [int(item["source_message_id"]) for item in unique_items]
-        buttons = {
-            str(item["source_message_id"]): item["buttons"]
-            for item in unique_items if item.get("buttons")
-        }
+            mid = str(item["source_message_id"])
+            if item.get("buttons") and mid not in buttons:
+                buttons[mid] = item["buttons"]
         # Keep the required storage format unchanged: comma-separated IDs and
         # one compact string per button, shared by single and multiple files.
         record = await repo.save_batch(
