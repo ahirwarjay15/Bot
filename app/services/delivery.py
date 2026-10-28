@@ -108,19 +108,47 @@ def _notice(cfg, minutes):
     return format_notice(cfg, minutes)[0]
 
 
+def _compact_buttons_markup(buttons):
+    """Convert per-message compact button tuples into Telegram inline-keyboard JSON."""
+    if not isinstance(buttons, dict) or not buttons:
+        return None
+    rows = {}
+    for key, values in buttons.items():
+        if not isinstance(values, (list, tuple)) or len(values) < 2:
+            continue
+        try:
+            parts = str(key).split(".")
+            row_index = int(parts[0])
+            column_index = int(parts[1]) if len(parts) > 1 else 0
+        except (TypeError, ValueError):
+            continue
+        button = {"text": str(values[0]), "url": str(values[1])}
+        if len(values) > 2:
+            style = {"D": "danger", "S": "success", "P": "primary"}.get(str(values[2]).upper())
+            if style:
+                button["style"] = style
+        rows.setdefault(row_index, []).append((column_index, button))
+    keyboard = [
+        [button for _, button in sorted(rows[row_index], key=lambda pair: pair[0])]
+        for row_index in sorted(rows)
+    ]
+    return {"inline_keyboard": keyboard} if keyboard else None
+
+
 async def deliver_reference(bot: Bot, db, settings, *, user_id: int, file_doc: dict, deeplink: str, request_key: str | None = None):
     """Use compact records while resolving the fixed source channel at runtime."""
     source_chat_id = file_doc.get("chat") or file_doc.get("source_chat_id") or getattr(settings, "source_channel_id", None)
     if not source_chat_id:
         log.error("Source channel is missing for compact file record")
         return (0, 1)
-    item = {
-        "source_chat_id": source_chat_id,
-        "source_message_id": (file_doc.get("id")[0] if isinstance(file_doc.get("id"), list) and file_doc.get("id") else file_doc.get("id", file_doc.get("source_message_id"))),
-    }
+    message_id = (file_doc.get("id")[0] if isinstance(file_doc.get("id"), list) and file_doc.get("id") else file_doc.get("id", file_doc.get("source_message_id")))
+    item = {"source_chat_id": source_chat_id, "source_message_id": message_id}
     markup_data = file_doc.get("reply_markup")
-    if file_doc.get("buttons"):
-        markup_data = {"inline_keyboard": file_doc["buttons"]}
+    button_data = file_doc.get("buttons")
+    if isinstance(button_data, dict):
+        markup_data = _compact_buttons_markup(button_data.get(str(message_id)))
+    elif button_data:
+        markup_data = {"inline_keyboard": button_data}
     if markup_data:
         item["reply_markup"] = markup_data
     return await deliver_batch(
@@ -140,10 +168,14 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         raw_ids = batch.get("id") if isinstance(batch.get("id"), list) else (
             list(batch["id"].values()) if isinstance(batch.get("id"), dict) else batch["source_message_id"]
         )
-        items = [
-            {"source_chat_id": channel_id, "source_message_id": int(mid)}
-            for mid in raw_ids
-        ]
+        compact_buttons = batch.get("buttons") if isinstance(batch.get("buttons"), dict) else {}
+        items = []
+        for mid in raw_ids:
+            item = {"source_chat_id": channel_id, "source_message_id": int(mid)}
+            markup_data = _compact_buttons_markup(compact_buttons.get(str(mid)))
+            if markup_data:
+                item["reply_markup"] = markup_data
+            items.append(item)
     if not items:
         return (0, 0)
 
