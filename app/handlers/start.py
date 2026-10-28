@@ -948,7 +948,7 @@ async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:d
     me=await bot.get_me();link=f"https://t.me/{me.username}?start={payload}"
     # Batch records contain ordered IDs; only external-source batches store "chat".
     ids = record.get("id")
-    if (isinstance(ids, list) and len(ids) > 1) or isinstance(record.get("source_message_id"), list) or isinstance(ids, dict):
+    if (isinstance(ids, list) and len(ids) > 1) or isinstance(record.get("source_message_id"), list) or isinstance(ids, dict) or (isinstance(ids, str) and "," in ids):
         record = {**record, "_source_chat_id": record.get("chat") or settings.source_channel_id}
         return await deliver_batch(bot,database.db,user_id=user_id,batch=record,deeplink=link,request_key=request_key)
     # Old batch records remain readable during the transition.
@@ -992,7 +992,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             # Flash and clear the blink before delivering the file/batch.
             await send_file_animation(bot, database.db, message.chat.id)
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
-            is_batch = isinstance(record.get("items"), list) or (isinstance(record.get("id"), list) and len(record.get("id")) > 1) or isinstance(record.get("id"), dict) or isinstance(record.get("source_message_id"), list)
+            is_batch = isinstance(record.get("items"), list) or (isinstance(record.get("id"), list) and len(record.get("id")) > 1) or isinstance(record.get("id"), dict) or isinstance(record.get("source_message_id"), list) or (isinstance(record.get("id"), str) and "," in record.get("id"))
             if is_batch and result[0]==0:
                 await message.answer("None of the batch files could be delivered. The source messages may be unavailable.")
             elif is_batch and result[1]:
