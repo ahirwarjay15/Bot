@@ -544,6 +544,16 @@ def _is_member_status(member) -> bool:
     )
 
 
+async def cleanup_expired_pending_join_requests(db, now=None) -> int:
+    """Remove private-channel join requests older than the 15-day validity window."""
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=15)
+    result = await db.pending_join_requests.delete_many({
+        "requested_at": {"$lte": cutoff}
+    })
+    return int(getattr(result, "deleted_count", 0))
+
+
 def _pending_request_is_recent(pending: dict | None, now=None, max_age_seconds: int = 15 * 24 * 60 * 60) -> bool:
     """Only honor a private join request for up to 15 days; legacy records are invalid."""
     requested_at = (pending or {}).get("requested_at")
