@@ -384,7 +384,7 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                     text = after.get("text") or "<blockquote><i>ʏᴏᴜʀ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ! ✅\nᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇsᴛᴏʀᴇ ʏᴏᴜʀ ғɪʟᴇ.</i></blockquote>"
                     link = task.get("deeplink")
                     markup = InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text=after.get("button_text") or "↻ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!", url=link)
+                        InlineKeyboardButton(text=after.get("button_text") or "↻ ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!", url=link)
                     ]]) if link else None
                     try:
                         if notice_id:
