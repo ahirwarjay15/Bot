@@ -506,7 +506,7 @@ async def render_animation(query, db):
     cfg = normalize_animation_config(raw)
     await db.settings.update_one(
         {"key": "animation"},
-        {"$set": {key: cfg[key] for key in ("frames", "speed", "mode", "enabled")},
+        {"$set": {key: cfg[key] for key in ("frames", "speed", "mode", "enabled", "file_animation_text")},
          "$unset": {"prefix": "", "prefix_enabled": "", "frames_enabled": ""}},
         upsert=True,
     )
