@@ -215,6 +215,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         deadline = None
         expiry_suffix = request_key or f"{user_id}:{token_urlsafe(12)}"
         task_key = f"batch-expiry:{expiry_suffix}"
+        after_cfg = await db.settings.find_one({"key": "after_delete", "enabled": True}) or {}
         task = {
             "user_id": user_id,
             "message_ids": [],
@@ -224,6 +225,11 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
             "updated_at": _now(),
             "messages_deleted": False,
             "after_delete_attempted": False,
+            "after_delete_snapshot": {
+                "enabled": bool(after_cfg),
+                "text": after_cfg.get("text") or "",
+                "button_text": after_cfg.get("button_text") or "",
+            },
             "request_key": task_key,
         }
         # This is the only persistent delivery record for new deliveries: the
@@ -378,7 +384,14 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                     if deletion_failed:
                         raise RuntimeError("One or more delivered messages could not be deleted; retrying expiry task")
                     await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"messages_deleted": True}})
-                after = await db.settings.find_one({"key": "after_delete", "enabled": True})
+                # Use the per-delivery snapshot so disabling or editing the
+                # feature cannot change work that was already scheduled.
+                if "after_delete_snapshot" in task:
+                    after = task.get("after_delete_snapshot") or {}
+                    after = after if after.get("enabled") else None
+                else:
+                    # Backward compatibility for tasks created before snapshots existed.
+                    after = await db.settings.find_one({"key": "after_delete", "enabled": True})
                 notice_id = task.get("notice_message_id")
                 if after and not task.get("after_delete_attempted", False):
                     text = after.get("text") or "<blockquote><i>ʏᴏᴜʀ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ! ✅\nᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇsᴛᴏʀᴇ ʏᴏᴜʀ ғɪʟᴇ.</i></blockquote>"
