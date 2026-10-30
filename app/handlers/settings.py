@@ -488,7 +488,7 @@ def build_animation_page(cfg):
     speed = normalized["speed"]
     mode = normalized["mode"]
     status = {"disabled": "Disabled ❌", "message": "Message", "poster": "Poster"}.get(mode, "Disabled ❌")
-    blink_status = "Enabled ✅" if normalized.get("file_animation_text") else "Disabled ❌"
+    blink_status = "Enabled ✅" if normalized.get("file_animation_enabled", True) else "Disabled ❌"
     text = (
         "ANIMATION\n"
         "\n<i>Add a custom animation for the verification process.</i>"
@@ -506,7 +506,7 @@ async def render_animation(query, db):
     cfg = normalize_animation_config(raw)
     await db.settings.update_one(
         {"key": "animation"},
-        {"$set": {key: cfg[key] for key in ("frames", "speed", "mode", "enabled", "file_animation_text")},
+        {"$set": {key: cfg[key] for key in ("frames", "speed", "mode", "enabled", "file_animation_text", "file_animation_enabled")},
          "$unset": {"prefix": "", "prefix_enabled": "", "frames_enabled": ""}},
         upsert=True,
     )
@@ -1313,15 +1313,17 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "forcejoin_animation":
         await render_animation(query, db)
     elif action == "file_animation":
-        cfg = await db.settings.find_one({"key": "animation"}) or {}
-        if cfg.get("file_animation_text"):
-            await db.settings.update_one({"key": "animation"}, {"$unset": {"file_animation_text": ""}})
-            await render_animation(query, db)
-        else:
-            await state.set_state(SettingInput.waiting)
-            await state.update_data(field="file_animation_text", animation_panel_chat_id=query.message.chat.id if query.message else None, animation_panel_message_id=query.message.message_id if query.message else None)
-            if query.message:
-                await tracked_answer(query.message, state, "Send the Blink text. It will briefly appear before each file or batch delivery.")
+        cfg = normalize_animation_config(await db.settings.find_one({"key": "animation"}) or {})
+        blink_enabled = not cfg.get("file_animation_enabled", True)
+        await db.settings.update_one(
+            {"key": "animation"},
+            {"$set": {
+                "file_animation_text": cfg.get("file_animation_text") or "<b><i>Wait a sec...</i></b>",
+                "file_animation_enabled": blink_enabled,
+            }},
+            upsert=True,
+        )
+        await render_animation(query, db)
     elif action == "animation_frames":
         await state.set_state(SettingInput.waiting)
         await state.update_data(field="animation_frames_collect", pending_frames=[], animation_panel_chat_id=query.message.chat.id if query.message else None, animation_panel_message_id=query.message.message_id if query.message else None)
