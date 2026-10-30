@@ -299,7 +299,7 @@ async def refresh_media_parent_panel(bot, chat_id, message_id, kind, db, setting
     elif kind == "start":
         cfg = await db.settings.find_one({"key": "start_message"}) or {}
         about_enabled = bool(cfg.get("about_enabled", True))
-        text = f"START\\n\\nCustomize your bot's start message using the following options.\\n\\nStatus: {'ENABLED ✅' if cfg.get('enabled', True) else 'DISABLED ❌'}\\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
+        text = f"START\n\nCustomize your bot's start message using the following options.\n\nStatus: {'ENABLED ✅' if cfg.get('enabled', True) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
         markup = kb([
             [("DISABLE" if cfg.get("enabled", True) else "ENABLE", "settings:start_toggle")],
             [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
@@ -309,7 +309,7 @@ async def refresh_media_parent_panel(bot, chat_id, message_id, kind, db, setting
     else:
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
         about_enabled = bool(cfg.get("about_enabled", False))
-        text = f"INVALID\\nSet a response for users who send normal messages to the bot.\\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
+        text = f"INVALID\nSet a response for users who send normal messages to the bot.\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
         markup = kb([
             [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:invalid_toggle")],
             [("CAPTION", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
