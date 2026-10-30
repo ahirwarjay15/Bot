@@ -9,7 +9,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError, Telegra
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, MessageEntity
 
 log = logging.getLogger(__name__)
-DEFAULT_NOTICE = "<blockquote><b><i>This file will be automatically deleted in {auto_delete_time}. Make sure to save it before it gets deleted..!</i></b></blockquote>"
+DEFAULT_NOTICE = "<blockquote><b><i>Tʜɪs ғɪʟᴇ ᴡɪʟʟ ʙᴇ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪɴ 5 ᴍɪɴᴜᴛᴇs.\nMᴀᴋᴇ sᴜʀᴇ ᴛᴏ sᴀᴠᴇ ɪᴛ ʙᴇғᴏʀᴇ ɪᴛ ɢᴇᴛs ᴅᴇʟᴇᴛᴇᴅ..!</i></b></blockquote>"
 
 
 def _now():
@@ -53,7 +53,7 @@ async def finish_delivery_request(db, request_key: str, success: bool):
 def _minutes(cfg):
     allowed = (2, 5, 10, 15, 30, 60, 180, 360, 720, 1440)
     try:
-        value = int((cfg or {}).get("minutes", 10))
+        value = int((cfg or {}).get("minutes", 5))
     except (TypeError, ValueError):
         return 10
     return value if value in allowed else 10
