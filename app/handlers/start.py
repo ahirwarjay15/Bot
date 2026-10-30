@@ -1073,28 +1073,18 @@ async def start_about(query: CallbackQuery, database):
     about_text = await load_shared_about_text(database.db)
     rendered = render_common_variables(about_text, query.from_user, me).replace("{bot_name}", render_common_variables("{bot_mention}", query.from_user, me))
     back_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="《 BACK", callback_data="start:about_back")]])
-    # Send a fresh About post instead of editing the Start post (which can show Edited).
+    # Keep the original Start post and switch its content in place.
     try:
-        if cfg.get("poster_file_id"):
-            replacement = await query.bot.send_animation(
-                query.from_user.id, cfg["poster_file_id"], caption=rendered,
-                parse_mode="HTML", reply_markup=back_markup,
-            )
-        elif cfg.get("poster_photo_id"):
-            replacement = await query.bot.send_photo(
-                query.from_user.id, cfg["poster_photo_id"], caption=rendered,
-                parse_mode="HTML", reply_markup=back_markup,
+        if query.message.photo or query.message.animation or query.message.document:
+            await query.message.edit_caption(
+                caption=rendered, parse_mode="HTML", reply_markup=back_markup,
             )
         else:
-            replacement = await query.bot.send_message(
-                query.from_user.id, rendered, parse_mode="HTML", reply_markup=back_markup,
+            await query.message.edit_text(
+                rendered, parse_mode="HTML", reply_markup=back_markup,
             )
-        try:
-            await query.message.delete()
-        except TelegramAPIError:
-            pass
     except TelegramAPIError:
-        log.warning("Could not send replacement About post", exc_info=True)
+        log.warning("Could not edit Start post into About", exc_info=True)
 
 @router.callback_query(F.data == "start:about_back")
 async def start_about_back(query: CallbackQuery, settings: Settings, database):
@@ -1134,44 +1124,18 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
     markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
     raw = cfg.get("text") or '<b>✨ ʜᴇʟʟᴏ</b> <i>{mention}</i>\n\nɪ\'m {bot_mention} ꜰɪʟᴇ ʙᴏᴛ ʙʏ <b><a href="https://t.me/lexianime">Lexi Anime</a></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!'
     rendered = render_common_variables(raw, user, me)
-    # Re-send the main Start post and remove About instead of editing in place.
-    # This avoids Telegram's Edited label on both text and media messages.
+    # Restore the Start content on the same message.
     try:
-        if cfg.get("poster_file_id"):
-            replacement = await query.bot.send_animation(
-                user.id, cfg["poster_file_id"], caption=rendered,
-                parse_mode="HTML", reply_markup=markup,
-            )
-        elif cfg.get("poster_photo_id"):
-            replacement = await query.bot.send_photo(
-                user.id, cfg["poster_photo_id"], caption=rendered,
-                parse_mode="HTML", reply_markup=markup,
+        if msg.photo or msg.animation or msg.document:
+            await msg.edit_caption(
+                caption=rendered, parse_mode="HTML", reply_markup=markup,
             )
         else:
-            replacement = await query.bot.send_message(
-                user.id, rendered, parse_mode="HTML", reply_markup=markup,
+            await msg.edit_text(
+                rendered, parse_mode="HTML", reply_markup=markup,
             )
-        try:
-            await msg.delete()
-        except TelegramAPIError:
-            pass
     except TelegramAPIError:
-        log.warning("Could not send replacement Start post", exc_info=True)
-
-async def cleanup_expired_pending_join_requests(db, now=None, max_age_days: int = 15):
-    """Delete pending-request records only after their 15-day expiry."""
-    now = now or datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=max_age_days)
-    result = await db.pending_join_requests.delete_many({"requested_at": {"$lte": cutoff}})
-    return getattr(result, "deleted_count", 0)
-
-
-async def run_pending_join_request_cleanup_worker(db, interval_seconds: int = 3600):
-    """Periodically remove expired pending join requests, independent of verification."""
-    while True:
-        await cleanup_expired_pending_join_requests(db)
-        await asyncio.sleep(interval_seconds)
-
+        log.warning("Could not edit About post back to Start", exc_info=True)
 
 @router.chat_join_request()
 async def remember_pending_join_request(event, database):
