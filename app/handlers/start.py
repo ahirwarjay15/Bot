@@ -80,7 +80,8 @@ async def effective_force_join_channels(database, settings) -> list[str]:
             channels.append(channel)
     return channels
 
-DEFAULT_ANIMATION_FRAMES = ["Checking.", "Checking..", "Checking...", "Checking....", "Checking....."]
+DEFAULT_ANIMATION_FRAMES = ["Cʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ.", "Cʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ..", "Cʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ..."]
+DEFAULT_BLINK_TEXT = "<b><i>Wait a sec...</i></b>"
 
 def animation_frame_text(frame: str) -> str:
     """Render a saved frame while preserving Telegram HTML formatting."""
@@ -100,10 +101,12 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     mode = normalized.get("mode")
     if mode in ("new_message", "message"): mode = "message"
     elif mode in ("force_join_poster", "poster"): mode = "poster"
-    elif mode != "disabled": mode = "poster" if normalized.get("enabled", False) else "disabled"
-    if normalized.get("enabled") is False: mode = "disabled"
+    elif mode == "disabled": mode = "disabled"
+    elif "enabled" in normalized: mode = "poster" if normalized.get("enabled") else "disabled"
+    else: mode = "message"
     normalized["mode"] = mode
     normalized["enabled"] = mode != "disabled"
+    normalized.setdefault("file_animation_text", DEFAULT_BLINK_TEXT)
     try: speed = float(normalized.get("speed", 0.25))
     except (TypeError, ValueError): speed = 0.25
     normalized["speed"] = min(1.0, max(0.20, speed))
@@ -116,7 +119,7 @@ async def load_animation_config(db) -> dict:
     """Load and persist migrated animation defaults once."""
     raw = await db.settings.find_one({"key": "animation"}) or {}
     normalized = normalize_animation_config(raw)
-    persisted_keys = ("frames", "speed", "mode", "enabled")
+    persisted_keys = ("frames", "speed", "mode", "enabled", "file_animation_text")
     legacy_keys = ("prefix", "prefix_enabled", "frames_enabled")
     if any(raw.get(key) != normalized.get(key) for key in persisted_keys) or any(key in raw for key in legacy_keys):
         await db.settings.update_one({"key": "animation"}, {"$set": {key: normalized[key] for key in persisted_keys}, "$unset": {key: "" for key in legacy_keys}}, upsert=True)
