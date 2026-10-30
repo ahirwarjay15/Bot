@@ -59,8 +59,8 @@ def unicode_buttons(value: str) -> str:
 AUTO_DELETE_MINUTES = (2, 5, 10, 15, 30, 60, 180, 360, 720, 1440)
 DEFAULT_NOTICE = "<blockquote><b><i>Tʜɪs ғɪʟᴇ ᴡɪʟʟ ʙᴇ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪɴ 5 ᴍɪɴᴜᴛᴇs.\nMᴀᴋᴇ sᴜʀᴇ ᴛᴏ sᴀᴠᴇ ɪᴛ ʙᴇғᴏʀᴇ ɪᴛ ɢᴇᴛs ᴅᴇʟᴇᴛᴇᴅ..!</i></b></blockquote>"
 DEFAULT_START_TEXT = "<blockquote><b><i>✨ ʜᴇʟʟᴏ {mention}</i></b></blockquote>\n\nɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
-DEFAULT_AFTER_TEXT = "Yᴏᴜʀ Vɪᴅᴇᴏ / Fɪʟᴇ Iꜱ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ Dᴇʟᴇᴛᴇᴅ ✅"
-DEFAULT_AFTER_BUTTON = "Gᴇᴛ ʏᴏᴜʀ ꜰɪʟᴇꜱ ᴀɢᴀɪɴ"
+DEFAULT_AFTER_TEXT = "<blockquote><i>Your File is Successfully Deleted.✅\nTap the Button below to get the File back.</i></blockquote>"
+DEFAULT_AFTER_BUTTON = "ɢᴇᴛ ғɪʟᴇ ᴀɢᴀɪɴ!"
 DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
 DEFAULT_FORCE_JOIN_MESSAGE = "<blockquote>⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!</blockquote>\n<blockquote>ᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.</blockquote>"
 
@@ -586,6 +586,8 @@ async def refresh_animation_panel(bot, chat_id, message_id, db):
     return replacement.message_id
 
 async def render_auto(query, db):
+    await patch(db, "auto_delete", {}, {"enabled": True, "minutes": 5, "notice": DEFAULT_NOTICE})
+    await patch(db, "after_delete", {}, {"enabled": True, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON})
     cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
     after = await db.settings.find_one({"key": "after_delete"}) or {}
     minutes = int(cfg.get("minutes", 5))
