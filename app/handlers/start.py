@@ -1108,8 +1108,8 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
         return
     me = await query.bot.get_me()
     rows = []
-    url = cfg.get("button1_url", cfg.get("button_url", "http://t.me/lexiAnime"))
-    label = cfg.get("button1_text", cfg.get("button_text", "📟 UPDATE CHANNEL"))
+    url = cfg.get("button1_url", cfg.get("button_url", ""))
+    label = cfg.get("button1_text", cfg.get("button_text", ""))
     parsed = urlparse(url)
     configured_buttons = []
     if cfg.get("button1_enabled", cfg.get("button_enabled", False)) and label and parsed.scheme in ("http", "https") and parsed.netloc:
