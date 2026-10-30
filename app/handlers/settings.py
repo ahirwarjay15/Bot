@@ -467,9 +467,13 @@ async def refresh_button_panel(bot, chat_id, message_id, db, kind):
     except TelegramAPIError:
         pass
 
-async def render_start_poster(query):
+async def render_start_poster(query, db):
+    cfg = await db.settings.find_one({"key": "start_message"}) or {}
+    media_buttons = [("✚ ADD", "settings:start_poster_add")]
+    if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
+        media_buttons.append(("REMOVE", "settings:start_poster_remove"))
     await edit_page(query, "MEDIA\n\nInclude an image or GIF with your start message.", kb([
-        [("✚ ADD", "settings:start_poster_add"), ("REMOVE", "settings:start_poster_remove")],
+        media_buttons,
         [("《 BACK", "settings:start")],
     ]))
 
@@ -667,9 +671,8 @@ async def render_invalid(query, db):
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
     about_enabled = bool(cfg.get("about_enabled", False))
     await edit_page(query, f"INVALID\nSet a response for users who send normal messages to the bot.\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
-        [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:invalid_toggle")],
-        [("TEXT", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
-        [("POSTER", "settings:invalid_poster"), ("ABOUT" if about_enabled else "ABOUT", "settings:invalid_about_toggle")],
+        [("CAPTION", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
+        [("MEDIA & TEXT", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")],
         [("《 BACK", "settings:home")],
     ]))
 
@@ -688,9 +691,13 @@ async def render_invalid_button(query, db):
     return query.message
 
 
-async def render_poster(query):
-    await edit_page(query, "MEDIA\nAdd an image or GIF to your invalid item.", kb([
-        [("✚ ADD", "settings:poster_add"), ("REMOVE", "settings:poster_remove")],
+async def render_poster(query, db):
+    cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
+    media_buttons = [("✚ ADD", "settings:poster_add")]
+    if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
+        media_buttons.append(("REMOVE", "settings:poster_remove"))
+    await edit_page(query, "MEDIA & TEXT\nAdd an image or GIF to the invalid response.", kb([
+        media_buttons,
         [("《 BACK", "settings:invalid")],
     ]))
 
@@ -1026,8 +1033,12 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await render_forcejoin_message(query)
         return
     elif action == "forcejoin_media":
+        cfg = await db.settings.find_one({"key": "force_join"}) or {}
+        media_buttons = [("✚ ADD", "settings:forcejoin_media_add")]
+        if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
+            media_buttons.append(("REMOVE", "settings:forcejoin_media_remove"))
         await edit_page(query, "FORCE SUB MEDIA\n\nAdd or remove the image/GIF shown with the Force Sub message.", kb([
-            [("✚ ADD", "settings:forcejoin_media_add"), ("REMOVE", "settings:forcejoin_media_remove")],
+            media_buttons,
             [("《 BACK", "settings:forcejoin")],
         ]))
     elif action == "forcejoin_media_add":
@@ -1147,14 +1158,14 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action in ("start_button_text", "start_button_link"):
         await state.set_state(SettingInput.waiting); await state.update_data(field="start_button_1_text" if action == "start_button_text" else "start_button_1_link", button_index="1", panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="start")
         if query.message: await tracked_answer(query.message, state, "Send text for Start Button 1." if action == "start_button_text" else "Now send the URL for Start Button 1.")
-    elif action == "start_poster": await render_start_poster(query)
+    elif action == "start_poster": await render_start_poster(query, db)
     elif action == "start_poster_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="start_poster")
         if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new start media here.")
     elif action == "start_poster_remove":
         await db.settings.update_one({"key": "start_message"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
         if query.message: await tracked_answer(query.message, state, "✨ Successfully removed your bot start poster.")
-        await render_start_poster(query)
+        await render_start_poster(query, db)
     elif action == "start_about":
         await render_start_about(query, db)
     elif action == "start_about_toggle":
@@ -1331,14 +1342,14 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action in ("invalid_button_text", "invalid_button_link"):
         await state.set_state(SettingInput.waiting); await state.update_data(field="invalid_button_1_text" if action == "invalid_button_text" else "invalid_button_1_link", button_index="1", panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="invalid")
         if query.message: await tracked_answer(query.message, state, "Send text for Invalid Button 1." if action == "invalid_button_text" else "Now send the URL for Invalid Button 1.")
-    elif action == "invalid_poster": await render_poster(query)
+    elif action == "invalid_poster": await render_poster(query, db)
     elif action == "poster_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="poster")
         if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new invalid itemer here.")
     elif action == "poster_remove":
         await db.settings.update_one({"key": "invalid_post"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
         if query.message: await tracked_answer(query.message, state, "✨ Invalid itemer removed successfully.")
-        await render_poster(query)
+        await render_poster(query, db)
     elif action == "invalid_about": await render_about(query, db)
     elif action == "invalid_about_toggle":
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
