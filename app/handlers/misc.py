@@ -55,13 +55,13 @@ async def load_shared_about_text(db) -> str:
         "<i>ᴛʜᴀɴᴋs ғᴏʀ ᴜsɪɴɢ ᴏᴜʀ ʙᴏᴛ 💗</i>"
     )
     unbolded_current_default = (
-        "✨ ᴀʙᴏᴜᴛ ᴍᴇ\\n"
-        "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\\n\\n"
-        "✦ ʙᴏᴛ ɪɴғᴏ\\n\\n"
-        "➤ ɴᴀᴍᴇ: {bot_name}\\n\\n"
-        "➤ ᴄʀᴇᴀᴛᴏʀ: {owner}\\n\\n"
-        "➤ ᴏᴡɴᴇʀ: {owner}\\n\\n"
-        "➤ ᴍᴀᴅᴇ ғᴏʀ: {anime}\\n\\n"
+        "✨ ᴀʙᴏᴜᴛ ᴍᴇ\n"
+        "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\n\n"
+        "✦ ʙᴏᴛ ɪɴғᴏ\n\n"
+        "➤ ɴᴀᴍᴇ: {bot_name}\n\n"
+        "➤ ᴄʀᴇᴀᴛᴏʀ: {owner}\n\n"
+        "➤ ᴏᴡɴᴇʀ: {owner}\n\n"
+        "➤ ᴍᴀᴅᴇ ғᴏʀ: {anime}\n\n"
         "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
     )
     if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default):
