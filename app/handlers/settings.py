@@ -1471,7 +1471,7 @@ async def handle_button_settings_reply_keyboard(message: Message, state: FSMCont
 async def send_button_settings_reply_panel(message: Message, db, kind: str, panel_chat_id=None, panel_message_id=None):
     is_start = kind == "start"
     cfg = await db.settings.find_one({"key": "start_message" if is_start else "invalid_post"}) or {}
-    status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", True) if is_start else bool(cfg.get("button_text") and cfg.get("button_url"))) else "OFF ❌"
+    status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", False) if is_start else bool(cfg.get("button_text") and cfg.get("button_url"))) else "OFF ❌"
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     title = "START BUTTONS" if is_start else "INVALID BUTTONS"
