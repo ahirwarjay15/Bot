@@ -369,7 +369,7 @@ async def build_forcejoin_page(bot, db, settings):
         )
     rows.extend([
         [("CAPTION", "settings:forcejoin_message"), ("MEDIA", "settings:forcejoin_media")],
-        [("VERIFY", "settings:forcejoin_verify_text"), ("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")],
+        [("VERIFY", "settings:forcejoin_verify_text")],
         [("《 BACK", "settings:home")],
     ])
     text = ("FORCE SUB\n\n"
@@ -852,7 +852,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         channels = await effective_force_join_channels(database, settings)
         if channel_id not in channels:
             channels.append(channel_id)
-        await patch(db, "force_join", {"channels": channels, "channels_override": True})
+        await patch(db, "force_join", {"channels": channels, "channels_override": True, "enabled": bool(channels)})
         await db.settings.update_one(
             {"key": "force_join_channel", "channel": channel_id},
             {"$set": {"key": "force_join_channel", "channel": channel_id,
@@ -985,7 +985,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         index = int(action.split(":", 1)[1])
         if index < len(channels):
             channel = channels.pop(index)
-            await patch(db, "force_join", {"channels": channels, "channels_override": True})
+            await patch(db, "force_join", {"channels": channels, "channels_override": True, "enabled": bool(channels)})
             # Immediately revoke every tracked invite for the removed channel;
             # the background worker also prunes stale channel links as a safeguard.
             async for link in db.force_join_links.find({"channel": channel}):
@@ -1050,7 +1050,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         index = int(action.split(":", 1)[1])
         if 0 <= index < len(channels):
             channel = channels.pop(index)
-            await patch(db, "force_join", {"channels": channels, "channels_override": True})
+            await patch(db, "force_join", {"channels": channels, "channels_override": True, "enabled": bool(channels)})
             async for link in db.force_join_links.find({"channel": channel}):
                 try:
                     if link.get("invite_link") and link.get("chat_id") is not None:
