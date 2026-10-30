@@ -379,6 +379,17 @@ async def build_forcejoin_page(bot, db, settings):
     return text, kb(rows)
 
 
+async def render_forcejoin_media(query, db):
+    cfg = await db.settings.find_one({"key": "force_join"}) or {}
+    media_buttons = [("✚ ADD", "settings:forcejoin_media_add")]
+    if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
+        media_buttons.append(("REMOVE", "settings:forcejoin_media_remove"))
+    await edit_page(query, "FORCE SUB MEDIA\n\nAdd or remove the image/GIF shown with the Force Sub message.", kb([
+        media_buttons,
+        [("《 BACK", "settings:forcejoin")],
+    ]))
+
+
 async def render_forcejoin(query, db, settings):
     text, markup = await build_forcejoin_page(query.bot, db, settings)
     await edit_page(query, text, markup)
@@ -1033,21 +1044,14 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await render_forcejoin_message(query)
         return
     elif action == "forcejoin_media":
-        cfg = await db.settings.find_one({"key": "force_join"}) or {}
-        media_buttons = [("✚ ADD", "settings:forcejoin_media_add")]
-        if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
-            media_buttons.append(("REMOVE", "settings:forcejoin_media_remove"))
-        await edit_page(query, "FORCE SUB MEDIA\n\nAdd or remove the image/GIF shown with the Force Sub message.", kb([
-            media_buttons,
-            [("《 BACK", "settings:forcejoin")],
-        ]))
+        await render_forcejoin_media(query, db)
     elif action == "forcejoin_media_add":
         await state.set_state(SettingInput.waiting); await state.update_data(field="forcejoin_media")
         if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new force-sub poster here.")
     elif action == "forcejoin_media_remove":
         await db.settings.update_one({"key": "force_join"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
         if query.message: await tracked_answer(query.message, state, "✨ Force-join poster removed successfully.")
-        await render_forcejoin(query, db, settings)
+        await render_forcejoin_media(query, db)
     elif action == "forcejoin_verify_text":
         await state.set_state(SettingInput.waiting); await state.update_data(field="forcejoin_verify_text")
         if query.message: await tracked_answer(query.message, state, "Send your new verification button text.")
