@@ -684,7 +684,7 @@ async def render_invalid(query, db):
     await edit_page(query, f"INVALID\nSet a response for users who send normal messages to the bot.\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:invalid_toggle")],
         [("CAPTION", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
-        [("MEDIA & TEXT", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")],
+        [("MEDIA", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")],
         [("《 BACK", "settings:home")],
     ]))
 
@@ -708,7 +708,7 @@ async def render_poster(query, db):
     media_buttons = [("✚ ADD", "settings:poster_add")]
     if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
         media_buttons.append(("REMOVE", "settings:poster_remove"))
-    await edit_page(query, "MEDIA & TEXT\nAdd an image or GIF to the invalid response.", kb([
+    await edit_page(query, "MEDIA\nAdd an image or GIF to the invalid response.", kb([
         media_buttons,
         [("《 BACK", "settings:invalid")],
     ]))
