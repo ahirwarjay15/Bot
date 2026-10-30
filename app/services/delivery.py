@@ -381,10 +381,10 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                 after = await db.settings.find_one({"key": "after_delete", "enabled": True})
                 notice_id = task.get("notice_message_id")
                 if after and not task.get("after_delete_attempted", False):
-                    text = after.get("text") or "<blockquote><i>Your File is Successfully Deleted.✅\nTap the Button below to get the File back.</i></blockquote>"
+                    text = after.get("text") or "<blockquote><i>ʏᴏᴜʀ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ! ✅\nᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇsᴛᴏʀᴇ ʏᴏᴜʀ ғɪʟᴇ.</i></blockquote>"
                     link = task.get("deeplink")
                     markup = InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text=after.get("button_text") or "ɢᴇᴛ ғɪʟᴇ ᴀɢᴀɪɴ!", url=link)
+                        InlineKeyboardButton(text=after.get("button_text") or "↻ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!", url=link)
                     ]]) if link else None
                     try:
                         if notice_id:
