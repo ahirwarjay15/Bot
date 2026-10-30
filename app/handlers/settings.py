@@ -1689,7 +1689,9 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             await state.set_state(SettingInput.waiting)
             await state.update_data(field="forcejoin_wait_mode")
             return
-        await state.update_data(
+        # Public chats always use their stable username URL, so save them
+        # immediately with Single Link mode. Mode selection remains private-only.
+        pending = await state.update_data(
             pending_forcejoin_chat_id=chat.id,
             pending_forcejoin_channel_id=channel_id,
             pending_forcejoin_chat_title=chat.title or str(chat.id),
@@ -1699,25 +1701,51 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             pending_forcejoin_panel_chat_id=data.get("forcejoin_panel_chat_id"),
             pending_forcejoin_panel_message_id=data.get("forcejoin_panel_message_id"),
         )
-        link_text = f"Choose link mode for <b>{html.escape(chat.title or str(chat.id))}</b>:"
-        link_markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Rotation Links", callback_data="settings:forcejoin_link_mode:rotation")],
-            [InlineKeyboardButton(text="Single Link", callback_data="settings:forcejoin_link_mode:single")],
-        ])
-        carrier_chat_id = data.get("forcejoin_carrier_chat_id")
-        carrier_message_id = data.get("forcejoin_carrier_message_id")
-        edited_carrier = False
-        if carrier_chat_id and carrier_message_id:
-            try:
-                await message.bot.edit_message_text(chat_id=carrier_chat_id, message_id=carrier_message_id,
-                    text=link_text, parse_mode="HTML", reply_markup=link_markup)
-                edited_carrier = True
-            except TelegramAPIError:
-                pass
-        if not edited_carrier:
-            await tracked_answer(message, state, link_text, parse_mode="HTML", reply_markup=link_markup)
-        await state.set_state(SettingInput.waiting)
-        await state.update_data(field="forcejoin_wait_mode")
+        pending = await state.get_data()
+        channels.append(channel_id)
+        await patch(db, "force_join", {"channels": channels, "channels_override": True, "enabled": bool(channels)})
+        await db.settings.update_one(
+            {"key": "force_join_channel", "channel": channel_id},
+            {"$set": {"key": "force_join_channel", "channel": channel_id,
+                      "button_url": None, "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat.id),
+                      "chat_type": pending.get("pending_forcejoin_chat_type"),
+                      "mode": "normal", "link_mode": "single"}},
+            upsert=True,
+        )
+        try:
+            from app.handlers.start import _prepare_force_join_link
+            channel_cfg = await db.settings.find_one({"key": "force_join_channel", "channel": channel_id}) or {}
+            await _prepare_force_join_link(message.bot, db, channel_id, channel_cfg)
+        except Exception:
+            pass
+        await remove_temporary_prompts(message.bot, pending)
+        try:
+            await message.bot.delete_message(
+                chat_id=message.chat.id,
+                message_id=pending.get("pending_forcejoin_selected_message_id"),
+            )
+        except (TelegramAPIError, TypeError):
+            pass
+        try:
+            keyboard_removal = await message.bot.send_message(
+                chat_id=message.chat.id, text=" ", reply_markup=ReplyKeyboardRemove()
+            )
+            await keyboard_removal.delete()
+        except TelegramAPIError:
+            pass
+        await state.clear()
+        panel_chat_id = pending.get("pending_forcejoin_panel_chat_id")
+        panel_message_id = pending.get("pending_forcejoin_panel_message_id")
+        if panel_chat_id and panel_message_id:
+            panel_text, panel_markup = await build_forcejoin_page(message.bot, db, settings)
+            refreshed = await refresh_settings_panel(message.bot, panel_chat_id, panel_message_id, panel_text, panel_markup)
+            if not refreshed:
+                try:
+                    await message.bot.send_message(
+                        chat_id=message.from_user.id, text=panel_text, reply_markup=panel_markup
+                    )
+                except TelegramAPIError:
+                    pass
         return
 
     if field == "custom_button_text":
