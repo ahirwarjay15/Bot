@@ -81,7 +81,6 @@ async def effective_force_join_channels(database, settings) -> list[str]:
     return channels
 
 DEFAULT_ANIMATION_FRAMES = ["Cʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ.", "Cʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ..", "Cʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ..."]
-DEFAULT_BLINK_TEXT = "<b><i>Wait a sec...</i></b>"
 
 def animation_frame_text(frame: str) -> str:
     """Render a saved frame while preserving Telegram HTML formatting."""
@@ -106,8 +105,6 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     else: mode = "message"
     normalized["mode"] = mode
     normalized["enabled"] = mode != "disabled"
-    normalized.setdefault("file_animation_text", DEFAULT_BLINK_TEXT)
-    normalized.setdefault("file_animation_enabled", True)
     try: speed = float(normalized.get("speed", 0.25))
     except (TypeError, ValueError): speed = 0.25
     normalized["speed"] = min(1.0, max(0.20, speed))
@@ -120,7 +117,7 @@ async def load_animation_config(db) -> dict:
     """Load and persist migrated animation defaults once."""
     raw = await db.settings.find_one({"key": "animation"}) or {}
     normalized = normalize_animation_config(raw)
-    persisted_keys = ("frames", "speed", "mode", "enabled", "file_animation_text", "file_animation_enabled")
+    persisted_keys = ("frames", "speed", "mode", "enabled")
     legacy_keys = ("prefix", "prefix_enabled", "frames_enabled")
     if any(raw.get(key) != normalized.get(key) for key in persisted_keys) or any(key in raw for key in legacy_keys):
         await db.settings.update_one({"key": "animation"}, {"$set": {key: normalized[key] for key in persisted_keys}, "$unset": {key: "" for key in legacy_keys}}, upsert=True)
@@ -921,8 +918,6 @@ async def send_file_animation(bot, db, user_id: int) -> None:
     msg = None
     try:
         cfg = await load_animation_config(db)
-        if not cfg.get("file_animation_enabled", True):
-            return
         text = str(cfg.get("file_animation_text") or "").strip()
         if not text:
             return
