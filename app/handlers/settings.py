@@ -586,8 +586,6 @@ async def refresh_animation_panel(bot, chat_id, message_id, db):
     return replacement.message_id
 
 async def render_auto(query, db):
-    await patch(db, "auto_delete", {}, {"enabled": True, "minutes": 5, "notice": DEFAULT_NOTICE})
-    await patch(db, "after_delete", {}, {"enabled": True, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON})
     cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
     after = await db.settings.find_one({"key": "after_delete"}) or {}
     minutes = int(cfg.get("minutes", 5))
@@ -1169,9 +1167,20 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "auto_toggle":
         cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
         turning_on = not cfg.get("enabled", False)
-        await patch(db, "auto_delete", {"enabled": turning_on}, {"minutes": 5, "notice": DEFAULT_NOTICE})
-        if not turning_on:
-            await patch(db, "after_delete", {"enabled": False}, {"text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON})
+        if turning_on:
+            await db.settings.update_one(
+                {"key": "auto_delete", "channel": {"$exists": False}},
+                {"$set": {"key": "auto_delete", "enabled": True, "minutes": 5, "notice": DEFAULT_NOTICE}},
+                upsert=True,
+            )
+            await db.settings.update_one(
+                {"key": "after_delete", "channel": {"$exists": False}},
+                {"$set": {"key": "after_delete", "enabled": True, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON}},
+                upsert=True,
+            )
+        else:
+            await db.settings.delete_one({"key": "auto_delete", "channel": {"$exists": False}})
+            await db.settings.delete_one({"key": "after_delete", "channel": {"$exists": False}})
             await db.tasks.update_many(
                 {"kind": "delete_delivery", "status": {"$in": ["pending", "processing"]}},
                 {"$set": {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc)}},
@@ -1233,7 +1242,14 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await render_after(query, db)
             return
         cfg = await db.settings.find_one({"key": "after_delete"}) or {}
-        await patch(db, "after_delete", {"enabled": not cfg.get("enabled", False)}, {"text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON})
+        if cfg.get("enabled", False):
+            await db.settings.delete_one({"key": "after_delete", "channel": {"$exists": False}})
+        else:
+            await db.settings.update_one(
+                {"key": "after_delete", "channel": {"$exists": False}},
+                {"$set": {"key": "after_delete", "enabled": True, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON}},
+                upsert=True,
+            )
         await render_after(query, db)
     elif action == "after_text": await render_after_text(query)
     elif action in ("after_text_message", "after_text_button"):
