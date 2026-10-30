@@ -80,7 +80,7 @@ async def effective_force_join_channels(database, settings) -> list[str]:
             channels.append(channel)
     return channels
 
-DEFAULT_ANIMATION_FRAMES = ["Cʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ.", "Cʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ..", "Cʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ..."]
+DEFAULT_ANIMATION_FRAMES = ["<i>Cʜᴇᴄᴋɪɴɢ.</i>", "<i>Cʜᴇᴄᴋɪɴɢ..</i>", "<i>Cʜᴇᴄᴋɪɴɢ...</i>"]
 
 def animation_frame_text(frame: str) -> str:
     """Render a saved frame while preserving Telegram HTML formatting."""
