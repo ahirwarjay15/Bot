@@ -1173,18 +1173,28 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 {"$set": {"key": "auto_delete", "enabled": True, "minutes": 5, "notice": DEFAULT_NOTICE}},
                 upsert=True,
             )
+            # After Delete is a separate opt-in feature and stays OFF by default.
             await db.settings.update_one(
                 {"key": "after_delete", "channel": {"$exists": False}},
-                {"$set": {"key": "after_delete", "enabled": True, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON}},
+                {"$set": {"key": "after_delete", "enabled": False, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON}},
                 upsert=True,
             )
         else:
+            # Preserve the After Delete behavior already scheduled for existing
+            # deliveries before removing the feature settings.
+            after_cfg = await db.settings.find_one({"key": "after_delete", "channel": {"$exists": False}}) or {}
+            snapshot = {
+                "enabled": bool(after_cfg.get("enabled", False)),
+                "text": after_cfg.get("text") or DEFAULT_AFTER_TEXT,
+                "button_text": after_cfg.get("button_text") or DEFAULT_AFTER_BUTTON,
+            }
+            await db.tasks.update_many(
+                {"status": {"$in": ["pending", "processing"]}, "after_delete_snapshot": {"$exists": False}},
+                {"$set": {"after_delete_snapshot": snapshot}},
+            )
+            # Do not cancel pending tasks: they finish at their original deadlines.
             await db.settings.delete_one({"key": "auto_delete", "channel": {"$exists": False}})
             await db.settings.delete_one({"key": "after_delete", "channel": {"$exists": False}})
-            await db.tasks.update_many(
-                {"kind": "delete_delivery", "status": {"$in": ["pending", "processing"]}},
-                {"$set": {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc)}},
-            )
         await render_auto(query, db)
     elif action == "auto_time": await render_auto_time(query, db)
     elif action == "auto_time_change":
@@ -1237,12 +1247,20 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "after_toggle":
         auto = await db.settings.find_one({"key": "auto_delete", "enabled": True})
         if not auto:
-            await patch(db, "after_delete", {"enabled": False}, {"text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON})
             if query.message: await tracked_answer(query.message, state, "After Delete only works when Auto Delete is enabled.")
             await render_after(query, db)
             return
         cfg = await db.settings.find_one({"key": "after_delete"}) or {}
         if cfg.get("enabled", False):
+            snapshot = {
+                "enabled": True,
+                "text": cfg.get("text") or DEFAULT_AFTER_TEXT,
+                "button_text": cfg.get("button_text") or DEFAULT_AFTER_BUTTON,
+            }
+            await db.tasks.update_many(
+                {"status": {"$in": ["pending", "processing"]}, "after_delete_snapshot": {"$exists": False}},
+                {"$set": {"after_delete_snapshot": snapshot}},
+            )
             await db.settings.delete_one({"key": "after_delete", "channel": {"$exists": False}})
         else:
             await db.settings.update_one(
