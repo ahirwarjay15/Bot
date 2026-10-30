@@ -13,13 +13,13 @@ router = Router(name="misc")
 log = logging.getLogger(__name__)
 DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
 DEFAULT_ABOUT = (
-    "✨ ᴀʙᴏᴜᴛ ᴍᴇ\n"
+    "✨ <b>ᴀʙᴏᴜᴛ ᴍᴇ</b>\n"
     "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\n\n"
-    "✦ ʙᴏᴛ ɪɴғᴏ\n\n"
-    "➤ ɴᴀᴍᴇ: {bot_name}\n\n"
-    "➤ ᴄʀᴇᴀᴛᴏʀ: {owner}\n\n"
-    "➤ ᴏᴡɴᴇʀ: {owner}\n\n"
-    "➤ ᴍᴀᴅᴇ ғᴏʀ: {anime}\n\n"
+    "✦ <b>ʙᴏᴛ ɪɴғᴏ</b>\n\n"
+    "➤ ɴᴀᴍᴇ: <b>{bot_name}</b>\n\n"
+    "➤ ᴄʀᴇᴀᴛᴏʀ: <b>{owner}</b>\n\n"
+    "➤ ᴏᴡɴᴇʀ: <b>{owner}</b>\n\n"
+    "➤ ᴍᴀᴅᴇ ғᴏʀ: <b>{anime}</b>\n\n"
     "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
 )
 
@@ -54,7 +54,17 @@ async def load_shared_about_text(db) -> str:
         "✧ V 0.1\n\n"
         "<i>ᴛʜᴀɴᴋs ғᴏʀ ᴜsɪɴɢ ᴏᴜʀ ʙᴏᴛ 💗</i>"
     )
-    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default):
+    unbolded_current_default = (
+        "✨ ᴀʙᴏᴜᴛ ᴍᴇ\\n"
+        "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\\n\\n"
+        "✦ ʙᴏᴛ ɪɴғᴏ\\n\\n"
+        "➤ ɴᴀᴍᴇ: {bot_name}\\n\\n"
+        "➤ ᴄʀᴇᴀᴛᴏʀ: {owner}\\n\\n"
+        "➤ ᴏᴡɴᴇʀ: {owner}\\n\\n"
+        "➤ ᴍᴀᴅᴇ ғᴏʀ: {anime}\\n\\n"
+        "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
+    )
+    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default):
         await db.settings.update_one(
             {"key": "invalid_post"},
             {"$set": {"key": "invalid_post", "about_text": DEFAULT_ABOUT}},
