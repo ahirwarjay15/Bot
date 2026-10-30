@@ -299,9 +299,8 @@ async def refresh_media_parent_panel(bot, chat_id, message_id, kind, db, setting
     elif kind == "start":
         cfg = await db.settings.find_one({"key": "start_message"}) or {}
         about_enabled = bool(cfg.get("about_enabled", True))
-        text = f"START\n\nCustomize your bot's start message using the following options.\n\nStatus: {'ENABLED ✅' if cfg.get('enabled', True) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
+        text = f"START\n\nCustomize your bot's start message using the following options.\n\nStatus: ENABLED ✅\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
         markup = kb([
-            [("DISABLE" if cfg.get("enabled", True) else "ENABLE", "settings:start_toggle")],
             [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
             [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about_toggle")],
             [("《 BACK", "settings:home")],
@@ -455,8 +454,8 @@ async def render_invalid_text(query):
 async def render_start(query, db):
     cfg = await db.settings.find_one({"key": "start_message"}) or {}
     about_enabled = bool(cfg.get("about_enabled", True))
-    await edit_page(query, f"START\n\nCustomize your bot's start message using the following options.\n\nStatus: {'ENABLED ✅' if cfg.get('enabled', True) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
-        [("DISABLE" if cfg.get("enabled", True) else "ENABLE", "settings:start_toggle")],
+    await db.settings.update_one({"key": "start_message"}, {"$set": {"enabled": True}}, upsert=True)
+    await edit_page(query, f"START\n\nCustomize your bot's start message using the following options.\n\nStatus: ENABLED ✅\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
         [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
         [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about_toggle")],
         [("《 BACK", "settings:home")],
@@ -1144,10 +1143,6 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "custom_button_unused":
         await query.answer("This button is a preview of the saved label.", show_alert=False)
     elif action == "start": await render_start(query, db)
-    elif action == "start_toggle":
-        cfg = await db.settings.find_one({"key": "start_message"}) or {}
-        await patch(db, "start_message", {"enabled": not cfg.get("enabled", True)}, {"text": DEFAULT_START_TEXT})
-        await render_start(query, db)
     elif action == "start_text": await render_start_text(query)
     elif action == "start_text_edit":
         await show_input_prompt(query, state, "start_text",
@@ -1485,8 +1480,8 @@ async def handle_button_settings_reply_keyboard(message: Message, state: FSMCont
         if kind == "start":
             parent_text = format_settings_page("START\nCustomize your bot's start message using the following options.")
             parent_kb = kb([
-                [("DISABLE/ENABLE", "settings:start_toggle")], [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
-                [("MEDIA", "settings:start_poster"), ("ABOUT BUTTON", "settings:start_about")], [("《 BACK", "settings:home")],
+                [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
+                [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about")], [("《 BACK", "settings:home")],
             ])
         else:
             parent_text = format_settings_page("INVALID\nSet a response for users who send normal messages to the bot.")
