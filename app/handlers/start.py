@@ -1023,11 +1023,11 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
     cfg=await database.db.settings.find_one({"key":"start_message"}) or {}
     if cfg.get("enabled", True):
         rows = []
-        button1_url = cfg.get("button1_url", cfg.get("button_url", "http://t.me/lexiAnime"))
-        button1_text = cfg.get("button1_text", cfg.get("button_text", "📟 UPDATE CHANNEL"))
+        button1_url = cfg.get("button1_url", cfg.get("button_url", ""))
+        button1_text = cfg.get("button1_text", cfg.get("button_text", ""))
         parsed1 = urlparse(button1_url)
         configured_buttons = []
-        if cfg.get("button1_enabled", cfg.get("button_enabled", True)) and button1_text and parsed1.scheme in ("http", "https") and parsed1.netloc:
+        if cfg.get("button1_enabled", cfg.get("button_enabled", False)) and button1_text and parsed1.scheme in ("http", "https") and parsed1.netloc:
             configured_buttons.append(InlineKeyboardButton(text=button1_text, url=button1_url))
         button2_url = cfg.get("button2_url", "")
         button2_text = cfg.get("button2_text", "")
@@ -1112,7 +1112,7 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
     label = cfg.get("button1_text", cfg.get("button_text", "📟 UPDATE CHANNEL"))
     parsed = urlparse(url)
     configured_buttons = []
-    if cfg.get("button1_enabled", cfg.get("button_enabled", True)) and label and parsed.scheme in ("http", "https") and parsed.netloc:
+    if cfg.get("button1_enabled", cfg.get("button_enabled", False)) and label and parsed.scheme in ("http", "https") and parsed.netloc:
         configured_buttons.append(InlineKeyboardButton(text=label, url=url))
     url2 = cfg.get("button2_url", "")
     label2 = cfg.get("button2_text", "")
