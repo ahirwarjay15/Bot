@@ -254,9 +254,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         if valid_custom_buttons else None
     )
     sent_count = failed_count = 0
-    # Bounded concurrency improves throughput without flooding Telegram.
-    semaphore = asyncio.Semaphore(4)
-
+    # Send batch messages sequentially in the exact order stored in the batch.
     async def _deliver_one(item):
         markup_data = item.get("reply_markup")
         if not markup_data and valid_custom_buttons:
@@ -270,26 +268,27 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
             except (ValueError, TypeError):
                 log.warning("Invalid inline buttons for source message %s",
                             item["source_message_id"], exc_info=True)
-        async with semaphore:
-            try:
-                sent = await bot.copy_message(
-                    chat_id=user_id,
-                    from_chat_id=item["source_chat_id"],
-                    message_id=item["source_message_id"],
-                    reply_markup=markup,
+        try:
+            sent = await bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=item["source_chat_id"],
+                message_id=item["source_message_id"],
+                reply_markup=markup,
+            )
+            if task_key:
+                await db.tasks.update_one(
+                    {"request_key": task_key},
+                    {"$push": {"message_ids": sent.message_id}, "$set": {"updated_at": _now()}},
                 )
-                if task_key:
-                    await db.tasks.update_one(
-                        {"request_key": task_key},
-                        {"$push": {"message_ids": sent.message_id}, "$set": {"updated_at": _now()}},
-                    )
-                return (1, 0)
-            except TelegramAPIError as exc:
-                log.warning("Delivery item %s failed for user %s: %s",
-                            item.get("source_message_id"), user_id, type(exc).__name__)
-                return (0, 1)
+            return (1, 0)
+        except TelegramAPIError as exc:
+            log.warning("Delivery item %s failed for user %s: %s",
+                        item.get("source_message_id"), user_id, type(exc).__name__)
+            return (0, 1)
 
-    results = await asyncio.gather(*(_deliver_one(item) for item in items))
+    results = []
+    for item in items:
+        results.append(await _deliver_one(item))
     sent_count = sum(sent for sent, _ in results)
     failed_count = sum(failed for _, failed in results)
 
