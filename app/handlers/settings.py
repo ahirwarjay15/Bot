@@ -60,7 +60,7 @@ AUTO_DELETE_MINUTES = (2, 5, 10, 15, 30, 60, 180, 360, 720, 1440)
 DEFAULT_NOTICE = "<blockquote><b><i>Tʜɪs ғɪʟᴇ ᴡɪʟʟ ʙᴇ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ᴅᴇʟᴇᴛᴇᴅ ɪɴ 5 ᴍɪɴᴜᴛᴇs.\nMᴀᴋᴇ sᴜʀᴇ ᴛᴏ sᴀᴠᴇ ɪᴛ ʙᴇғᴏʀᴇ ɪᴛ ɢᴇᴛs ᴅᴇʟᴇᴛᴇᴅ..!</i></b></blockquote>"
 DEFAULT_START_TEXT = "<blockquote><b><i>✨ ʜᴇʟʟᴏ {mention}</i></b></blockquote>\n\nɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
 DEFAULT_AFTER_TEXT = "<blockquote><i>ʏᴏᴜʀ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ! ✅\nᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇsᴛᴏʀᴇ ʏᴏᴜʀ ғɪʟᴇ.</i></blockquote>"
-DEFAULT_AFTER_BUTTON = "↻ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!"
+DEFAULT_AFTER_BUTTON = "↻ ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!"
 DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
 DEFAULT_FORCE_JOIN_MESSAGE = "<blockquote>⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!</blockquote>\n<blockquote>ᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.</blockquote>"
 
