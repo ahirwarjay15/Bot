@@ -418,7 +418,7 @@ async def render_start_text(query):
 
 async def render_start_button(query, db):
     cfg = await db.settings.find_one({"key": "start_message"}) or {}
-    status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", True)) else "OFF ❌"
+    status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", False)) else "OFF ❌"
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
@@ -437,7 +437,7 @@ async def refresh_button_panel(bot, chat_id, message_id, db, kind):
         return
     is_start = kind == "start"
     cfg = await db.settings.find_one({"key": "start_message" if is_start else "invalid_post"}) or {}
-    status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", True) if is_start else bool(cfg.get("button_text") and cfg.get("button_url"))) else "OFF ❌"
+    status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", False) if is_start else bool(cfg.get("button_text") and cfg.get("button_url"))) else "OFF ❌"
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
@@ -1129,7 +1129,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         index = action.rsplit(":", 1)[1]
         cfg = await db.settings.find_one({"key": "start_message"}) or {}
         key = f"button{index}_enabled"
-        enabled = cfg.get(key, cfg.get("button_enabled", True) if index == "1" else False)
+        enabled = cfg.get(key, cfg.get("button_enabled", False) if index == "1" else False)
         text_value = cfg.get(f"button{index}_text", cfg.get("button_text", "") if index == "1" else "")
         url_value = cfg.get(f"button{index}_url", cfg.get("button_url", "") if index == "1" else "")
         if enabled:
@@ -1451,7 +1451,7 @@ async def handle_button_settings_reply_keyboard(message: Message, state: FSMCont
         index = value[0]
         cfg = await db.settings.find_one({"key": cfg_key}) or {}
         key = f"button{index}_enabled"
-        enabled = cfg.get(key, cfg.get("button_enabled", True) if index == "1" and is_start else bool(cfg.get("button_text") and cfg.get("button_url")) if index == "1" else False)
+        enabled = cfg.get(key, cfg.get("button_enabled", False) if index == "1" and is_start else bool(cfg.get("button_text") and cfg.get("button_url")) if index == "1" else False)
         if enabled:
             await patch(db, cfg_key, {key: False}, {"enabled": True, "text": DEFAULT_START_TEXT} if is_start else {"enabled": False})
             panel_data = await state.get_data()
@@ -2022,14 +2022,14 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await clear_state_preserving_prompts(state)
         return
     elif field == "start_button_text":
-        await patch(db, "start_message", {"button_text": value, "button_enabled": True}, {"enabled": True, "text": DEFAULT_START_TEXT, "button_url": "http://t.me/lexiAnime", "about_enabled": True})
+        await patch(db, "start_message", {"button_text": value, "button_enabled": True}, {"enabled": True, "text": DEFAULT_START_TEXT, "button_url": "", "about_enabled": True})
         await tracked_answer(message, state, "✨ Successfully updated start message button text.")
     elif field == "start_button_link":
         parsed = urlparse(value)
         if parsed.scheme not in ("https", "http") or not parsed.netloc:
             await tracked_answer(message, state, "Button link must be a valid http/https URL.")
             return
-        await patch(db, "start_message", {"button_url": value, "button_enabled": True}, {"enabled": True, "button_text": "📟 UPDATE CHANNEL", "button_url": "http://t.me/lexiAnime"})
+        await patch(db, "start_message", {"button_url": value, "button_enabled": True}, {"enabled": True, "button_text": "", "button_url": ""})
         await tracked_answer(message, state, "✨ Successfully updated start message button link.")
     elif field == "auto_notice":
         # Telegram sends formatting as entities, not HTML/Markdown in message.text.
@@ -2121,7 +2121,7 @@ async def setstart(m: Message, settings: Settings, database):
     if not await allowed(m, settings, database): return
     p=(m.text or "").split(maxsplit=1)
     if len(p)!=2 or p[1].lower() not in ("on","off"): await m.answer("Usage: /setstart on|off"); return
-    await patch(database.db, "start_message", {"enabled": p[1].lower()=="on"}, {"text": DEFAULT_START_TEXT, "button_enabled": True, "button_text": "📟 UPDATE CHANNEL", "button_url": "http://t.me/lexiAnime", "about_enabled": True})
+    await patch(database.db, "start_message", {"enabled": p[1].lower()=="on"}, {"text": DEFAULT_START_TEXT, "button_enabled": False, "button_text": "", "button_url": "", "about_enabled": True})
     await m.answer("Start setting updated.")
 
 @router.message(Command("setstarttext"))
