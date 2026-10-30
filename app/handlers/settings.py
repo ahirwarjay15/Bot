@@ -1450,7 +1450,7 @@ async def handle_button_settings_reply_keyboard(message: Message, state: FSMCont
             parent_text = format_settings_page("INVALID\nSet a response for users who send normal messages to the bot.")
             parent_kb = kb([
                 [("DISABLE/ENABLE", "settings:invalid_toggle")], [("TEXT", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
-                [("POSTER", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")], [("《 BACK", "settings:home")],
+                [("MEDIA", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")], [("《 BACK", "settings:home")],
             ])
         parent = await message.answer(parent_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove(), link_preview_options={"is_disabled": True})
         try:
