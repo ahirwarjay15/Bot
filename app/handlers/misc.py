@@ -16,17 +16,11 @@ DEFAULT_ABOUT = (
     "✨ ᴀʙᴏᴜᴛ ᴍᴇ\n"
     "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\n\n"
     "✦ ʙᴏᴛ ɪɴғᴏ\n\n"
-    "➤ ɴᴀᴍᴇ\n"
-    "✧ {bot_name}\n\n"
-    "➤ ᴄʀᴇᴀᴛᴏʀ\n"
-    "✧ {owner}\n\n"
-    "➤ ᴏᴡɴᴇʀ\n"
-    "✧ {owner}\n\n"
-    "➤ ᴍᴀᴅᴇ ғᴏʀ\n"
-    "✧ {anime}\n\n"
-    "➤ ᴠᴇʀsɪᴏɴ\n"
-    "✧ V 0.1\n\n"
-    "<i>ᴛʜᴀɴᴋs ғᴏʀ ᴜsɪɴɢ ᴏᴜʀ ʙᴏᴛ 💗</i>"
+    "➤ ɴᴀᴍᴇ: {bot_name}\n\n"
+    "➤ ᴄʀᴇᴀᴛᴏʀ: {owner}\n\n"
+    "➤ ᴏᴡɴᴇʀ: {owner}\n\n"
+    "➤ ᴍᴀᴅᴇ ғᴏʀ: {anime}\n\n"
+    "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
 )
 
 LEGACY_DEFAULT_ABOUT = (
@@ -43,8 +37,24 @@ async def load_shared_about_text(db) -> str:
     """Load the single shared About template used by every About entry point."""
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
     raw = cfg.get("about_text")
-    # Upgrade only the previous built-in default; preserve any owner-customized text.
-    if not raw or str(raw) == LEGACY_DEFAULT_ABOUT:
+    # Upgrade built-in defaults only; preserve any owner-customized About text.
+    previous_default = (
+        "✨ ᴀʙᴏᴜᴛ ᴍᴇ\n"
+        "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\n\n"
+        "✦ ʙᴏᴛ ɪɴғᴏ\n\n"
+        "➤ ɴᴀᴍᴇ\n"
+        "✧ {bot_name}\n\n"
+        "➤ ᴄʀᴇᴀᴛᴏʀ\n"
+        "✧ {owner}\n\n"
+        "➤ ᴏᴡɴᴇʀ\n"
+        "✧ {owner}\n\n"
+        "➤ ᴍᴀᴅᴇ ғᴏʀ\n"
+        "✧ {anime}\n\n"
+        "➤ ᴠᴇʀsɪᴏɴ\n"
+        "✧ V 0.1\n\n"
+        "<i>ᴛʜᴀɴᴋs ғᴏʀ ᴜsɪɴɢ ᴏᴜʀ ʙᴏᴛ 💗</i>"
+    )
+    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default):
         await db.settings.update_one(
             {"key": "invalid_post"},
             {"$set": {"key": "invalid_post", "about_text": DEFAULT_ABOUT}},
