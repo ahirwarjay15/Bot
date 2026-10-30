@@ -488,7 +488,7 @@ def build_animation_page(cfg):
     speed = normalized["speed"]
     mode = normalized["mode"]
     status = {"disabled": "Disabled ❌", "message": "Message", "poster": "Poster"}.get(mode, "Disabled ❌")
-    blink_status = "Enabled ✅" if normalized.get("file_animation_enabled", True) else "Disabled ❌"
+    blink_status = "Enabled ✅" if normalized.get("file_animation_text") else "Disabled ❌"
     text = (
         "ANIMATION\n"
         "\n<i>Add a custom animation for the verification process.</i>"
