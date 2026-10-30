@@ -13,29 +13,45 @@ router = Router(name="misc")
 log = logging.getLogger(__name__)
 DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
 DEFAULT_ABOUT = (
-    "✨ ᴀʙᴏᴜᴛ ᴍᴇ\n\n"
-    "✰ ᴍʏ ɴᴀᴍᴇ: {bot_name}\n\n"
-    "✰ creator: {owner}\n\n"
-    "✰ ᴍʏ ᴏᴡɴᴇʀ: {owner}\n\n"
-    "✰ made for: {anime}\n\n"
+    "✨ ᴀʙᴏᴜᴛ ᴍᴇ\\n"
+    "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\\n\\n"
+    "✦ ʙᴏᴛ ɪɴғᴏ\\n\\n"
+    "➤ ɴᴀᴍᴇ\\n"
+    "✧ {bot_name}\\n\\n"
+    "➤ ᴄʀᴇᴀᴛᴏʀ\\n"
+    "✧ {owner}\\n\\n"
+    "➤ ᴏᴡɴᴇʀ\\n"
+    "✧ {owner}\\n\\n"
+    "➤ ᴍᴀᴅᴇ ғᴏʀ\\n"
+    "✧ {anime}\\n\\n"
+    "➤ ᴠᴇʀsɪᴏɴ\\n"
+    "✧ V 0.1\\n\\n"
+    "<i>ᴛʜᴀɴᴋs ғᴏʀ ᴜsɪɴɢ ᴏᴜʀ ʙᴏᴛ 💗</i>"
+)
+
+LEGACY_DEFAULT_ABOUT = (
+    "✨ ᴀʙᴏᴜᴛ ᴍᴇ\\n\\n"
+    "✰ ᴍʏ ɴᴀᴍᴇ: {bot_name}\\n\\n"
+    "✰ creator: {owner}\\n\\n"
+    "✰ ᴍʏ ᴏᴡɴᴇʀ: {owner}\\n\\n"
+    "✰ made for: {anime}\\n\\n"
     "✰ ᴠᴇʀsɪᴏɴ: [V 0.1]"
 )
 
 
 async def load_shared_about_text(db) -> str:
-    """Use one saved About template for both Start Message and Invalid Post."""
+    """Load the single shared About template used by every About entry point."""
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
     raw = cfg.get("about_text")
-    if raw:
-        return str(raw)
-    # Keep the default template in the one shared settings record; do not
-    # duplicate it into start_message, because both About buttons use this value.
-    await db.settings.update_one(
-        {"key": "invalid_post"},
-        {"$set": {"key": "invalid_post", "about_text": DEFAULT_ABOUT}},
-        upsert=True,
-    )
-    return DEFAULT_ABOUT
+    # Upgrade only the previous built-in default; preserve any owner-customized text.
+    if not raw or str(raw) == LEGACY_DEFAULT_ABOUT:
+        await db.settings.update_one(
+            {"key": "invalid_post"},
+            {"$set": {"key": "invalid_post", "about_text": DEFAULT_ABOUT}},
+            upsert=True,
+        )
+        return DEFAULT_ABOUT
+    return str(raw)
 
 
 def _mention(user):
