@@ -1052,9 +1052,8 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         raw_text = normalize_telegram_text(ensure_default_quote_format(cfg.get("text") or default_start_text, "start"))
         me = await message.bot.get_me()
         text = render_common_variables(raw_text, user, me)
-        if cfg.get("poster_file_id"):
-            await message.answer_animation(cfg["poster_file_id"], caption=text, reply_markup=markup, parse_mode="HTML")
-        elif cfg.get("poster_photo_id"):
+        # Normal /start stays static; animated frames are reserved for Force Sub prompts.
+        if cfg.get("poster_photo_id"):
             await message.answer_photo(cfg["poster_photo_id"], caption=text, reply_markup=markup, parse_mode="HTML")
         else:
             await message.answer(text, reply_markup=markup, parse_mode="HTML")
