@@ -290,6 +290,48 @@ async def remove_input_prompt(bot, data):
             pass
 
 
+async def refresh_media_parent_panel(bot, chat_id, message_id, kind, db, settings):
+    """Return to the parent settings page after media is saved."""
+    if not chat_id or not message_id:
+        return
+    if kind == "forcejoin":
+        text, markup = await build_forcejoin_page(bot, db, settings)
+    elif kind == "start":
+        cfg = await db.settings.find_one({"key": "start_message"}) or {}
+        about_enabled = bool(cfg.get("about_enabled", True))
+        text = f"START\\n\\nCustomize your bot's start message using the following options.\\n\\nStatus: {'ENABLED ✅' if cfg.get('enabled', True) else 'DISABLED ❌'}\\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
+        markup = kb([
+            [("DISABLE" if cfg.get("enabled", True) else "ENABLE", "settings:start_toggle")],
+            [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
+            [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about_toggle")],
+            [("《 BACK", "settings:home")],
+        ])
+    else:
+        cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
+        about_enabled = bool(cfg.get("about_enabled", False))
+        text = f"INVALID\\nSet a response for users who send normal messages to the bot.\\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
+        markup = kb([
+            [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:invalid_toggle")],
+            [("CAPTION", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
+            [("MEDIA", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")],
+            [("《 BACK", "settings:home")],
+        ])
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text=format_settings_page(text), parse_mode="HTML", reply_markup=markup,
+            link_preview_options={"is_disabled": True},
+        )
+    except TelegramAPIError:
+        try:
+            await bot.send_message(
+                chat_id=chat_id, text=format_settings_page(text), parse_mode="HTML",
+                reply_markup=markup, link_preview_options={"is_disabled": True},
+            )
+        except TelegramAPIError:
+            pass
+
+
 async def finish_input_panel(message, state, title, back_action):
     """Delete the temporary input prompt; send success separately and keep the panel."""
     data = await state.get_data()
@@ -1047,7 +1089,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "forcejoin_media":
         await render_forcejoin_media(query, db)
     elif action == "forcejoin_media_add":
-        await state.set_state(SettingInput.waiting); await state.update_data(field="forcejoin_media")
+        await state.set_state(SettingInput.waiting); await state.update_data(field="forcejoin_media", panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="forcejoin")
         if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new force-sub poster here.")
     elif action == "forcejoin_media_remove":
         await db.settings.update_one({"key": "force_join"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
@@ -1165,7 +1207,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         if query.message: await tracked_answer(query.message, state, "Send text for Start Button 1." if action == "start_button_text" else "Now send the URL for Start Button 1.")
     elif action == "start_poster": await render_start_poster(query, db)
     elif action == "start_poster_add":
-        await state.set_state(SettingInput.waiting); await state.update_data(field="start_poster")
+        await state.set_state(SettingInput.waiting); await state.update_data(field="start_poster", panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="start")
         if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new start media here.")
     elif action == "start_poster_remove":
         await db.settings.update_one({"key": "start_message"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
@@ -1349,7 +1391,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         if query.message: await tracked_answer(query.message, state, "Send text for Invalid Button 1." if action == "invalid_button_text" else "Now send the URL for Invalid Button 1.")
     elif action == "invalid_poster": await render_poster(query, db)
     elif action == "poster_add":
-        await state.set_state(SettingInput.waiting); await state.update_data(field="poster")
+        await state.set_state(SettingInput.waiting); await state.update_data(field="poster", panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="invalid")
         if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new invalid itemer here.")
     elif action == "poster_remove":
         await db.settings.update_one({"key": "invalid_post"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
@@ -1953,7 +1995,8 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
             return
         await clear_state_preserving_prompts(state)
-        await tracked_answer(message, state, "✨ Force-join poster updated successfully.")
+        await refresh_media_parent_panel(message.bot, data.get("panel_chat_id"), data.get("panel_message_id"), "forcejoin", db, settings)
+        await tracked_answer(message, state, "✨ Force Sub media added successfully.")
         return
     if field == "forcejoin_channel":
         await clear_state_preserving_prompts(state)
@@ -1967,7 +2010,10 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         else:
             await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
             return
-        await clear_state_preserving_prompts(state); await tracked_answer(message, state, "✨ Start poster updated successfully."); return
+        await clear_state_preserving_prompts(state)
+        await refresh_media_parent_panel(message.bot, data.get("panel_chat_id"), data.get("panel_message_id"), "start", db, settings)
+        await tracked_answer(message, state, "✨ Start media added successfully.")
+        return
     if field == "poster":
         if message.animation:
             await patch(db, "invalid_post", {"poster_file_id": message.animation.file_id, "poster_photo_id": None}, {"enabled": False})
@@ -1976,7 +2022,10 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         else:
             await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
             return
-        await clear_state_preserving_prompts(state); await tracked_answer(message, state, "✨ Invalid itemer updated successfully."); return
+        await clear_state_preserving_prompts(state)
+        await refresh_media_parent_panel(message.bot, data.get("panel_chat_id"), data.get("panel_message_id"), "invalid", db, settings)
+        await tracked_answer(message, state, "✨ Invalid media added successfully.")
+        return
     if not value:
         await tracked_answer(message, state, "Please send a non-empty value.")
         return
