@@ -933,7 +933,7 @@ async def send_file_animation(bot, db, user_id: int) -> None:
             return
         msg = await bot.send_message(user_id, text, parse_mode="HTML")
         # Keep the blink brief, then remove it before sending the file.
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.025)
     except TelegramAPIError:
         log.warning("Blink send failed; continuing delivery", exc_info=True)
     finally:
