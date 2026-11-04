@@ -1,8 +1,11 @@
-"""Owner/moderator administration, ban controls, and stats popup."""
+"""Owner/moderator administration, database export, ban controls, and stats popup."""
 import asyncio
+import json
+from datetime import datetime, timezone
+from bson import json_util
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from app.config import Settings
 from app.services.permissions import is_owner_or_moderator
 
@@ -119,3 +122,65 @@ async def stats_ok(query: CallbackQuery, settings: Settings, database):
         await query.answer("Not authorized.", show_alert=True)
         return
     await query.answer(await build_stats_text(query.bot, database.db), show_alert=True)
+
+
+@router.message(Command("export"))
+async def export_database(message: Message, settings: Settings, database):
+    """Export every MongoDB collection as Extended JSON in one owner-only TXT file."""
+    if not message.from_user or message.from_user.id != settings.owner_id:
+        return
+
+    # Telegram's cloud Bot API accepts uploads up to 50 MB; keep a safety margin.
+    max_bytes = 48 * 1024 * 1024
+    output = bytearray()
+    document_count = 0
+    collection_count = 0
+    try:
+        collection_names = sorted(await database.db.list_collection_names())
+        output.extend(b'{\n  "database": ')
+        output.extend(json.dumps(database.db.name, ensure_ascii=False).encode("utf-8"))
+        output.extend(b',\n  "exported_at": ')
+        output.extend(json.dumps(datetime.now(timezone.utc).isoformat()).encode("utf-8"))
+        output.extend(b',\n  "collections": {')
+        for collection_name in collection_names:
+            collection = database.db[collection_name]
+            if collection_count:
+                output.extend(b',')
+            output.extend(b'\n    ')
+            output.extend(json.dumps(collection_name, ensure_ascii=False).encode("utf-8"))
+            output.extend(b': [')
+            first_document = True
+            async for record in collection.find({}):
+                encoded = json_util.dumps(
+                    record, json_options=json_util.RELAXED_JSON_OPTIONS, ensure_ascii=False
+                ).encode("utf-8")
+                extra = (b'' if first_document else b',') + b'\n      ' + encoded.replace(b'\n', b'\n      ')
+                if len(output) + len(extra) + 8 > max_bytes:
+                    await message.answer(
+                        "Database export is larger than Telegram's safe upload limit (48 MB). "
+                        "No partial export was sent."
+                    )
+                    return
+                output.extend(extra)
+                first_document = False
+                document_count += 1
+            output.extend(b'\n    ]')
+            collection_count += 1
+        output.extend(b'\n  }\n}\n')
+        if len(output) > max_bytes:
+            await message.answer(
+                "Database export is larger than Telegram's safe upload limit (48 MB). "
+                "No partial export was sent."
+            )
+            return
+        export_file = BufferedInputFile(bytes(output), filename="database_export.txt")
+        await message.answer_document(
+            export_file,
+            caption=(
+                "MongoDB database export completed.\\n"
+                f"Collections: {collection_count} | Documents: {document_count}"
+            ),
+        )
+    except Exception:
+        # Do not expose database errors or credentials in chat.
+        await message.answer("Database export failed. Please check the bot logs and try again.")
