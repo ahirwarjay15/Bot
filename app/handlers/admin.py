@@ -177,7 +177,7 @@ async def export_database(message: Message, settings: Settings, database):
         await message.answer_document(
             export_file,
             caption=(
-                "MongoDB database export completed.\\n"
+                "MongoDB database export completed.\n"
                 f"Collections: {collection_count} | Documents: {document_count}"
             ),
         )
