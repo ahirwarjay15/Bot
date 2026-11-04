@@ -130,7 +130,7 @@ async def export_database(message: Message, settings: Settings, database):
     if not message.from_user or message.from_user.id != settings.owner_id:
         return
 
-    max_bytes = 25 * 1024 * 1024
+    max_bytes = 25_000_000
     files = []
     document_count = 0
     collection_names = []
