@@ -28,7 +28,7 @@ def ensure_default_quote_format(raw_text, kind):
             text = text.replace(hello, "<blockquote>" + hello + "</blockquote>", 1)
     elif kind == "force_join" and "<blockquote>" not in text:
         first = "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!"
-        second = "ᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ."
+        second = "ᴛᴀᴘ <b>『 ♻️ 𝐕ᴇʀɪғʏ 𝐀ɢᴀɪɴ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ."
         if text == first + "\\n\\n" + second:
             text = "<blockquote>" + first + "</blockquote>\\n\\n<blockquote>" + second + "</blockquote>"
     return text
