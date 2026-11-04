@@ -62,7 +62,7 @@ DEFAULT_START_TEXT = "<blockquote><b><i>✨ ʜᴇʟʟᴏ {mention}</i></b></bloc
 DEFAULT_AFTER_TEXT = "<blockquote><i>ʏᴏᴜʀ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ! ✅\nᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇsᴛᴏʀᴇ ʏᴏᴜʀ ғɪʟᴇ.</i></blockquote>"
 DEFAULT_AFTER_BUTTON = "↻ ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!"
 DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
-DEFAULT_FORCE_JOIN_MESSAGE = "<blockquote><b><i>⚡ ʜᴇʏ {mention},</i></b></blockquote>\n\n<blockquote><i>ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ <b><i>ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs</i></b> ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!</i></blockquote>\n\n<blockquote><i>ᴛᴀᴘ <b>『 ᴠᴇʀɪғʏ ᴀɢᴀɪɴ 』</b> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ.</i></blockquote>"
+DEFAULT_FORCE_JOIN_MESSAGE = "<blockquote><b><i>⚡ ʜᴇʏ {mention},</i></b></blockquote>\n\n<blockquote><i>ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ <b><i>ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs</i></b> ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!</i></blockquote>\n<blockquote><i>ᴛᴀᴘ <b>『 ᴠᴇʀɪғʏ ᴀɢᴀɪɴ 』</b> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ.</i></blockquote>"
 
 
 def formatted_input_text(message, fallback):
