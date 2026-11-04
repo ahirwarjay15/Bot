@@ -141,10 +141,9 @@ async def export_database(message: Message, settings: Settings, database):
             "database": database.db.name,
             "exported_at": exported_at,
             "part": part_number,
-            "collections": {},
         }
         # Keep the collections object open while documents are streamed in.
-        return bytearray(json.dumps(prefix, ensure_ascii=False).encode("utf-8")[:-2] + b', "collections": {')
+        return bytearray(json.dumps(prefix, ensure_ascii=False).encode("utf-8")[:-1] + b', "collections": {')
 
     try:
         collection_names = sorted(await database.db.list_collection_names())
