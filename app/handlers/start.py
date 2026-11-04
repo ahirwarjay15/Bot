@@ -33,7 +33,7 @@ def ensure_default_quote_format(raw_text, kind):
         legacy_first = "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!"
         legacy_second = "ᴛᴀᴘ <b>『 ♻️ 𝐓ʀʏ 𝐀ɢᴀɪɴ 』</b> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ."
         if text == legacy_first + "\\n\\n" + legacy_second:
-            text = "<blockquote>" + first + "</blockquote>\\n<blockquote>" + second + "</blockquote>\\n\\n<blockquote>" + third + "</blockquote>"
+            text = "<blockquote>" + first + "</blockquote>\\n<blockquote>" + second + "</blockquote>\\n<blockquote>" + third + "</blockquote>"
     return text
 
 
