@@ -126,60 +126,114 @@ async def stats_ok(query: CallbackQuery, settings: Settings, database):
 
 @router.message(Command("export"))
 async def export_database(message: Message, settings: Settings, database):
-    """Export every MongoDB collection as Extended JSON in one owner-only TXT file."""
+    """Export every MongoDB collection as numbered, valid Extended JSON TXT parts."""
     if not message.from_user or message.from_user.id != settings.owner_id:
         return
 
-    # Telegram's cloud Bot API accepts uploads up to 50 MB; keep a safety margin.
-    max_bytes = 48 * 1024 * 1024
-    output = bytearray()
+    max_bytes = 25 * 1024 * 1024
+    files = []
     document_count = 0
-    collection_count = 0
+    collection_names = []
+    exported_at = datetime.now(timezone.utc).isoformat()
+
+    def start_part(part_number):
+        prefix = {
+            "database": database.db.name,
+            "exported_at": exported_at,
+            "part": part_number,
+            "collections": {},
+        }
+        # Keep the collections object open while documents are streamed in.
+        return bytearray(json.dumps(prefix, ensure_ascii=False).encode("utf-8")[:-2] + b', "collections": {')
+
     try:
         collection_names = sorted(await database.db.list_collection_names())
-        output.extend(b'{\n  "database": ')
-        output.extend(json.dumps(database.db.name, ensure_ascii=False).encode("utf-8"))
-        output.extend(b',\n  "exported_at": ')
-        output.extend(json.dumps(datetime.now(timezone.utc).isoformat()).encode("utf-8"))
-        output.extend(b',\n  "collections": {')
+        output = start_part(1)
+        part_number = 1
+        part_documents = 0
+        open_collection = None
+        first_collection = True
+        first_document = True
+
+        async def finish_collection():
+            nonlocal open_collection, first_document
+            if open_collection is not None:
+                output.extend(b']')
+                open_collection = None
+                first_document = True
+
+        async def save_part():
+            nonlocal output, part_number, part_documents, first_collection
+            output.extend(b'}}')
+            files.append((f"database_export_part_{part_number}.txt", bytes(output), part_documents))
+            part_number += 1
+            output = start_part(part_number)
+            part_documents = 0
+            first_collection = True
+
         for collection_name in collection_names:
-            collection = database.db[collection_name]
-            if collection_count:
-                output.extend(b',')
-            output.extend(b'\n    ')
-            output.extend(json.dumps(collection_name, ensure_ascii=False).encode("utf-8"))
-            output.extend(b': [')
-            first_document = True
-            async for record in collection.find({}):
+            async for record in database.db[collection_name].find({}):
                 encoded = json_util.dumps(
                     record, json_options=json_util.RELAXED_JSON_OPTIONS, ensure_ascii=False
                 ).encode("utf-8")
-                extra = (b'' if first_document else b',') + b'\n      ' + encoded.replace(b'\n', b'\n      ')
-                if len(output) + len(extra) + 8 > max_bytes:
+                if len(encoded) + 512 > max_bytes:
                     await message.answer(
-                        "Database export is larger than Telegram's safe upload limit (48 MB). "
-                        "No partial export was sent."
+                        "Ek single document 25 MB se bada hai, isliye use 25 MB limit ke andar "
+                        "valid JSON TXT part mein export nahi kiya ja sakta. Export send nahi hua."
                     )
                     return
-                output.extend(extra)
+
+                if open_collection != collection_name:
+                    await finish_collection()
+                    collection_prefix = (
+                        (b'' if first_collection else b',')
+                        + b'\n    '
+                        + json.dumps(collection_name, ensure_ascii=False).encode("utf-8")
+                        + b': ['
+                    )
+                    output.extend(collection_prefix)
+                    first_collection = False
+                    open_collection = collection_name
+                    first_document = True
+
+                document_bytes = (b'' if first_document else b',') + b'\n      ' + encoded.replace(b'\n', b'\n      ')
+                # Reserve room for closing brackets and the next collection metadata.
+                if len(output) + len(document_bytes) + 32 > max_bytes:
+                    await finish_collection()
+                    await save_part()
+                    collection_prefix = (
+                        b'\n    '
+                        + json.dumps(collection_name, ensure_ascii=False).encode("utf-8")
+                        + b': ['
+                    )
+                    output.extend(collection_prefix)
+                    first_collection = False
+                    open_collection = collection_name
+                    first_document = True
+                    document_bytes = b'\n      ' + encoded.replace(b'\n', b'\n      ')
+
+                output.extend(document_bytes)
                 first_document = False
+                part_documents += 1
                 document_count += 1
-            output.extend(b'\n    ]')
-            collection_count += 1
-        output.extend(b'\n  }\n}\n')
-        if len(output) > max_bytes:
-            await message.answer(
-                "Database export is larger than Telegram's safe upload limit (48 MB). "
-                "No partial export was sent."
+
+            await finish_collection()
+
+        if not files or part_documents or collection_names:
+            await save_part()
+
+        total_parts = len(files)
+        for index, (filename, content, part_document_count) in enumerate(files, start=1):
+            await message.answer_document(
+                BufferedInputFile(content, filename=filename),
+                caption=(
+                    f"MongoDB export — Part {index}/{total_parts}\n"
+                    f"Documents in this part: {part_document_count}"
+                ),
             )
-            return
-        export_file = BufferedInputFile(bytes(output), filename="database_export.txt")
-        await message.answer_document(
-            export_file,
-            caption=(
-                "MongoDB database export completed.\n"
-                f"Collections: {collection_count} | Documents: {document_count}"
-            ),
+        await message.answer(
+            "Database export completed.\n"
+            f"Collections: {len(collection_names)} | Documents: {document_count} | Files: {total_parts}"
         )
     except Exception:
         # Do not expose database errors or credentials in chat.
