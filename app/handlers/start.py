@@ -883,7 +883,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
             join_buttons.append(button)
     rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
     if verify_button:
-        rows.append([InlineKeyboardButton(text=cfg.get("verify_text") or "♻️ 𝗥ᴇᴛʀʏ", callback_data=f"forcejoin:check:{payload}")])
+        rows.append([InlineKeyboardButton(text=cfg.get("verify_text") or "♻️ Verify Again", callback_data=f"forcejoin:check:{payload}")])
     raw_text = ensure_default_quote_format(cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\\n\\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.", "force_join")
     me = await bot.get_me()
     rendered = render_common_variables(raw_text, user, me).replace("{remaining_count}", str(len(missing)))
@@ -1323,7 +1323,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             if button:
                 join_buttons.append(button)
         rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
-        rows.append([InlineKeyboardButton(text=force_cfg.get("verify_text") or "♻️ 𝗥ᴇᴛʀʏ", callback_data=f"forcejoin:check:{payload}")])
+        rows.append([InlineKeyboardButton(text=force_cfg.get("verify_text") or "♻️ Verify Again", callback_data=f"forcejoin:check:{payload}")])
         me = await bot.get_me()
         raw_text = ensure_default_quote_format(force_cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\\n\\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.", "force_join")
         rendered = render_common_variables(normalize_telegram_text(raw_text), query.from_user, me).replace("{remaining_count}", str(len(missing)))
