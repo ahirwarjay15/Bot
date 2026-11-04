@@ -884,7 +884,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
     if verify_button:
         rows.append([InlineKeyboardButton(text=cfg.get("verify_text") or "♻️ 𝐕ᴇʀɪғʏ 𝐀ɢᴀɪɴ", callback_data=f"forcejoin:check:{payload}")])
-    raw_text = ensure_default_quote_format(cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\\n\\nᴛᴀᴘ <b>『 ʀᴇᴛʀʏ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.", "force_join")
+    raw_text = ensure_default_quote_format(cfg.get("message") or "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ!\\n\\nᴛᴀᴘ <b>『 ♻️ 𝐕ᴇʀɪғʏ 𝐀ɢᴀɪɴ 』</b> ᴀꜰᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪꜰʏ.", "force_join")
     me = await bot.get_me()
     rendered = render_common_variables(raw_text, user, me).replace("{remaining_count}", str(len(missing)))
     markup = InlineKeyboardMarkup(inline_keyboard=rows)
