@@ -29,7 +29,7 @@ def ensure_default_quote_format(raw_text, kind):
     elif kind == "force_join" and "<blockquote>" not in text:
         first = "<b><i>⚡ ʜᴇʏ {mention},</i></b>"
         second = "<i>ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ <b><i>ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs</i></b> ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!</i>"
-        third = "<i>ᴛᴀᴘ <b>『 ᴠᴇʀɪғʏ ᴀɢᴀɪɴ 』</b> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ.</i>"
+        third = "<i>ᴛᴀᴘ </i><b>『 ᴠᴇʀɪғʏ ᴀɢᴀɪɴ 』</b><i> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ.</i>"
         legacy_first = "⚡ ʜᴇʏ {mention}, ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ ʀᴇQᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!"
         legacy_second = "ᴛᴀᴘ <b>『 ♻️ 𝐓ʀʏ 𝐀ɢᴀɪɴ 』</b> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ."
         if text == legacy_first + "\\n\\n" + legacy_second:
@@ -1328,7 +1328,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
         rows.append([InlineKeyboardButton(text=force_cfg.get("verify_text") or "♻️ 𝐕ᴇʀɪғʏ 𝐀ɢᴀɪɴ", callback_data=f"forcejoin:check:{payload}")])
         me = await bot.get_me()
-        raw_text = ensure_default_quote_format(force_cfg.get("message") or "<blockquote><b><i>⚡ ʜᴇʏ {mention},</i></b></blockquote>\n\n<blockquote><i>ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ <b><i>ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs</i></b> ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!</i></blockquote>\n<blockquote><i>ᴛᴀᴘ <b>『 ᴠᴇʀɪғʏ ᴀɢᴀɪɴ 』</b> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ.</i></blockquote>", "force_join")
+        raw_text = ensure_default_quote_format(force_cfg.get("message") or "<blockquote><b><i>⚡ ʜᴇʏ {mention},</i></b></blockquote>\n\n<blockquote><i>ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ <b><i>ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs</i></b> ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!</i></blockquote>\n<blockquote><i>ᴛᴀᴘ </i><b>『 ᴠᴇʀɪғʏ ᴀɢᴀɪɴ 』</b><i> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ.</i></blockquote>", "force_join")
         rendered = render_common_variables(normalize_telegram_text(raw_text), query.from_user, me).replace("{remaining_count}", str(len(missing)))
         markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
