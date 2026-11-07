@@ -902,6 +902,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat_id),
                 "chat_type": pending.get("pending_forcejoin_chat_type"),
                 "mode": mode,
+                "metadata_cached_at": datetime.now(timezone.utc),
             }},
             upsert=True,
         )
@@ -1776,7 +1777,8 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                       "button_url": f"https://t.me/{chat.username}",
                       "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat.id),
                       "chat_type": pending.get("pending_forcejoin_chat_type"),
-                      "mode": "normal"}},
+                      "mode": "normal",
+                      "metadata_cached_at": datetime.now(timezone.utc)}},
             upsert=True,
         )
         await remove_temporary_prompts(message.bot, pending)
