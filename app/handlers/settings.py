@@ -1768,9 +1768,10 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await db.settings.update_one(
             {"key": "force_join_channel", "channel": channel_id},
             {"$set": {"key": "force_join_channel", "channel": channel_id,
-                      "button_url": None, "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat.id),
+                      "button_url": f"https://t.me/{chat.username}",
+                      "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat.id),
                       "chat_type": pending.get("pending_forcejoin_chat_type"),
-                      "mode": "normal", "button_url": f"https://t.me/{chat.username}"}},
+                      "mode": "normal"}},
             upsert=True,
         )
         await remove_temporary_prompts(message.bot, pending)
