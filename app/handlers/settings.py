@@ -1000,7 +1000,6 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             details = f"Chat: {html.escape(str(channel_title))}"
             if is_private:
                 details += f"\nMode: {mode_label}"
-            details += f"\n{link_label}"
             await edit_page(query, f"{chat_kind} SETTINGS\n\n{details}\n\nSelect an option below.", kb([
                 [("BUTTON TEXT", f"settings:forcejoin_label:{index}"), ("REMOVE", f"settings:forcejoin_remove_one:{index}")],
                 [("《 BACK", "settings:forcejoin")],
