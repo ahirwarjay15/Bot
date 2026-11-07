@@ -15,7 +15,9 @@ async def unify_file_batch_records(db) -> int:
         items = batch.get("items")
         if not code or not isinstance(items, list):
             continue
-        existing = await db.files.find_one({"$or": [{"key": code}, {"file_key": code}]}, {"_id": 1, "items": 1})
+        existing = await db.files.find_one({"key": code}, {"_id": 1, "items": 1})
+        if existing is None:
+            existing = await db.files.find_one({"file_key": code}, {"_id": 1, "items": 1})
         if existing is None:
             await db.files.insert_one({"key": code, "items": items})
             moved += 1
