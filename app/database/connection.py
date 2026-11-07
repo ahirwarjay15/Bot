@@ -183,7 +183,6 @@ class Database:
                 "user_chat_unique",
                 "user_chat_lookup",
                 "temporary_link_ttl",
-                "temporary_link_cleanup_ttl",
             ):
                 if obsolete_index in force_join_indexes:
                     await self.db.force_join_links.drop_index(obsolete_index)
