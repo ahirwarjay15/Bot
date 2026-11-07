@@ -1,7 +1,7 @@
 import pytest
 from types import SimpleNamespace
 
-from app.handlers.settings import build_forcejoin_page
+from app.handlers.settings import build_forcejoin_page, unicode_buttons
 
 
 @pytest.mark.asyncio
@@ -33,5 +33,5 @@ async def test_force_sub_settings_uses_cached_channel_titles_without_telegram_re
         Bot(), Database(), SimpleNamespace(force_join_channels=[])
     )
     labels = [button.text for row in markup.inline_keyboard for button in row]
-    assert "Cached Private Channel" in labels
+    assert unicode_buttons("Cached Private Channel") in labels
     assert "FORCE SUB\\n\\n" not in text
