@@ -102,6 +102,7 @@ async def save_force_join_channel_label(bot, db, channel: str, label: str):
             "channel_title": chat.title or str(chat.id),
             "chat_type": chat.type,
             "mode": force_join_mode_for_chat(chat),
+            "metadata_cached_at": datetime.now(timezone.utc),
         })
         if chat.username:
             values["button_url"] = f"https://t.me/{chat.username}"
