@@ -412,6 +412,7 @@ async def build_forcejoin_page(bot, db, settings):
     rows.extend([
         [("CAPTION", "settings:forcejoin_message"), ("MEDIA", "settings:forcejoin_media")],
         [("VERIFY", "settings:forcejoin_verify_text")],
+        [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")],
         [("《 BACK", "settings:home")],
     ])
     text = ("FORCE SUB\n\n"
