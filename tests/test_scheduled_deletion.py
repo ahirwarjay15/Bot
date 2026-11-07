@@ -32,3 +32,34 @@ async def test_scheduled_message_deletion_skips_empty_id_list():
             raise AssertionError("No Telegram request should be made for an empty task")
 
     await delete_scheduled_messages(FakeBot(), 42, [])
+
+
+@pytest.mark.asyncio
+async def test_idle_delivery_worker_waits_for_scheduler_wake(monkeypatch):
+    import asyncio
+    import app.services.delivery as delivery
+
+    class EmptyCursor:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    class Tasks:
+        def find(self, *args, **kwargs):
+            return EmptyCursor()
+
+        async def find_one(self, *args, **kwargs):
+            return None
+
+    class DB:
+        tasks = Tasks()
+
+    async def stop_after_sleep(seconds):
+        assert seconds == 60
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(delivery.asyncio, "sleep", stop_after_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await delivery.run_task_worker(None, DB())
