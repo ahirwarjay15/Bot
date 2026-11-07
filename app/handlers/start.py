@@ -10,7 +10,7 @@ from aiogram import Router,F
 from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message,InlineKeyboardMarkup,InlineKeyboardButton,CallbackQuery
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter, TelegramNetworkError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
 from app.config import Settings
 from app.database.files import FileRepository
 from app.services.delivery import deliver_reference,deliver_batch,claim_delivery_request,finish_delivery_request
@@ -60,8 +60,8 @@ def render_common_variables(raw_text, user, bot):
     return text
 
 
-async def effective_force_join_channels(database, settings) -> list[str]:
-    cfg = await database.db.settings.find_one({"key": "force_join"})
+async def effective_force_join_channels(database, settings, cfg: dict | None = None) -> list[str]:
+    cfg = cfg or await database.db.settings.find_one({"key": "force_join"})
     configured = cfg.get("channels") if cfg is not None else None
     # Keep environment defaults until an admin explicitly edits the channel list.
     # Once channels_override is set, an empty list is an intentional "no channels".
@@ -98,7 +98,10 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     normalized = dict(cfg or {})
     frames = normalized.get("frames")
     frames = [str(frame) for frame in frames if str(frame).strip()] if isinstance(frames, list) else []
-    if not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    # Legacy prefix-based configs used a five-frame default cycle. Preserve
+    # valid modern 1-6 frame configurations, but migrate incomplete legacy ones.
+    if not 1 <= len(frames) <= 6 or ("prefix" in normalized and len(frames) < 4):
+        frames = list(DEFAULT_ANIMATION_FRAMES)
     normalized["frames"] = frames[:6]
     mode = normalized.get("mode")
     if mode in ("new_message", "message"): mode = "message"
@@ -159,379 +162,149 @@ def build_force_join_channel_button(
     return None
 
 
-async def _force_join_owner_alert(bot, db, record: dict, operation: str, error: Exception, attempts: int, owner_id=None):
-    """Send one durable owner alert for a terminal Force Sub task failure."""
-    task_id = str(record.get("_id", "unknown"))
-    alerts = getattr(db, "force_join_alerts", None)
-    if alerts is not None:
-        try:
-            claim = await alerts.update_one(
-                {"_id": f"{operation}:{task_id}", "sent": {"$ne": True}},
-                {"$setOnInsert": {"created_at": datetime.now(timezone.utc), "sent": False}},
-                upsert=True,
-            )
-            existing = await alerts.find_one({"_id": f"{operation}:{task_id}", "sent": True})
-            if existing:
-                return
-        except Exception:
-            log.exception("Could not claim Force Sub owner alert")
-            alerts = None
-    settings_doc = await db.settings.find_one({"key": "runtime"}) or {}
-    owner_id = owner_id or settings_doc.get("owner_id") or getattr(bot, "owner_id", None)
-    chat_id = record.get("chat_id")
-    chat_name = record.get("channel") or record.get("chat_title") or "unknown"
-    message = (
-        "⚠️ <b>Force Sub task failed</b>\n"
-        f"Operation: <code>{html.escape(operation)}</code>\n"
-        f"Chat: <code>{html.escape(str(chat_name))}</code>\n"
-        f"Chat ID: <code>{html.escape(str(chat_id or 'unknown'))}</code>\n"
-        f"Attempts: <code>{attempts}/3</code>\n"
-        f"Task/link: <code>{html.escape(str(record.get('invite_link') or task_id))}</code>\n"
-        f"Error: <code>{html.escape(str(error)[:2500])}</code>"
-    )
-    if owner_id:
-        try:
-            await bot.send_message(int(owner_id), message, parse_mode="HTML")
-            if alerts is not None:
-                await alerts.update_one({"_id": f"{operation}:{task_id}"}, {"$set": {"sent": True, "sent_at": datetime.now(timezone.utc)}})
-        except Exception:
-            log.exception("Could not deliver Force Sub owner alert")
-    else:
-        log.error("Force Sub owner alert cannot be sent: owner ID unavailable; %s", message)
-
-
-async def _revoke_tracked_force_join_link(bot, db, record: dict, owner_id=None) -> None:
-    """Revoke an expired invite with durable, bounded retries."""
-    link, chat_id = record.get("invite_link"), record.get("chat_id")
-    now = datetime.now(timezone.utc)
-    attempts = int(record.get("revoke_attempts", 0))
-    due = record.get("revoke_retry_at")
-    if isinstance(due, datetime) and due.tzinfo is None:
-        due = due.replace(tzinfo=timezone.utc)
-    if due and due > now:
-        return
-    if link and chat_id is not None:
-        try:
-            await bot.revoke_chat_invite_link(chat_id=int(chat_id), invite_link=link)
-        except TelegramAPIError as exc:
-            # Only explicit "already revoked/expired" responses count as success.
-            # Permission, malformed-request, rate-limit, and transient API errors
-            # must remain tracked and be retried rather than silently dropping the link.
-            error_text = str(exc).lower()
-            already_gone = any(marker in error_text for marker in (
-                "invite link is invalid", "invite link has expired",
-                "invite link was revoked", "invite link is revoked",
-                "invite link not found", "already revoked", "already expired",
-            ))
-            if not already_gone:
-                attempts += 1
-                if attempts >= 3:
-                    await db.force_join_links.update_one(
-                        {"_id": record["_id"]},
-                        {"$set": {"revoke_attempts": attempts, "revoke_failed": True,
-                                  "revoke_last_error": str(exc), "revoke_failed_at": now}},
-                    )
-                    await _force_join_owner_alert(bot, db, record, "revoke", exc, attempts, owner_id)
-                    return
-                await db.force_join_links.update_one(
-                    {"_id": record["_id"]},
-                    {"$set": {"revoke_attempts": attempts, "revoke_retry_at": now + timedelta(seconds=30),
-                              "revoke_last_error": str(exc)}},
-                )
-                return
-            log.info("Force Sub invite already expired/revoked: %s", exc)
-        except Exception as exc:
-            attempts += 1
-            if attempts >= 3:
-                await db.force_join_links.update_one(
-                    {"_id": record["_id"]},
-                    {"$set": {"revoke_attempts": attempts, "revoke_failed": True,
-                              "revoke_last_error": str(exc), "revoke_failed_at": now}},
-                )
-                await _force_join_owner_alert(bot, db, record, "revoke", exc, attempts, owner_id)
-                return
-            await db.force_join_links.update_one(
-                {"_id": record["_id"]},
-                {"$set": {"revoke_attempts": attempts, "revoke_retry_at": now + timedelta(seconds=30),
-                          "revoke_last_error": str(exc)}},
-            )
-            return
-    await db.force_join_links.delete_one({"_id": record["_id"]})
-
-
-async def cleanup_expired_force_join_links(bot, db, limit: int = 200, owner_id=None) -> int:
-    now = datetime.now(timezone.utc)
-    records = [r async for r in db.force_join_links.find({
-        "expires_at": {"$lte": now}, "revoke_failed": {"$ne": True},
-        "$or": [{"revoke_retry_at": {"$exists": False}}, {"revoke_retry_at": {"$lte": now}}],
-    }).limit(limit)]
-    semaphore = asyncio.Semaphore(10)
-
-    async def cleanup_one(record):
-        async with semaphore:
-            # Atomic claim makes simultaneous workers skip the same link.
-            owner = f"{id(asyncio.current_task())}:{time.monotonic()}"
-            claim_until = now + timedelta(minutes=2)
-            try:
-                claimed = await db.force_join_links.find_one_and_update(
-                    {"_id": record["_id"], "$or": [
-                        {"revoke_claim_until": {"$lte": now}},
-                        {"revoke_claim_until": {"$exists": False}},
-                    ]},
-                    {"$set": {"revoke_claim_owner": owner, "revoke_claim_until": claim_until}},
-                    return_document=True,
-                )
-            except Exception:
-                log.exception("Could not claim expired Force Sub link for cleanup")
-                return
-            if not claimed or claimed.get("revoke_claim_owner") != owner:
-                return
-            try:
-                await _revoke_tracked_force_join_link(bot, db, claimed, owner_id)
-            except Exception:
-                log.warning("Could not clean up an expired Force Sub link", exc_info=True)
-            finally:
-                await db.force_join_links.update_one(
-                    {"_id": record["_id"], "revoke_claim_owner": owner},
-                    {"$set": {"revoke_claim_until": datetime.now(timezone.utc)}},
-                )
-
-    await asyncio.gather(*(cleanup_one(record) for record in records))
-    return len(records)
-
-
-async def run_force_join_link_cleanup_worker(bot, db, settings=None, interval_seconds: int = 5):
-    """Recover due revocations promptly after restarts; retry failed API calls every 30s."""
-    while True:
-        try:
-            await cleanup_expired_force_join_links(bot, db, owner_id=getattr(settings, "owner_id", None))
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.warning("Force Sub link cleanup failed", exc_info=True)
-        await asyncio.sleep(interval_seconds)
-
-
-async def _revoke_used_force_join_link(bot, db, chat_id: int, invite_link) -> None:
-    """Shared invite links are revoked only by their scheduled expiry task."""
-    return
-
-
-def _schedule_used_force_join_link_cleanup(bot, db, chat_id: int, invite_link) -> None:
-    """Do not revoke a shared invite when one user uses it."""
-    return
-
-
-async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
-    """Read a prepared shared link only; never call Telegram invite creation in a user request."""
-    links_collection = getattr(db, "force_join_links", None)
-    if links_collection is None:
-        log.error("Force Sub invite rotation requires the force_join_links collection")
-        return None
-    now = datetime.now(timezone.utc)
-    mode = channel_cfg.get("mode")
-    link_mode = channel_cfg.get("link_mode", "rotation")
-    if link_mode == "single":
-        single_query = {"channel": channel, "link_mode": "single"}
-        if mode in {"normal", "join_request"}:
-            single_query["mode"] = mode
-        single = await links_collection.find_one(single_query)
-        if single and single.get("invite_link"):
-            return single["invite_link"]
-        log.warning("No saved Single Link is currently available for %s", channel)
-        return None
-    query = {
+async def _retire_legacy_force_join_links(bot, db, channel: str) -> None:
+    """Revoke and remove old expiring invites after a stable link is saved."""
+    cursor = db.force_join_links.find({
         "channel": channel,
-        "link_mode": "rotation",
-        "is_rotation_current": True,
-        "refresh_at": {"$gt": now},
-        "expires_at": {"$gt": now},
-    }
-    if mode in {"normal", "join_request"}:
-        query["mode"] = mode
-    cached = await links_collection.find_one(query)
-    if cached and cached.get("invite_link"):
-        return cached["invite_link"]
-    # During an API outage, keep using the previous shared link until its real
-    # Telegram expiry, even if its 25-minute rotation point has passed.
-    fallback_query = {"channel": channel, "link_mode": "rotation", "expires_at": {"$gt": now}}
-    if mode in {"normal", "join_request"}:
-        fallback_query["mode"] = mode
-    fallback = await links_collection.find_one(fallback_query)
-    if fallback and fallback.get("invite_link"):
-        return fallback["invite_link"]
-    log.warning("No pre-generated Force Sub link is currently available for %s", channel)
-    return None
+        "expires_at": {"$exists": True},
+    })
+    async for record in cursor:
+        link = record.get("invite_link")
+        chat_id = record.get("chat_id")
+        if link and chat_id is not None:
+            try:
+                await bot.revoke_chat_invite_link(
+                    chat_id=int(chat_id), invite_link=link
+                )
+            except TelegramAPIError as exc:
+                # Expired/revoked links are already unusable; other failures remain
+                # recorded so a later startup can retry the revocation.
+                message = str(exc).lower()
+                if not any(term in message for term in (
+                    "invite link is invalid", "invite link has expired",
+                    "invite link was revoked", "invite link is revoked",
+                    "already revoked", "already expired",
+                )):
+                    log.warning("Could not revoke retired Force Sub invite for %s", channel, exc_info=True)
+                    continue
+        await db.force_join_links.delete_one({"_id": record["_id"]})
 
 
-async def _prepare_force_join_link(bot, db, channel: str, channel_cfg: dict, owner_id=None) -> bool:
-    """Create and persist a shared 30-minute link in the background rotation worker."""
-    links = db.force_join_links
+async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bool:
+    """Ensure a stable Force Sub URL exists; reuse cached metadata on later startups."""
+    legacy = await db.force_join_links.find_one({
+        "channel": channel,
+        "expires_at": {"$exists": True},
+    })
+    has_legacy_settings = bool(
+        channel_cfg.get("expires_at") or channel_cfg.get("refresh_at")
+        or channel_cfg.get("link_mode")
+    )
+    if (
+        channel_cfg.get("metadata_cached_at")
+        and channel_cfg.get("button_url")
+        and not legacy
+        and not has_legacy_settings
+    ):
+        return True
+    chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
     try:
-        chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
         chat = await bot.get_chat(chat_arg)
     except (ValueError, TelegramAPIError):
-        log.warning("Could not resolve Force Sub chat %r for background link rotation", channel, exc_info=True)
+        log.warning("Could not resolve Force Sub chat %r", channel, exc_info=True)
         return False
-    chat_id = int(chat.id)
+
     mode = channel_cfg.get("mode", "normal" if getattr(chat, "username", None) else "join_request")
     if mode not in {"normal", "join_request"}:
         mode = "normal" if getattr(chat, "username", None) else "join_request"
-    link_mode = channel_cfg.get("link_mode", "rotation")
-    now = datetime.now(timezone.utc)
-    if link_mode == "single":
-        current = await links.find_one({
-            "channel": channel, "chat_id": chat_id, "mode": mode,
-            "link_mode": "single", "invite_link": {"$exists": True},
-        })
-        if current and current.get("invite_link"):
-            return True
+
+    if getattr(chat, "username", None):
+        target = f"https://t.me/{chat.username}"
     else:
-        current = await links.find_one({
-            "channel": channel, "chat_id": chat_id, "mode": mode,
-            "link_mode": "rotation", "is_rotation_current": True, "expires_at": {"$gt": now},
+        existing = await db.force_join_links.find_one({
+            "channel": channel,
+            "invite_link": {"$exists": True},
+            "expires_at": {"$exists": False},
+            "mode": mode,
         })
-    refresh_at = current.get("refresh_at") if current else None
-    # MongoDB datetime decoding may return naive UTC datetimes when tz_aware is disabled.
-    # Normalize to UTC-aware before comparing with the aware UTC clock.
-    if refresh_at is not None and refresh_at.tzinfo is None:
-        refresh_at = refresh_at.replace(tzinfo=timezone.utc)
-    if current and refresh_at and refresh_at > now:
-        return True
-    if link_mode == "rotation":
-        retry_key = f"force_join_create_retry:{channel}:{chat_id}:{mode}"
-        retry_state = await db.service_locks.find_one({"_id": retry_key}) or {}
-        retry_at = retry_state.get("retry_at")
-        if isinstance(retry_at, datetime) and retry_at.tzinfo is None:
-            retry_at = retry_at.replace(tzinfo=timezone.utc)
-        if retry_state.get("failed") or (retry_at and retry_at > now):
-            return False
-    try:
-        invite_args = {
-            "chat_id": chat_id,
-            "creates_join_request": (mode == "join_request"),
-        }
-        if link_mode == "rotation":
-            invite_args["expire_date"] = int(now.timestamp()) + 1800
-        invite = await bot.create_chat_invite_link(**invite_args)
-    except Exception as exc:
-        # Persist bounded retries so process restarts do not reset failure state.
-        retry_key = f"force_join_create_retry:{channel}:{chat_id}:{mode}"
-        state = await db.service_locks.find_one({"_id": retry_key}) or {}
-        retry_at = state.get("retry_at")
-        if isinstance(retry_at, datetime) and retry_at.tzinfo is None:
-            retry_at = retry_at.replace(tzinfo=timezone.utc)
-        if state.get("failed") or (retry_at and retry_at > now):
-            return False
-        attempts = int(state.get("attempts", 0)) + 1
-        fields = {"attempts": attempts, "last_error": str(exc), "channel": channel, "chat_id": chat_id}
-        if attempts >= 3:
-            fields.update({"failed": True, "failed_at": now})
-            await db.service_locks.update_one({"_id": retry_key}, {"$set": fields}, upsert=True)
-            await _force_join_owner_alert(bot, db, {"_id": retry_key, "channel": channel, "chat_id": chat_id}, "create", exc, attempts, owner_id)
-        else:
-            fields["retry_at"] = now + timedelta(seconds=30)
-            await db.service_locks.update_one({"_id": retry_key}, {"$set": fields}, upsert=True)
-        log.warning("Could not pre-generate Force Sub link for %s (attempt %s/3); retaining old link until expiry", channel, attempts, exc_info=True)
-        return False
-    # Anchor DB timestamps to the exact expiry timestamp sent to Telegram.
-    created = now
-    record = {
-        "channel": channel,
-        "chat_id": chat_id,
-        "invite_link": invite.invite_link,
-        "mode": mode,
-        "link_mode": link_mode,
-        "created_at": created,
-        "is_rotation_current": True,
-    }
-    if link_mode == "rotation":
-        record.update({
-            "refresh_at": created + timedelta(seconds=1500),
-            "expires_at": created + timedelta(seconds=1800),
-            "cleanup_at": created + timedelta(seconds=1800),
-        })
-    # Clear the persisted create retry state only after Telegram creation succeeds.
-    retry_key = f"force_join_create_retry:{channel}:{chat_id}:{mode}"
-    await db.service_locks.delete_one({"_id": retry_key})
-    try:
-        await links.insert_one(record)
-        if link_mode == "rotation":
-            await links.update_many(
-                {"channel": channel, "chat_id": chat_id, "mode": mode,
-                 "link_mode": "rotation", "is_rotation_current": True, "_id": {"$ne": record.get("_id")}},
-                {"$set": {"is_rotation_current": False}},
-            )
-    except Exception:
-        try:
-            await bot.revoke_chat_invite_link(chat_id=chat_id, invite_link=invite.invite_link)
-        except TelegramAPIError:
-            log.warning("Could not revoke untracked Force Sub invite", exc_info=True)
-        log.exception("Could not persist pre-generated Force Sub link for %s", channel)
-        return False
+        target = existing.get("invite_link") if existing else None
+        if not target:
+            try:
+                invite = await bot.create_chat_invite_link(
+                    chat_id=int(chat.id),
+                    creates_join_request=(mode == "join_request"),
+                )
+                target = invite.invite_link
+            except TelegramAPIError:
+                log.warning("Could not create stable Force Sub invite for %s", channel, exc_info=True)
+                return False
+            try:
+                await db.force_join_links.insert_one({
+                    "channel": channel,
+                    "chat_id": int(chat.id),
+                    "invite_link": target,
+                    "mode": mode,
+                    "created_at": datetime.now(timezone.utc),
+                })
+            except Exception:
+                # If persistence fails, revoke the newly-created orphan invite.
+                try:
+                    await bot.revoke_chat_invite_link(
+                        chat_id=int(chat.id), invite_link=target
+                    )
+                except TelegramAPIError:
+                    log.warning("Could not revoke untracked Force Sub invite", exc_info=True)
+                raise
+
+    await db.settings.update_one(
+        {"key": "force_join_channel", "channel": channel},
+        {"$set": {
+            "key": "force_join_channel",
+            "channel": channel,
+            "button_url": target,
+            "channel_title": chat.title or getattr(chat, "full_name", None) or str(chat.id),
+            "chat_type": chat.type,
+            "mode": mode,
+            "metadata_cached_at": _now(),
+        }, "$unset": {"link_mode": "", "refresh_at": "", "expires_at": ""}},
+        upsert=True,
+    )
+    await _retire_legacy_force_join_links(bot, db, channel)
     return True
 
 
-async def run_force_join_link_rotation_worker(bot, db, settings, interval_seconds: int = 1):
-    """Warm missing links and rotate shared links at 25 minutes, before 30-minute expiry."""
-    while True:
-        try:
-            channels = await effective_force_join_channels(type("DatabaseProxy", (), {"db": db})(), settings)
-            cfg = await db.settings.find_one({"key": "force_join"}) or {}
-            active_channels = set(channels)
-            # Removed channels are excluded from link generation immediately.
-            # Keep their existing rotation links valid until their recorded 30-minute
-            # expiry; the expiry cleanup worker will revoke and remove them afterward.
-            if cfg.get("enabled", False):
-                channel_cfgs = await asyncio.gather(*(
-                    db.settings.find_one({"key": "force_join_channel", "channel": channel})
-                    for channel in channels
-                ))
-                semaphore = asyncio.Semaphore(5)
-                async def prepare(channel, channel_cfg):
-                    async with semaphore:
-                        # Shared MongoDB lease prevents the two Worker services from
-                        # creating/rotating links for the same channel simultaneously.
-                        owner = f"{id(asyncio.current_task())}:{time.monotonic()}"
-                        locks = db.service_locks
-                        now = datetime.now(timezone.utc)
-                        lease_until = now + timedelta(minutes=2)
-                        try:
-                            lock = await locks.find_one_and_update(
-                                {"_id": f"force_join_rotation:{channel}",
-                                 "$or": [{"lease_until": {"$lte": now}}, {"owner": owner}]},
-                                {"$set": {"owner": owner, "lease_until": lease_until}},
-                                upsert=True,
-                                return_document=True,
-                            )
-                        except Exception as exc:
-                            if getattr(exc, "code", None) == 11000:
-                                return
-                            raise
-                        if not lock or lock.get("owner") != owner:
-                            return
-                        try:
-                            # Re-read effective settings immediately before creation: a channel
-                            # removed while this worker was waiting for its lease must not get a link.
-                            latest_channels = await effective_force_join_channels(
-                                type("DatabaseProxy", (), {"db": db})(), settings
-                            )
-                            latest_cfg = await db.settings.find_one({"key": "force_join"}) or {}
-                            if channel not in latest_channels or not latest_cfg.get("enabled", False):
-                                return
-                            await _prepare_force_join_link(bot, db, channel, channel_cfg or {}, settings.owner_id)
-                        finally:
-                            await locks.update_one(
-                                {"_id": f"force_join_rotation:{channel}", "owner": owner},
-                                {"$set": {"lease_until": datetime.now(timezone.utc)}},
-                            )
-                await asyncio.gather(*(prepare(channel, channel_cfg) for channel, channel_cfg in zip(channels, channel_cfgs)))
-            # Expired links are revoked by the existing cleanup worker.
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.warning("Force Sub link rotation worker failed", exc_info=True)
-        await asyncio.sleep(interval_seconds)
+async def migrate_force_join_links(bot, db) -> dict:
+    """One-time startup migration from expiring invites to stable URLs."""
+    migrated = 0
+    skipped = 0
+    cursor = db.settings.find({"key": "force_join_channel"})
+    async for channel_cfg in cursor:
+        channel = channel_cfg.get("channel")
+        if not channel:
+            continue
+        if await ensure_force_join_link(bot, db, str(channel), channel_cfg):
+            migrated += 1
+        else:
+            skipped += 1
+    log.info("Force Sub link migration finished: migrated=%d skipped=%d", migrated, skipped)
+    return {"migrated": migrated, "skipped": skipped}
+
+
+async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
+    """Return a public URL or a persisted non-expiring private invite."""
+    target = channel_cfg.get("button_url")
+    if target and not target.startswith("https://t.me/+"):
+        return target
+    saved = await db.force_join_links.find_one({
+        "channel": channel,
+        "invite_link": {"$exists": True},
+        "expires_at": {"$exists": False},
+    })
+    if saved and saved.get("invite_link"):
+        if not target or target == saved["invite_link"]:
+            return saved["invite_link"]
+    return None
+
 
 def _is_private_chat(chat) -> bool:
     """Return true for private channels and groups without a public username."""
@@ -1152,8 +925,6 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
 @router.chat_join_request()
 async def remember_pending_join_request(event, database):
     bot = getattr(event, "bot", None)
-    if bot is not None:
-        _schedule_used_force_join_link_cleanup(bot, database.db, event.chat.id, getattr(event, "invite_link", None))
     # Telegram emits this only when the bot has the appropriate channel admin rights.
     await database.db.pending_join_requests.update_one(
         {"chat_id": event.chat.id, "user_id": event.from_user.id},
@@ -1164,9 +935,6 @@ async def remember_pending_join_request(event, database):
 
 @router.chat_member()
 async def clear_accepted_private_join_request(event, database):
-    bot = getattr(event, "bot", None)
-    if bot is not None:
-        _schedule_used_force_join_link_cleanup(bot, database.db, event.chat.id, getattr(event, "invite_link", None))
     """Drop a saved request only when a private-channel request becomes membership."""
     if not _is_private_chat(event.chat):
         return
@@ -1212,6 +980,12 @@ async def forcejoin_repair_link(query: CallbackQuery, database):
     channel_cfg = await database.db.settings.find_one(
         {"key": "force_join_channel", "channel": channel}
     ) or {}
+    if not await ensure_force_join_link(query.bot, database.db, channel, channel_cfg):
+        await query.answer("Could not prepare this channel link. Please try again.", show_alert=True)
+        return
+    channel_cfg = await database.db.settings.find_one(
+        {"key": "force_join_channel", "channel": channel}
+    ) or channel_cfg
     target = await resolve_force_join_button_target(query.bot, database.db, channel, channel_cfg, query.from_user.id)
     if target:
         rows = []
@@ -1316,7 +1090,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             for channel in missing
         ))
         channel_cfgs = [item or {} for item in channel_cfgs]
-        # Verification refreshes expired join links without changing its own callback.
+        # Resolve the saved Force Sub URL without a background refresh cycle.
         targets = await asyncio.gather(*(
             resolve_force_join_button_target(bot, database.db, channel, channel_cfg, user_id)
             for channel, channel_cfg in zip(missing, channel_cfgs)

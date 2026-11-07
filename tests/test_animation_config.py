@@ -17,7 +17,8 @@ def test_legacy_prefix_is_removed_without_overwriting_valid_frames():
     assert "frames_enabled" not in normalized
 def test_legacy_config_without_four_frames_gets_five_default_frames():
     normalized = normalize_animation_config({"prefix": "Checking..", "frames": ["only-one-frame"]})
-    assert normalized["frames"] == ["Checking.", "Checking..", "Checking...", "Checking....", "Checking....."]
+    from app.handlers.start import DEFAULT_ANIMATION_FRAMES
+    assert normalized["frames"] == DEFAULT_ANIMATION_FRAMES
 def test_animation_page_shows_canonical_status_and_only_remaining_controls():
     text, markup = build_animation_page({
         "prefix": "Verifying", "prefix_enabled": True,

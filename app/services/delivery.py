@@ -50,6 +50,20 @@ async def finish_delivery_request(db, request_key: str, success: bool):
     await db.delivery_requests.delete_one({"request_key": request_key})
 
 
+async def delete_scheduled_messages(bot: Bot, user_id: int, message_ids: list[int]) -> None:
+    """Delete up to 100 scheduled messages per Telegram API request."""
+    unique_ids = list(dict.fromkeys(int(mid) for mid in message_ids if mid is not None))
+    for offset in range(0, len(unique_ids), 100):
+        chunk = unique_ids[offset:offset + 100]
+        try:
+            await bot.delete_messages(chat_id=user_id, message_ids=chunk)
+        except TelegramBadRequest as exc:
+            if "message to delete not found" in str(exc).lower():
+                continue
+            raise
+    return None
+
+
 def _minutes(cfg):
     allowed = (2, 5, 10, 15, 30, 60, 180, 360, 720, 1440)
     try:
@@ -341,26 +355,45 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
     return (sent_count, failed_count)
 
 
-async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
+async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
+    # Recover interrupted deliveries once on startup, not on every scheduler wake.
+    now = _now()
+    stale_before = now - timedelta(minutes=10)
+    async for stuck in db.tasks.find({
+        "status": "delivering",
+        "$or": [
+            {"updated_at": {"$lte": stale_before}},
+            {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_before}},
+        ],
+    }).limit(50):
+        if stuck.get("message_ids"):
+            await db.tasks.update_one(
+                {"_id": stuck["_id"], "status": "delivering"},
+                {"$set": {"status": "pending", "deadline": now, "updated_at": now}},
+            )
+        else:
+            await db.tasks.delete_one({"_id": stuck["_id"], "status": "delivering"})
+
     while True:
         now = _now()
-        # Recover a delivery interrupted before its expiry timer was armed.
-        stale_before = now - timedelta(minutes=10)
-        async for stuck in db.tasks.find({
-            "status": "delivering",
-            "$or": [
-                {"updated_at": {"$lte": stale_before}},
-                {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_before}},
-            ],
-        }).limit(50):
-            if stuck.get("message_ids"):
-                await db.tasks.update_one(
-                    {"_id": stuck["_id"], "status": "delivering"},
-                    {"$set": {"status": "pending", "deadline": now, "updated_at": now}},
-                )
-            else:
-                await db.tasks.delete_one({"_id": stuck["_id"], "status": "delivering"})
-        async for task in db.tasks.find({"status": "pending", "deadline": {"$lte": now}}).sort("deadline", 1).limit(50):
+        # Schedule the next wake at the earliest persisted deadline. A bounded
+        # 60-second discovery wait notices tasks created by the separate polling
+        # process without hammering MongoDB every few seconds.
+        next_task = await db.tasks.find_one(
+            {"status": "pending", "deadline": {"$exists": True}},
+            sort=[("deadline", 1)],
+            projection={"deadline": 1},
+        )
+        deadline = _as_utc_aware((next_task or {}).get("deadline"))
+        if deadline is None or deadline > now:
+            wait_seconds = poll_seconds if deadline is None else min(
+                poll_seconds, max(0.1, (deadline - now).total_seconds())
+            )
+            await asyncio.sleep(wait_seconds)
+            continue
+
+        # One indexed query loads all currently due tasks in a batch.
+        async for task in db.tasks.find({"status": "pending", "deadline": {"$lte": now}}).sort("deadline", 1).limit(100):
             claimed = await db.tasks.update_one({"_id": task["_id"], "status": "pending"}, {"$set": {"status": "processing", "claimed_at": _now()}})
             if not claimed.modified_count:
                 continue
@@ -369,21 +402,22 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                 # was enabled. Turning the setting off affects future deliveries only;
                 # it must not silently cancel existing expiries.
                 if not task.get("messages_deleted", False):
-                    deletion_failed = False
-                    for mid in task.get("message_ids", []):
-                        try:
-                            await bot.delete_message(task["user_id"], mid)
-                        except TelegramBadRequest as exc:
-                            if "message to delete not found" in str(exc).lower():
-                                continue  # Already gone; the desired state is reached.
-                            deletion_failed = True
-                            log.warning("Delete attempt rejected for delivered message %s (user %s): %s", mid, task["user_id"], exc)
-                        except TelegramAPIError:
-                            deletion_failed = True
-                            log.warning("Could not delete delivered message %s for user %s; task will retry", mid, task["user_id"], exc_info=True)
-                    if deletion_failed:
-                        raise RuntimeError("One or more delivered messages could not be deleted; retrying expiry task")
-                    await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"messages_deleted": True}})
+                    try:
+                        await delete_scheduled_messages(
+                            bot, task["user_id"], task.get("message_ids", [])
+                        )
+                    except TelegramAPIError:
+                        log.warning(
+                            "Could not bulk-delete messages for user %s; task will retry",
+                            task["user_id"], exc_info=True,
+                        )
+                        raise RuntimeError(
+                            "Bulk message deletion failed; retrying expiry task"
+                        )
+                    await db.tasks.update_one(
+                        {"_id": task["_id"]},
+                        {"$set": {"messages_deleted": True}},
+                    )
                 # Use the per-delivery snapshot so disabling or editing the
                 # feature cannot change work that was already scheduled.
                 if "after_delete_snapshot" in task:
@@ -428,5 +462,13 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
                 await db.tasks.delete_one({"_id": task["_id"], "status": "done"})
             except Exception:
                 log.exception("Expiry task failed")
-                await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"status": "pending", "last_error_at": _now()}})
-        await asyncio.sleep(poll_seconds)
+                retry_at = _now() + timedelta(seconds=60)
+                await db.tasks.update_one(
+                    {"_id": task["_id"]},
+                    {"$set": {
+                        "status": "pending",
+                        "deadline": retry_at,
+                        "last_error_at": _now(),
+                    }},
+                )
+        # Loop immediately to find the next scheduled deadline; idle waits above.

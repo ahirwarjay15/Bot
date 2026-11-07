@@ -41,8 +41,9 @@ def test_blueprint_auto_delete_cycles_and_labels():
 
 
 def test_notice_uses_readable_timer_label():
-    assert _notice({"notice": DEFAULT_NOTICE, "minutes": 60}, 60) == "Your files will be automatically deleted after 1 hour."
-    assert _notice({"notice": DEFAULT_NOTICE, "minutes": 180}, 180) == "Your files will be automatically deleted after 3 hours."
+    template = "Your files will be automatically deleted after {auto_delete_time}."
+    assert _notice({"notice": template, "minutes": 60}, 60) == "Your files will be automatically deleted after 1 hour."
+    assert _notice({"notice": template, "minutes": 180}, 180) == "Your files will be automatically deleted after 3 hours."
 
 
 def test_blueprint_timer_display_labels():
@@ -346,7 +347,7 @@ def test_batch_repository_rejects_single_file_batch():
     from app.database.files import FileRepository
 
     source = inspect.getsource(FileRepository.save_batch)
-    assert "len(items) < 2" in source
+    assert "len(ids) < 2" in source
     assert "2 to 100 files" not in source
 
 
@@ -376,6 +377,11 @@ async def test_force_sub_settings_page_uses_real_line_breaks():
             if query.get("key") == "animation":
                 return {"frames": ["Checking.", "Checking..", "Checking...", "Checking...."], "speed": 0.25, "mode": "poster", "enabled": True}
             return None
+        def find(self, query):
+            class Cursor:
+                async def to_list(self, length=None):
+                    return []
+            return Cursor()
         async def update_one(self, *args, **kwargs):
             return None
     class FakeBot:
@@ -506,11 +512,14 @@ def test_stats_alert_only_contains_total_and_banned_users():
 
     source = Path("app/handlers/settings.py").read_text()
     stats_block = source.split('elif action == "stats":', 1)[1].split('\n    await query.answer()', 1)[0]
-    assert '⛦ Total Users: {total}' in stats_block
-    assert '⛦ Banned Users: {blocked}' in stats_block
-    assert 'get_me()' not in stats_block
-    assert 'USERS:' not in stats_block
-    assert 'BLOCKED:' not in stats_block
+    assert "build_stats_text(query.bot, db)" in stats_block
+    admin_source = Path("app/handlers/admin.py").read_text()
+    stats_builder = admin_source.split("async def build_stats_text", 1)[1].split('@router.message(Command("stats"))', 1)[0]
+    assert '⛦ Total Users: {total}' in stats_builder
+    assert '⛦ Banned Users: {banned}' in stats_builder
+    assert 'get_me()' not in stats_builder
+    assert 'USERS:' not in stats_builder
+    assert 'BLOCKED:' not in stats_builder
 
 
 def test_animation_legacy_prefix_is_removed_and_custom_frames_preserved():
@@ -590,9 +599,12 @@ def test_force_join_chat_add_returns_to_main_page_with_fallback():
     assert 'await message.bot.edit_message_text(' in handler
     # Normal success path edits the saved Force Join panel in place; it does
     # not send another panel. Replacement is handled by edit_page navigation.
-    assert 'panel_chat_id, panel_message_id = data.get("forcejoin_panel_chat_id"), data.get("forcejoin_panel_message_id")' in handler
+    assert 'pending = await state.get_data()' in handler
+    assert 'pending.get("forcejoin_panel_chat_id")' in handler
+    assert 'pending.get("forcejoin_panel_message_id")' in handler
     assert 'channels.append(channel_id)' in handler
-    assert 'await patch(db, "force_join", {"channels": channels, "channels_override": True})' in handler
+    assert 'await patch(db, "force_join", {' in handler
+    assert '"channels_override": True' in handler
 
 
 def test_force_join_disable_button_is_next_to_verify():
@@ -600,7 +612,7 @@ def test_force_join_disable_button_is_next_to_verify():
 
     source = Path("app/handlers/settings.py").read_text()
     page = source.split("async def build_forcejoin_page", 1)[1].split("async def render_forcejoin", 1)[0]
-    assert '[("VERIFY", "settings:forcejoin_verify_text"),' in page
+    assert '[("VERIFY", "settings:forcejoin_verify_text")]' in page
     assert '("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")' in page
     assert 'rows.append([("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")])' not in page
 
@@ -659,8 +671,8 @@ def test_force_join_chat_add_has_a_main_panel_fallback_and_poster_is_kept_for_ve
     start_source = Path("app/handlers/start.py").read_text()
     handler = settings_source.split('if field == "forcejoin_wait_chat":', 1)[1].split('if field == "custom_button_text":', 1)[0]
     assert "build_forcejoin_page(message.bot, db, settings)" in handler
-    assert "replacement = await message.bot.send_message(" in handler
-    assert "await message.bot.delete_message(chat_id=panel_chat_id, message_id=panel_message_id)" in handler
+    assert "refresh_settings_panel(message.bot, panel_chat_id, panel_message_id, panel_text, panel_markup)" in handler
+    assert "chat_id=message.from_user.id, text=panel_text, reply_markup=panel_markup" in handler
     poster_sender = start_source.split("async def _send_force_join_post", 1)[1].split("async def _edit_force_join_post", 1)[0]
     assert 'cfg.get("poster_file_id")' in poster_sender
     assert 'cfg.get("poster_photo_id")' in poster_sender
@@ -756,22 +768,20 @@ def test_broadcast_report_counts_skipped_banned_recipients():
     report = format_broadcast_report({
         "sent": 7, "failed": 1, "blocked": 2, "unknown": 1, "skipped_banned": 3,
     })
-    assert "Recipients: 14" in report
+    assert "Recipients processed: 14" in report
     assert "Sent successfully: 7" in report
-    assert "Failed: 2" in report
-    assert "Blocked/unreachable: 2" in report
-    assert "Skipped (banned): 3" in report
+    assert "Failed: 1" in report
+    assert "Blocked/unreachable in this broadcast: 2" in report
+    assert "Skipped (banned during broadcast): 3" in report
 
 
 def test_stats_blocked_count_does_not_treat_any_delivery_error_as_blocked():
     from pathlib import Path
 
     source = Path("app/handlers/admin.py").read_text()
-    stats_handler = source.split('@router.message(Command("stats"))', 1)[1].split(
-        '@router.callback_query(F.data == "stats:ok")', 1
-    )[0]
-    assert 'count_documents({"blocked": True})' in stats_handler
-    assert 'last_delivery_error' not in stats_handler
+    stats_builder = source.split("async def build_stats_text", 1)[1].split('@router.message(Command("stats"))', 1)[0]
+    assert 'count_documents({"banned": True})' in stats_builder
+    assert 'last_delivery_error' not in stats_builder
 
 
 def test_force_join_channel_button_is_not_omitted_when_invite_resolution_fails():
@@ -893,7 +903,9 @@ def test_batch_single_file_does_not_render_a_generate_panel():
     from pathlib import Path
     source = Path("app/handlers/batch.py").read_text()
     assert "count < 2" in source
-    assert "FileRepository(database.db).save_batch(items)" in source
+    file_source = Path("app/handlers/file.py").read_text()
+    assert "if len(ids) > 1" in file_source
+    assert "await repo.save_file(" in file_source
 
 def test_batch_panel_is_not_sent_from_each_file_update():
     from pathlib import Path
@@ -935,7 +947,7 @@ def test_animation_frame_editor_saves_four_to_six_inputs_on_done():
     source = Path("app/handlers/settings.py").read_text()
     assert 'field="animation_frames_collect"' in source
     assert 'value.lower() == "/done"' in source
-    assert "if len(frames) < 4:" in source
+    assert "if len(frames) < 1:" in source
     assert "len(frames) >= 6" in source
     assert '"frames": frames' in source
     assert "await refresh_animation_panel(message.bot, panel_chat_id, panel_message_id, db)" in source

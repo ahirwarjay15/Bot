@@ -253,10 +253,10 @@ async def test_stale_private_force_join_invite_is_not_recreated_in_user_request(
 
     class FakeBot:
         async def get_chat(self, chat_id):
-            raise AssertionError("Background rotation owns chat resolution")
+            raise AssertionError("Ordinary verification must not resolve channel metadata")
 
         async def create_chat_invite_link(self, **kwargs):
-            raise AssertionError("Background rotation owns invite creation")
+            raise AssertionError("Ordinary verification must not create invite links")
 
     links = LinksCollection()
     db = SimpleNamespace(settings=SimpleNamespace(), force_join_links=links)
@@ -282,10 +282,10 @@ async def test_public_force_join_link_is_not_created_in_user_request():
 
     class FakeBot:
         async def get_chat(self, chat_id):
-            raise AssertionError("Background rotation owns chat resolution")
+            raise AssertionError("Ordinary verification must not resolve channel metadata")
 
         async def create_chat_invite_link(self, **kwargs):
-            raise AssertionError("Background rotation owns invite creation")
+            raise AssertionError("Ordinary verification must not create invite links")
 
     links = LinksCollection()
     target = await resolve_force_join_button_target(

@@ -35,11 +35,11 @@ class FakeDatabase:
 
 
 @pytest.mark.asyncio
-async def test_single_file_stores_id_as_array_and_omits_empty_fields():
+async def test_single_file_stores_compact_id_and_omits_empty_fields():
     db = FakeDatabase()
     saved = await FileRepository(db).save_file(source_message_id=381)
 
-    assert saved["id"] == [381]
+    assert saved["id"] == "381"
     assert "buttons" not in saved
     assert "reply_markup" not in saved
     assert "message_id" not in saved
@@ -48,28 +48,32 @@ async def test_single_file_stores_id_as_array_and_omits_empty_fields():
 @pytest.mark.asyncio
 async def test_single_file_stores_compact_buttons_by_source_message_id():
     db = FakeDatabase()
-    buttons = {
-        "1": ["Join Channel", "https://t.me/example"],
-        "1.1": ["Join Channel", "https://t.me/example", "D"],
-        "1.2": ["Join Channel", "https://t.me/example", "S"],
-        "1.3": ["Join Channel", "https://t.me/example", "P"],
-        "2": ["Join Channel", "https://t.me/example"],
-    }
+    buttons = [
+        [1, 0, "Join Channel", "https://t.me/example", "D"],
+        [1, 1, "Join Channel", "https://t.me/example", "S"],
+        [1, 2, "Join Channel", "https://t.me/example", "P"],
+    ]
     saved = await FileRepository(db).save_file(source_message_id=678, buttons=buttons)
 
-    assert saved == {"key": saved["key"], "id": [678], "buttons": {"678": buttons}}
+    assert saved["id"] == "678"
+    assert saved["buttons"] == [
+        "678|1|0|Join Channel|https://t.me/example|D",
+        "678|1|1|Join Channel|https://t.me/example|S",
+        "678|1|2|Join Channel|https://t.me/example|P",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_batch_stores_compact_buttons_per_source_message_id():
     db = FakeDatabase()
     buttons = {
-        "678": {"1": ["Join Channel", "https://t.me/example"]},
-        "532": {"1": ["Join Channel", "https://t.me/example", "P"]},
+        "678": [[1, 0, "Join Channel", "https://t.me/example", "D"]],
+        "532": [[1, 0, "Join Channel", "https://t.me/example", "P"]],
     }
     saved = await FileRepository(db).save_batch([678, 532], buttons=buttons)
 
-    assert saved == {"key": saved["key"], "id": [678, 532], "buttons": buttons}
+    assert saved["id"] == "678,532"
+    assert saved["buttons"] == ["678|1|0|Join Channel|https://t.me/example|D", "532|1|0|Join Channel|https://t.me/example|P"]
 
 
 @pytest.mark.asyncio
@@ -77,7 +81,7 @@ async def test_batch_stores_ordered_ids_without_buttons_or_chat_by_default():
     db = FakeDatabase()
     saved = await FileRepository(db).save_batch([381, 379, 382])
 
-    assert saved["id"] == [381, 379, 382]
+    assert saved["id"] == "381,379,382"
     assert "buttons" not in saved
     assert "chat" not in saved
     assert "message_id" not in saved
@@ -88,7 +92,7 @@ async def test_external_channel_batch_saves_numeric_chat_id_but_no_buttons():
     db = FakeDatabase()
     saved = await FileRepository(db).save_batch([381, 379], chat_id=-1001234567890)
 
-    assert saved == {"key": saved["key"], "id": [381, 379], "chat": -1001234567890}
+    assert saved == {"key": saved["key"], "id": "381,379", "chat": -1001234567890}
     assert "buttons" not in saved
     assert "message_id" not in saved
 
@@ -101,7 +105,7 @@ async def test_batch_accepts_handler_item_references_without_storing_chat_or_but
         {"source_chat_id": -100123, "source_message_id": 4},
     ])
 
-    assert saved["id"] == [3, 4]
+    assert saved["id"] == "3,4"
     assert "source_chat_id" not in saved
     assert "chat" not in saved
     assert "buttons" not in saved
