@@ -224,7 +224,7 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     saved = await db.force_join_links.find_one(
         {"channel": channel, "invite_link": {"$exists": True}}
     )
-    if saved and saved.get("invite_link"):
+    if saved and saved.get("invite_link") and not saved.get("expires_at"):
         return saved["invite_link"]
     return None
 
