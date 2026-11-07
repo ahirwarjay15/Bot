@@ -462,5 +462,13 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
                 await db.tasks.delete_one({"_id": task["_id"], "status": "done"})
             except Exception:
                 log.exception("Expiry task failed")
-                await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"status": "pending", "last_error_at": _now()}})
+                retry_at = _now() + timedelta(seconds=60)
+                await db.tasks.update_one(
+                    {"_id": task["_id"]},
+                    {"$set": {
+                        "status": "pending",
+                        "deadline": retry_at,
+                        "last_error_at": _now(),
+                    }},
+                )
         # Loop immediately to find the next scheduled deadline; idle waits above.
