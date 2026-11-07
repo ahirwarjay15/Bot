@@ -388,21 +388,39 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
                 # was enabled. Turning the setting off affects future deliveries only;
                 # it must not silently cancel existing expiries.
                 if not task.get("messages_deleted", False):
-                    deletion_failed = False
-                    for mid in task.get("message_ids", []):
+                    message_ids = list(dict.fromkeys(
+                        int(mid) for mid in task.get("message_ids", []) if mid is not None
+                    ))
+                    # Telegram supports deleting up to 100 messages in one API
+                    # request. Chunk large batches rather than issuing one request
+                    # per delivered file.
+                    for offset in range(0, len(message_ids), 100):
+                        chunk = message_ids[offset:offset + 100]
                         try:
-                            await bot.delete_message(task["user_id"], mid)
+                            await bot.delete_messages(
+                                chat_id=task["user_id"],
+                                message_ids=chunk,
+                            )
                         except TelegramBadRequest as exc:
                             if "message to delete not found" in str(exc).lower():
-                                continue  # Already gone; the desired state is reached.
-                            deletion_failed = True
-                            log.warning("Delete attempt rejected for delivered message %s (user %s): %s", mid, task["user_id"], exc)
+                                continue
+                            log.warning(
+                                "Bulk delete rejected for user %s (%d messages): %s",
+                                task["user_id"], len(chunk), exc,
+                            )
+                            raise RuntimeError(
+                                "Bulk message deletion failed; retrying expiry task"
+                            ) from exc
                         except TelegramAPIError:
-                            deletion_failed = True
-                            log.warning("Could not delete delivered message %s for user %s; task will retry", mid, task["user_id"], exc_info=True)
-                    if deletion_failed:
-                        raise RuntimeError("One or more delivered messages could not be deleted; retrying expiry task")
-                    await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"messages_deleted": True}})
+                            log.warning(
+                                "Could not bulk-delete messages for user %s; task will retry",
+                                task["user_id"], exc_info=True,
+                            )
+                            raise
+                    await db.tasks.update_one(
+                        {"_id": task["_id"]},
+                        {"$set": {"messages_deleted": True}},
+                    )
                 # Use the per-delivery snapshot so disabling or editing the
                 # feature cannot change work that was already scheduled.
                 if "after_delete_snapshot" in task:
