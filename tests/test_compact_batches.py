@@ -72,7 +72,8 @@ async def test_batch_stores_compact_buttons_per_source_message_id():
     }
     saved = await FileRepository(db).save_batch([678, 532], buttons=buttons)
 
-    assert saved["id"] == "678,532"\n    assert saved["buttons"] == ["678|1|0|Join Channel|https://t.me/example|D", "532|1|0|Join Channel|https://t.me/example|P"]
+    assert saved["id"] == "678,532"
+    assert saved["buttons"] == ["678|1|0|Join Channel|https://t.me/example|D", "532|1|0|Join Channel|https://t.me/example|P"]
 
 
 @pytest.mark.asyncio
