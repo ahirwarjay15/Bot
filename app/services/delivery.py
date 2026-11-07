@@ -341,26 +341,45 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
     return (sent_count, failed_count)
 
 
-async def run_task_worker(bot: Bot, db, poll_seconds: int = 3):
+async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
+    # Recover interrupted deliveries once on startup, not on every scheduler wake.
+    now = _now()
+    stale_before = now - timedelta(minutes=10)
+    async for stuck in db.tasks.find({
+        "status": "delivering",
+        "$or": [
+            {"updated_at": {"$lte": stale_before}},
+            {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_before}},
+        ],
+    }).limit(50):
+        if stuck.get("message_ids"):
+            await db.tasks.update_one(
+                {"_id": stuck["_id"], "status": "delivering"},
+                {"$set": {"status": "pending", "deadline": now, "updated_at": now}},
+            )
+        else:
+            await db.tasks.delete_one({"_id": stuck["_id"], "status": "delivering"})
+
     while True:
         now = _now()
-        # Recover a delivery interrupted before its expiry timer was armed.
-        stale_before = now - timedelta(minutes=10)
-        async for stuck in db.tasks.find({
-            "status": "delivering",
-            "$or": [
-                {"updated_at": {"$lte": stale_before}},
-                {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_before}},
-            ],
-        }).limit(50):
-            if stuck.get("message_ids"):
-                await db.tasks.update_one(
-                    {"_id": stuck["_id"], "status": "delivering"},
-                    {"$set": {"status": "pending", "deadline": now, "updated_at": now}},
-                )
-            else:
-                await db.tasks.delete_one({"_id": stuck["_id"], "status": "delivering"})
-        async for task in db.tasks.find({"status": "pending", "deadline": {"$lte": now}}).sort("deadline", 1).limit(50):
+        # Schedule the next wake at the earliest persisted deadline. A bounded
+        # 60-second discovery wait notices tasks created by the separate polling
+        # process without hammering MongoDB every few seconds.
+        next_task = await db.tasks.find_one(
+            {"status": "pending", "deadline": {"$exists": True}},
+            sort=[("deadline", 1)],
+            projection={"deadline": 1},
+        )
+        deadline = _as_utc_aware((next_task or {}).get("deadline"))
+        if deadline is None or deadline > now:
+            wait_seconds = poll_seconds if deadline is None else min(
+                poll_seconds, max(0.1, (deadline - now).total_seconds())
+            )
+            await asyncio.sleep(wait_seconds)
+            continue
+
+        # One indexed query loads all currently due tasks in a batch.
+        async for task in db.tasks.find({"status": "pending", "deadline": {"$lte": now}}).sort("deadline", 1).limit(100):
             claimed = await db.tasks.update_one({"_id": task["_id"], "status": "pending"}, {"$set": {"status": "processing", "claimed_at": _now()}})
             if not claimed.modified_count:
                 continue
@@ -429,4 +448,4 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 3):
             except Exception:
                 log.exception("Expiry task failed")
                 await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"status": "pending", "last_error_at": _now()}})
-        await asyncio.sleep(poll_seconds)
+        # Loop immediately to find the next scheduled deadline; idle waits above.
