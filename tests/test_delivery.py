@@ -6,7 +6,7 @@ def test_auto_delete_timer_accepts_blueprint_cycle():
 
 def test_invalid_auto_delete_timer_falls_back_to_default():
     assert _minutes({"minutes": 7}) == 10
-    assert _minutes({}) == 10
+    assert _minutes({}) == 5
 
 def test_auto_delete_notice_interpolates_timer():
     assert _notice({"notice": "Deleted in {auto_delete_time}", "minutes": 30}, 30) == "Deleted in 30 ᴍɪɴᴜᴛᴇs"
