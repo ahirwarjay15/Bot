@@ -377,6 +377,11 @@ async def test_force_sub_settings_page_uses_real_line_breaks():
             if query.get("key") == "animation":
                 return {"frames": ["Checking.", "Checking..", "Checking...", "Checking...."], "speed": 0.25, "mode": "poster", "enabled": True}
             return None
+        def find(self, query):
+            class Cursor:
+                async def to_list(self, length=None):
+                    return []
+            return Cursor()
         async def update_one(self, *args, **kwargs):
             return None
     class FakeBot:
