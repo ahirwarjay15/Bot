@@ -341,7 +341,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
     return (sent_count, failed_count)
 
 
-async def run_task_worker(bot: Bot, db, poll_seconds: int = 1):
+async def run_task_worker(bot: Bot, db, poll_seconds: int = 3):
     while True:
         now = _now()
         # Recover a delivery interrupted before its expiry timer was armed.
