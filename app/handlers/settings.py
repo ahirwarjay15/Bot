@@ -13,7 +13,7 @@ from app.config import Settings
 from app.services.permissions import is_owner_or_moderator
 from app.services.text_format import normalize_telegram_text
 from app.services.links import shorten_url
-from app.handlers.start import effective_force_join_channels, normalize_animation_config
+from app.handlers.start import effective_force_join_channels, normalize_animation_config, ensure_force_join_link
 
 router = Router(name="settings")
 
@@ -872,61 +872,36 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await query.answer("Invalid mode.", show_alert=True)
             return
         pending = await state.get_data()
-        if not pending.get("pending_forcejoin_chat_id") or not pending.get("pending_forcejoin_channel_id"):
-            await query.answer("Selection expired. Please add the chat again.", show_alert=True)
-            return
-        await state.update_data(pending_forcejoin_access_mode=mode)
-        link_prompt = (
-            f"Choose link mode for <b>{html.escape(pending.get('pending_forcejoin_chat_title') or str(pending['pending_forcejoin_chat_id']))}</b>:"
-        )
-        link_markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="ʀᴏᴛᴀᴛɪᴏɴ ʟɪɴᴋꜱ", callback_data="settings:forcejoin_link_mode:rotation")],
-            [InlineKeyboardButton(text="ꜱɪɴɢʟᴇ ʟɪɴᴋ", callback_data="settings:forcejoin_link_mode:single")],
-        ])
-        edited = False
-        if query.message:
-            try:
-                await query.message.edit_text(link_prompt, parse_mode="HTML", reply_markup=link_markup)
-                edited = True
-            except TelegramAPIError:
-                pass
-        if not edited:
-            await query.bot.send_message(
-                chat_id=query.from_user.id, text=link_prompt,
-                parse_mode="HTML", reply_markup=link_markup,
-            )
-        await query.answer("Access mode saved.")
-        return
-    if action.startswith("forcejoin_link_mode:"):
-        link_mode = action.split(":", 1)[1]
-        if link_mode not in {"rotation", "single"}:
-            await query.answer("Invalid link mode.", show_alert=True)
-            return
-        pending = await state.get_data()
         chat_id = pending.get("pending_forcejoin_chat_id")
         channel_id = pending.get("pending_forcejoin_channel_id")
-        access_mode = pending.get("pending_forcejoin_access_mode", "normal")
         if not chat_id or not channel_id:
             await query.answer("Selection expired. Please add the chat again.", show_alert=True)
             return
         channels = await effective_force_join_channels(database, settings)
         if channel_id not in channels:
             channels.append(channel_id)
-        await patch(db, "force_join", {"channels": channels, "channels_override": True, "enabled": bool(channels)})
+        await patch(db, "force_join", {
+            "channels": channels,
+            "channels_override": True,
+            "enabled": bool(channels),
+        })
         await db.settings.update_one(
             {"key": "force_join_channel", "channel": channel_id},
-            {"$set": {"key": "force_join_channel", "channel": channel_id,
-                      "button_url": None, "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat_id),
-                      "chat_type": pending.get("pending_forcejoin_chat_type"),
-                      "mode": access_mode, "link_mode": link_mode}},
+            {"$set": {
+                "key": "force_join_channel",
+                "channel": channel_id,
+                "button_url": None,
+                "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat_id),
+                "chat_type": pending.get("pending_forcejoin_chat_type"),
+                "mode": mode,
+            }, "$unset": {"link_mode": ""}},
             upsert=True,
         )
-        try:
-            from app.handlers.start import _prepare_force_join_link
-            channel_cfg = await db.settings.find_one({"key": "force_join_channel", "channel": channel_id}) or {}
-            await _prepare_force_join_link(query.bot, db, channel_id, channel_cfg)
-        except Exception:
-            pass
+        channel_cfg = await db.settings.find_one(
+            {"key": "force_join_channel", "channel": channel_id}
+        ) or {}
+        if not await ensure_force_join_link(query.bot, db, channel_id, channel_cfg):
+            log.warning("Force Sub link setup is incomplete for %s; it can be repaired from the user-facing button", channel_id)
         await remove_temporary_prompts(query.bot, pending)
         try:
             await query.bot.delete_message(
@@ -942,8 +917,6 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await keyboard_removal.delete()
         except TelegramAPIError:
             pass
-        # The link-mode chooser is a temporary prompt; remove only that
-        # message after a selection, leaving the main Force Sub settings panel intact.
         if query.message:
             try:
                 await query.message.delete()
@@ -954,7 +927,9 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         panel_message_id = pending.get("pending_forcejoin_panel_message_id")
         if panel_chat_id and panel_message_id:
             panel_text, panel_markup = await build_forcejoin_page(query.bot, db, settings)
-            refreshed = await refresh_settings_panel(query.bot, panel_chat_id, panel_message_id, panel_text, panel_markup)
+            refreshed = await refresh_settings_panel(
+                query.bot, panel_chat_id, panel_message_id, panel_text, panel_markup
+            )
             if not refreshed:
                 try:
                     await query.bot.send_message(
@@ -962,7 +937,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                     )
                 except TelegramAPIError:
                     pass
-        await query.answer("Link mode saved.")
+        await query.answer("Access mode saved.")
         return
     if action in {"home", "home_back"}: await render_home(query)
     elif action == "forcejoin": await render_forcejoin(query, db, settings)
@@ -1023,8 +998,6 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 is_private = not str(channel).startswith("@")
             mode = cfg.get("mode", "normal")
             mode_label = "Request Mode" if mode in {"join_request", "request"} else "Normal Mode"
-            link_mode = cfg.get("link_mode", "rotation")
-            link_label = "Single Link" if link_mode == "single" else "Rotation Links"
             chat_kind = "Group" if chat_type in {"group", "supergroup"} else "Channel"
             details = f"Chat: {html.escape(str(channel_title))}"
             if is_private:
@@ -1798,15 +1771,9 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             {"$set": {"key": "force_join_channel", "channel": channel_id,
                       "button_url": None, "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat.id),
                       "chat_type": pending.get("pending_forcejoin_chat_type"),
-                      "mode": "normal", "link_mode": "single"}},
+                      "mode": "normal", "button_url": f"https://t.me/{chat.username}"}},
             upsert=True,
         )
-        try:
-            from app.handlers.start import _prepare_force_join_link
-            channel_cfg = await db.settings.find_one({"key": "force_join_channel", "channel": channel_id}) or {}
-            await _prepare_force_join_link(message.bot, db, channel_id, channel_cfg)
-        except Exception:
-            pass
         await remove_temporary_prompts(message.bot, pending)
         try:
             await message.bot.delete_message(
