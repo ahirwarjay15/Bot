@@ -1748,8 +1748,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             await state.set_state(SettingInput.waiting)
             await state.update_data(field="forcejoin_wait_mode")
             return
-        # Public chats always use their stable username URL, so save them
-        # immediately with Single Link mode. Mode selection remains private-only.
+        # Public chats use their stable username URL; mode selection remains private-only.
         pending = await state.update_data(
             pending_forcejoin_chat_id=chat.id,
             pending_forcejoin_channel_id=channel_id,
