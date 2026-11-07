@@ -202,6 +202,10 @@ class Database:
             await self.db.broadcast_jobs.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
             await self.db.broadcast_recipients.create_index([("job_id", ASCENDING), ("user_id", ASCENDING)], unique=True)
             await self.db.broadcast_recipients.create_index([("job_id", ASCENDING), ("status", ASCENDING)])
+            await self.db.broadcast_recipients.create_index(
+                [("job_id", ASCENDING), ("status", ASCENDING), ("retry_at", ASCENDING)],
+                name="job_status_retry_at",
+            )
             # Remove the retired delivery-status flag and profile metadata. Admin
             # bans remain represented by users.banned; Telegram delivery failures
             # are tracked per broadcast recipient, not as a second user status.

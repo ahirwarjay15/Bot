@@ -18,6 +18,27 @@ def now():
     return datetime.now(timezone.utc)
 
 
+def _eligible_broadcast_recipient_filter(job_id, current_time):
+    """Claim only pending recipients whose Telegram retry delay has elapsed."""
+    return {
+        "job_id": job_id,
+        "status": "pending",
+        "$or": [
+            {"retry_at": {"$exists": False}},
+            {"retry_at": {"$lte": current_time}},
+        ],
+    }
+
+
+def _retry_wait_seconds(retry_at, current_time):
+    """Convert MongoDB's possibly-naive UTC datetime into a safe sleep duration."""
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    else:
+        retry_at = retry_at.astimezone(timezone.utc)
+    return max(0.1, (retry_at - current_time).total_seconds())
+
+
 def format_broadcast_report(counts: dict[str, int]) -> str:
     """Show mutually exclusive outcomes for this broadcast and reconcile totals."""
     statuses = ("sent", "failed", "blocked", "unknown", "skipped_banned")
@@ -180,19 +201,40 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
             await db.broadcast_jobs.update_one(
                 {"_id": job_id}, {"$set": {"recipients_loaded": True, "recipient_count": len(ids), "status": "processing"}}
             )
+        claim_time = now()
         recipient = await db.broadcast_recipients.find_one_and_update(
-            {"job_id": job_id, "status": "pending"},
-            {"$set": {"status": "sending", "attempted_at": now()}},
+            _eligible_broadcast_recipient_filter(job_id, claim_time),
+            {
+                "$set": {"status": "sending", "attempted_at": claim_time},
+                "$unset": {"retry_at": ""},
+            },
             sort=[("user_id", 1)],
         )
         if not recipient:
+            # A rate-limited recipient stays pending but must not be reclaimed
+            # until Telegram's RetryAfter deadline has passed. Sleep until the
+            # earliest deferred recipient instead of spinning MongoDB every 0.1s.
+            retry_now = now()
+            deferred = await db.broadcast_recipients.find_one(
+                {
+                    "job_id": job_id,
+                    "status": "pending",
+                    "retry_at": {"$gt": retry_now},
+                },
+                sort=[("retry_at", 1)],
+                projection={"retry_at": 1},
+            )
+            if deferred:
+                await asyncio.sleep(_retry_wait_seconds(deferred["retry_at"], retry_now))
+                continue
+
             # A job can be observed by multiple workers. Wait for every claimed send
             # to finish and atomically claim report finalization exactly once.
             outstanding = await db.broadcast_recipients.count_documents(
                 {"job_id": job_id, "status": {"$in": ["pending", "sending"]}}
             )
             if outstanding:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5)
                 continue
             finalized = await db.broadcast_jobs.update_one(
                 {"_id": job_id, "status": {"$in": ["preparing", "pending", "processing"]}},
@@ -243,8 +285,11 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
             # Successful delivery means this user is reachable again.
             await db.users.update_one({"user_id": uid}, {"$set": {"blocked": False}})
         except RetryAfter as exc:
-            await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "pending", "retry_after": float(exc.retry_after)}})
-            await asyncio.sleep(float(exc.retry_after) + 0.5)
+            retry_at = now() + timedelta(seconds=max(0.0, float(exc.retry_after)) + 0.5)
+            await db.broadcast_recipients.update_one(
+                {"_id": recipient["_id"]},
+                {"$set": {"status": "pending", "retry_at": retry_at}},
+            )
         except TelegramForbiddenError:
             await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "blocked", "finished_at": now()}})
             # This is Telegram delivery status, not an admin ban.
