@@ -894,7 +894,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 "channel_title": pending.get("pending_forcejoin_chat_title") or str(chat_id),
                 "chat_type": pending.get("pending_forcejoin_chat_type"),
                 "mode": mode,
-            }, "$unset": {"link_mode": ""}},
+            }},
             upsert=True,
         )
         channel_cfg = await db.settings.find_one(
