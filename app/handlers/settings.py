@@ -1017,8 +1017,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         if index < len(channels):
             channel = channels.pop(index)
             await patch(db, "force_join", {"channels": channels, "channels_override": True, "enabled": bool(channels)})
-            # Immediately revoke every tracked invite for the removed channel;
-            # the background worker also prunes stale channel links as a safeguard.
+            # Revoke and remove every tracked invite for the removed channel.
             async for link in db.force_join_links.find({"channel": channel}):
                 try:
                     if link.get("invite_link") and link.get("chat_id") is not None:
