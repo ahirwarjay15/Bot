@@ -177,20 +177,22 @@ class Database:
             await self.db.delivery_requests.create_index([("request_key", ASCENDING)], unique=True)
             await self.db.delivery_requests.create_index([("status", ASCENDING), ("updated_at", ASCENDING)])
             await migrate_delivery_storage(self.db)
-            # Keep multiple short-lived links per user/chat so issuing a fresh
-            # link never has to revoke an older one in the interactive request path.
+            # Stable Force Sub URLs are looked up by channel; no expiry polling/index is needed.
             force_join_indexes = await self.db.force_join_links.index_information()
-            if "user_chat_unique" in force_join_indexes:
-                await self.db.force_join_links.drop_index("user_chat_unique")
-            if "user_chat_lookup" not in force_join_indexes:
-                await self.db.force_join_links.create_index(
-                    [("user_id", ASCENDING), ("chat_id", ASCENDING)], name="user_chat_lookup"
-                )
-            force_join_indexes = await self.db.force_join_links.index_information()
-            if "temporary_link_ttl" in force_join_indexes:
-                await self.db.force_join_links.drop_index("temporary_link_ttl")
-            await self.db.force_join_links.create_index([("cleanup_at", ASCENDING)], expireAfterSeconds=0, name="temporary_link_cleanup_ttl")
-            await self.db.force_join_links.create_index([("invite_link", ASCENDING)], unique=True, name="invite_link_unique")
+            for obsolete_index in (
+                "user_chat_unique",
+                "user_chat_lookup",
+                "temporary_link_ttl",
+                "temporary_link_cleanup_ttl",
+            ):
+                if obsolete_index in force_join_indexes:
+                    await self.db.force_join_links.drop_index(obsolete_index)
+            await self.db.force_join_links.create_index(
+                [("channel", ASCENDING)], name="channel_lookup"
+            )
+            await self.db.force_join_links.create_index(
+                [("invite_link", ASCENDING)], unique=True, name="invite_link_unique"
+            )
             await remove_legacy_external_force_join_links(self.db)
             cleanup_counts = await cleanup_completed_transients(self.db)
             logger.info("Removed completed legacy records: %s", cleanup_counts)
