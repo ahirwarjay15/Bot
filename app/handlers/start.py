@@ -160,7 +160,7 @@ def build_force_join_channel_button(
 
 
 async def _retire_legacy_force_join_links(bot, db, channel: str) -> None:
-    """Revoke and remove old expiring rotation invites after a stable link is saved."""
+    """Revoke and remove old expiring invites after a stable link is saved."""
     cursor = db.force_join_links.find({
         "channel": channel,
         "expires_at": {"$exists": True},
@@ -255,7 +255,7 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
 
 
 async def migrate_force_join_links(bot, db) -> dict:
-    """One-time startup migration from expiring rotation links to stable URLs."""
+    """One-time startup migration from expiring invites to stable URLs."""
     migrated = 0
     skipped = 0
     cursor = db.settings.find({"key": "force_join_channel"})
