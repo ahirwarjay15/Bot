@@ -140,6 +140,11 @@ async def _parse_message_reference(message: Message, bot, configured_chat_id):
         if len(parts) >= 3 and parts[0] == "c":
             channel_id = int("-100" + parts[1])
             message_id = int(parts[2])
+            # Private /c/ links can only be resolved without a username. Accept
+            # them only for the configured Database Channel; other private
+            # sources must be forwarded with Telegram's origin metadata.
+            if configured_chat_id is None or int(configured_chat_id) != channel_id:
+                return None
         elif len(parts) >= 2 and parts[0] not in ("+", "joinchat"):
             chat = await bot.get_chat("@" + parts[0].lstrip("@"))
             channel_id = int(chat.id)
