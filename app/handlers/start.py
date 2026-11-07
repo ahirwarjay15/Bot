@@ -188,7 +188,22 @@ async def _retire_legacy_force_join_links(bot, db, channel: str) -> None:
 
 
 async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bool:
-    """Ensure a stable Force Sub URL exists; create it only during setup or repair."""
+    """Ensure a stable Force Sub URL exists; reuse cached metadata on later startups."""
+    legacy = await db.force_join_links.find_one({
+        "channel": channel,
+        "expires_at": {"$exists": True},
+    })
+    has_legacy_settings = bool(
+        channel_cfg.get("expires_at") or channel_cfg.get("refresh_at")
+        or channel_cfg.get("link_mode")
+    )
+    if (
+        channel_cfg.get("metadata_cached_at")
+        and channel_cfg.get("button_url")
+        and not legacy
+        and not has_legacy_settings
+    ):
+        return True
     chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
     try:
         chat = await bot.get_chat(chat_arg)
@@ -247,6 +262,7 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
             "channel_title": chat.title or getattr(chat, "full_name", None) or str(chat.id),
             "chat_type": chat.type,
             "mode": mode,
+            "metadata_cached_at": _now(),
         }, "$unset": {"link_mode": "", "refresh_at": "", "expires_at": ""}},
         upsert=True,
     )
