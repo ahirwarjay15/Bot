@@ -384,14 +384,20 @@ async def render_home(query):
     ]))
 
 async def build_forcejoin_page(bot, db, settings):
-    channels = await effective_force_join_channels(type("DatabaseView", (), {"db": db})(), settings)
     cfg = await db.settings.find_one({"key": "force_join"}) or {}
+    channels = await effective_force_join_channels(
+        type("DatabaseView", (), {"db": db})(), settings, cfg
+    )
+    # Fetch all cached channel metadata in one MongoDB read. Opening this
+    # panel never calls Telegram get_chat or queries channels one by one.
+    channel_docs = await db.settings.find({
+        "key": "force_join_channel",
+        "channel": {"$in": channels[:10]},
+    }).to_list(length=10)
+    channel_map = {str(item.get("channel")): item for item in channel_docs}
     channel_buttons = []
     for i, channel in enumerate(channels[:10]):
-        channel_cfg = await db.settings.find_one({"key": "force_join_channel", "channel": channel}) or {}
-        # Channel metadata is cached when the channel is added or during the
-        # one-time startup migration. Opening this panel must not call Telegram
-        # for every configured chat again.
+        channel_cfg = channel_map.get(channel, {})
         label = (
             channel_cfg.get("channel_title")
             or channel_cfg.get("title")
