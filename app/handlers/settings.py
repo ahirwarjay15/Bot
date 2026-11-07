@@ -13,7 +13,7 @@ from app.config import Settings
 from app.services.permissions import is_owner_or_moderator
 from app.services.text_format import normalize_telegram_text
 from app.services.links import shorten_url
-from app.handlers.start import effective_force_join_channels, normalize_animation_config, ensure_force_join_link
+from app.handlers.start import effective_force_join_channels, normalize_animation_config, ensure_force_join_link, cleanup_pending_join_requests_for_channel
 
 router = Router(name="settings")
 
@@ -1026,16 +1026,31 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         if index < len(channels):
             channel = channels.pop(index)
             await patch(db, "force_join", {"channels": channels, "channels_override": True, "enabled": bool(channels)})
-            # Revoke and remove every tracked invite for the removed channel.
-            async for link in db.force_join_links.find({"channel": channel}):
+            # Revoke tracked invites and collect the real Telegram chat IDs once.
+            links = await db.force_join_links.find({"channel": channel}).to_list(length=None)
+            chat_ids = {
+                int(link["chat_id"])
+                for link in links
+                if link.get("chat_id") is not None
+            }
+            if str(channel).lstrip("-").isdigit():
+                chat_ids.add(int(channel))
+            for link in links:
                 try:
                     if link.get("invite_link") and link.get("chat_id") is not None:
                         await query.bot.revoke_chat_invite_link(
                             chat_id=int(link["chat_id"]), invite_link=link["invite_link"]
                         )
                 except TelegramAPIError:
+                    # The Force Sub configuration is being removed regardless;
+                    # an already-invalid invite does not block local data cleanup.
                     pass
-                await db.force_join_links.delete_one({"_id": link["_id"]})
+            await db.force_join_links.delete_many({"channel": channel})
+            # Pending requests are scoped by Telegram chat_id, not the Force Sub
+            # username/key. Resolve a public @username only when no saved ID exists.
+            await cleanup_pending_join_requests_for_channel(
+                query.bot, db, channel, known_chat_ids=chat_ids
+            )
             await db.settings.delete_one({"key": "force_join_channel", "channel": channel})
         await render_forcejoin(query, db, settings)
     elif action == "forcejoin_message": await render_forcejoin_message(query)

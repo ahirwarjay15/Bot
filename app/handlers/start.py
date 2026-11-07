@@ -330,6 +330,33 @@ async def cleanup_expired_pending_join_requests(db, now=None) -> int:
     return int(getattr(result, "deleted_count", 0))
 
 
+async def cleanup_pending_join_requests_for_channel(
+    bot, db, channel: str, known_chat_ids: set[int] | None = None
+) -> int:
+    """Delete all saved join requests for a Force Sub chat that is being removed."""
+    chat_ids = {int(value) for value in (known_chat_ids or set()) if value is not None}
+    channel_key = str(channel).strip()
+    if channel_key.lstrip("-").isdigit():
+        chat_ids.add(int(channel_key))
+    if not chat_ids:
+        chat_arg = channel_key
+        if chat_arg.startswith("@"):
+            chat_arg = chat_arg
+        try:
+            chat = await bot.get_chat(chat_arg)
+        except (ValueError, TelegramAPIError):
+            log.warning(
+                "Could not resolve removed Force Sub channel %r; pending join requests will expire by retention policy",
+                channel_key,
+            )
+            return 0
+        chat_ids.add(int(chat.id))
+    result = await db.pending_join_requests.delete_many({
+        "chat_id": {"$in": sorted(chat_ids)}
+    })
+    return int(getattr(result, "deleted_count", 0))
+
+
 def _pending_request_is_recent(pending: dict | None, now=None, max_age_seconds: int = 15 * 24 * 60 * 60) -> bool:
     """Only honor a private join request for up to 15 days; legacy records are invalid."""
     requested_at = (pending or {}).get("requested_at")

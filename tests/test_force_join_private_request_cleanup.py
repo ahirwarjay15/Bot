@@ -296,3 +296,73 @@ async def test_public_force_join_link_is_not_created_in_user_request():
     assert target is None
     assert links.records == []
 
+
+
+@pytest.mark.asyncio
+async def test_removing_force_sub_channel_deletes_all_its_pending_requests_without_telegram_lookup():
+    from app.handlers.start import cleanup_pending_join_requests_for_channel
+
+    class Pending:
+        def __init__(self):
+            self.query = None
+        async def delete_many(self, query):
+            self.query = query
+            return SimpleNamespace(deleted_count=7)
+
+    class Bot:
+        async def get_chat(self, channel):
+            raise AssertionError("Numeric Force Sub channel IDs must not call Telegram")
+
+    pending = Pending()
+    deleted = await cleanup_pending_join_requests_for_channel(
+        Bot(), SimpleNamespace(pending_join_requests=pending), "-100123"
+    )
+
+    assert deleted == 7
+    assert pending.query == {"chat_id": {"$in": [-100123]}}
+
+
+@pytest.mark.asyncio
+async def test_removing_username_force_sub_uses_saved_chat_id_before_telegram_lookup():
+    from app.handlers.start import cleanup_pending_join_requests_for_channel
+
+    class Pending:
+        async def delete_many(self, query):
+            self.query = query
+            return SimpleNamespace(deleted_count=2)
+
+    class Bot:
+        async def get_chat(self, channel):
+            raise AssertionError("Saved chat IDs should avoid an extra Telegram request")
+
+    pending = Pending()
+    deleted = await cleanup_pending_join_requests_for_channel(
+        Bot(), SimpleNamespace(pending_join_requests=pending),
+        "@privatechannel", known_chat_ids={-100123}
+    )
+
+    assert deleted == 2
+    assert pending.query == {"chat_id": {"$in": [-100123]}}
+
+
+@pytest.mark.asyncio
+async def test_removing_username_force_sub_resolves_chat_id_only_when_needed():
+    from app.handlers.start import cleanup_pending_join_requests_for_channel
+
+    class Pending:
+        async def delete_many(self, query):
+            self.query = query
+            return SimpleNamespace(deleted_count=1)
+
+    class Bot:
+        async def get_chat(self, channel):
+            assert channel == "@publicchannel"
+            return SimpleNamespace(id=-100456)
+
+    pending = Pending()
+    deleted = await cleanup_pending_join_requests_for_channel(
+        Bot(), SimpleNamespace(pending_join_requests=pending), "@publicchannel"
+    )
+
+    assert deleted == 1
+    assert pending.query == {"chat_id": {"$in": [-100456]}}
