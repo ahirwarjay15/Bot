@@ -29,7 +29,9 @@ async def test_force_sub_settings_uses_cached_channel_titles_without_telegram_re
         async def get_chat(self, chat_id):
             raise AssertionError("Opening Force Sub settings must not call Telegram get_chat")
 
-    text, _ = await build_forcejoin_page(
+    text, markup = await build_forcejoin_page(
         Bot(), Database(), SimpleNamespace(force_join_channels=[])
     )
-    assert "Cached Private Channel" in text or "Cached Private Channel" in str(text)
+    labels = [button.text for row in markup.inline_keyboard for button in row]
+    assert "Cached Private Channel" in labels
+    assert "FORCE SUB\\n\\n" not in text
