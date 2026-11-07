@@ -60,8 +60,8 @@ def render_common_variables(raw_text, user, bot):
     return text
 
 
-async def effective_force_join_channels(database, settings) -> list[str]:
-    cfg = await database.db.settings.find_one({"key": "force_join"})
+async def effective_force_join_channels(database, settings, cfg: dict | None = None) -> list[str]:
+    cfg = cfg or await database.db.settings.find_one({"key": "force_join"})
     configured = cfg.get("channels") if cfg is not None else None
     # Keep environment defaults until an admin explicitly edits the channel list.
     # Once channels_override is set, an empty list is an intentional "no channels".
