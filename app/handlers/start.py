@@ -226,11 +226,6 @@ async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: d
     )
     if saved and saved.get("invite_link"):
         return saved["invite_link"]
-    if await ensure_force_join_link(bot, db, channel, channel_cfg):
-        refreshed = await db.settings.find_one(
-            {"key": "force_join_channel", "channel": channel}
-        ) or {}
-        return refreshed.get("button_url")
     return None
 
 
@@ -908,6 +903,12 @@ async def forcejoin_repair_link(query: CallbackQuery, database):
     channel_cfg = await database.db.settings.find_one(
         {"key": "force_join_channel", "channel": channel}
     ) or {}
+    if not await ensure_force_join_link(query.bot, database.db, channel, channel_cfg):
+        await query.answer("Could not prepare this channel link. Please try again.", show_alert=True)
+        return
+    channel_cfg = await database.db.settings.find_one(
+        {"key": "force_join_channel", "channel": channel}
+    ) or channel_cfg
     target = await resolve_force_join_button_target(query.bot, database.db, channel, channel_cfg, query.from_user.id)
     if target:
         rows = []
