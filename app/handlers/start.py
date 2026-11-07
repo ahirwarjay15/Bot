@@ -265,7 +265,7 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
             "channel_title": chat.title or getattr(chat, "full_name", None) or str(chat.id),
             "chat_type": chat.type,
             "mode": mode,
-            "metadata_cached_at": _now(),
+            "metadata_cached_at": datetime.now(timezone.utc),
         }, "$unset": {"link_mode": "", "refresh_at": "", "expires_at": ""}},
         upsert=True,
     )
