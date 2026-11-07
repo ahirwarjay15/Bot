@@ -68,7 +68,7 @@ async def test_batches_move_into_shared_files_collection_and_unused_metadata_is_
 
     assert await unify_file_batch_records(db) == 1
 
-    batch = await files.find_one({"file_key": "batch0"})
+    batch = await files.find_one({"key": "batch0"})
     assert batch["items"][0]["source_message_id"] == 10
     assert batches.records == []
     assert not ({"file_name", "created_at", "created_by", "kind"} & set(files.records[0]))
