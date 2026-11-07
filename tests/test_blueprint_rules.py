@@ -347,7 +347,7 @@ def test_batch_repository_rejects_single_file_batch():
     from app.database.files import FileRepository
 
     source = inspect.getsource(FileRepository.save_batch)
-    assert "len(items) < 2" in source
+    assert "len(ids) < 2" in source
     assert "2 to 100 files" not in source
 
 
