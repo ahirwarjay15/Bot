@@ -159,8 +159,36 @@ def build_force_join_channel_button(
     return None
 
 
+async def _retire_legacy_force_join_links(bot, db, channel: str) -> None:
+    """Revoke and remove old expiring rotation invites after a stable link is saved."""
+    cursor = db.force_join_links.find({
+        "channel": channel,
+        "expires_at": {"$exists": True},
+    })
+    async for record in cursor:
+        link = record.get("invite_link")
+        chat_id = record.get("chat_id")
+        if link and chat_id is not None:
+            try:
+                await bot.revoke_chat_invite_link(
+                    chat_id=int(chat_id), invite_link=link
+                )
+            except TelegramAPIError as exc:
+                # Expired/revoked links are already unusable; other failures remain
+                # recorded so a later startup can retry the revocation.
+                message = str(exc).lower()
+                if not any(term in message for term in (
+                    "invite link is invalid", "invite link has expired",
+                    "invite link was revoked", "invite link is revoked",
+                    "already revoked", "already expired",
+                )):
+                    log.warning("Could not revoke retired Force Sub invite for %s", channel, exc_info=True)
+                    continue
+        await db.force_join_links.delete_one({"_id": record["_id"]})
+
+
 async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bool:
-    """Ensure one stable Force Sub URL exists; create it only during setup or repair."""
+    """Ensure a stable Force Sub URL exists; create it only during setup or repair."""
     chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
     try:
         chat = await bot.get_chat(chat_arg)
@@ -175,9 +203,12 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
     if getattr(chat, "username", None):
         target = f"https://t.me/{chat.username}"
     else:
-        existing = await db.force_join_links.find_one(
-            {"channel": channel, "invite_link": {"$exists": True}, "expires_at": {"$exists": False}}
-        )
+        existing = await db.force_join_links.find_one({
+            "channel": channel,
+            "invite_link": {"$exists": True},
+            "expires_at": {"$exists": False},
+            "mode": mode,
+        })
         target = existing.get("invite_link") if existing else None
         if not target:
             try:
@@ -187,19 +218,25 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
                 )
                 target = invite.invite_link
             except TelegramAPIError:
-                log.warning("Could not create Force Sub invite for %s", channel, exc_info=True)
+                log.warning("Could not create stable Force Sub invite for %s", channel, exc_info=True)
                 return False
-            await db.force_join_links.update_one(
-                {"channel": channel},
-                {"$set": {
+            try:
+                await db.force_join_links.insert_one({
                     "channel": channel,
                     "chat_id": int(chat.id),
                     "invite_link": target,
                     "mode": mode,
                     "created_at": datetime.now(timezone.utc),
-                }},
-                upsert=True,
-            )
+                })
+            except Exception:
+                # If persistence fails, revoke the newly-created orphan invite.
+                try:
+                    await bot.revoke_chat_invite_link(
+                        chat_id=int(chat.id), invite_link=target
+                    )
+                except TelegramAPIError:
+                    log.warning("Could not revoke untracked Force Sub invite", exc_info=True)
+                raise
 
     await db.settings.update_one(
         {"key": "force_join_channel", "channel": channel},
@@ -210,22 +247,43 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
             "channel_title": chat.title or getattr(chat, "full_name", None) or str(chat.id),
             "chat_type": chat.type,
             "mode": mode,
-        }},
+        }, "$unset": {"link_mode": "", "refresh_at": "", "expires_at": ""}},
         upsert=True,
     )
+    await _retire_legacy_force_join_links(bot, db, channel)
     return True
 
 
+async def migrate_force_join_links(bot, db) -> dict:
+    """One-time startup migration from expiring rotation links to stable URLs."""
+    migrated = 0
+    skipped = 0
+    cursor = db.settings.find({"key": "force_join_channel"})
+    async for channel_cfg in cursor:
+        channel = channel_cfg.get("channel")
+        if not channel:
+            continue
+        if await ensure_force_join_link(bot, db, str(channel), channel_cfg):
+            migrated += 1
+        else:
+            skipped += 1
+    log.info("Force Sub link migration finished: migrated=%d skipped=%d", migrated, skipped)
+    return {"migrated": migrated, "skipped": skipped}
+
+
 async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
-    """Return the saved stable Force Sub URL without a background refresh loop."""
+    """Return a public URL or a persisted non-expiring private invite."""
     target = channel_cfg.get("button_url")
-    if target:
+    if target and not target.startswith("https://t.me/+"):
         return target
-    saved = await db.force_join_links.find_one(
-        {"channel": channel, "invite_link": {"$exists": True}}
-    )
-    if saved and saved.get("invite_link") and not saved.get("expires_at"):
-        return saved["invite_link"]
+    saved = await db.force_join_links.find_one({
+        "channel": channel,
+        "invite_link": {"$exists": True},
+        "expires_at": {"$exists": False},
+    })
+    if saved and saved.get("invite_link"):
+        if not target or target == saved["invite_link"]:
+            return saved["invite_link"]
     return None
 
 
