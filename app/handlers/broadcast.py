@@ -133,7 +133,7 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
     if query.message:
         await query.message.edit_text("Broadcast queued. You will receive the delivery report when it finishes.")
 
-async def run_broadcast_worker(bot, db, poll_seconds: int = 2):
+async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
     """Resume queued broadcasts without resetting recipients owned by a live worker."""
     # Only recover recipients whose send attempt has been stale for 10+ minutes.
     # A second worker starting must not mark another worker's active send as unknown.
