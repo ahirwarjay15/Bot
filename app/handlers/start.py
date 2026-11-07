@@ -176,7 +176,7 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
         target = f"https://t.me/{chat.username}"
     else:
         existing = await db.force_join_links.find_one(
-            {"channel": channel, "invite_link": {"$exists": True}}
+            {"channel": channel, "invite_link": {"$exists": True}, "expires_at": {"$exists": False}}
         )
         target = existing.get("invite_link") if existing else None
         if not target:
@@ -1012,7 +1012,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             for channel in missing
         ))
         channel_cfgs = [item or {} for item in channel_cfgs]
-        # Verification refreshes expired join links without changing its own callback.
+        # Resolve the saved Force Sub URL without a background refresh cycle.
         targets = await asyncio.gather(*(
             resolve_force_join_button_target(bot, database.db, channel, channel_cfg, user_id)
             for channel, channel_cfg in zip(missing, channel_cfgs)
