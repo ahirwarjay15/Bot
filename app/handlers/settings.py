@@ -106,12 +106,18 @@ async def save_force_join_channel_label(bot, db, channel: str, label: str):
         if chat.username:
             values["button_url"] = f"https://t.me/{chat.username}"
         else:
-            # Older buggy saves could associate another channel's invite URL
-            # with this ID. Generate a correct invite for the selected private chat.
-            invite = await bot.create_chat_invite_link(
-                chat_id=chat.id, creates_join_request=True
+            existing = await db.settings.find_one(
+                {"key": "force_join_channel", "channel": channel},
+                {"button_url": 1},
             )
-            values["button_url"] = invite.invite_link
+            saved_url = (existing or {}).get("button_url")
+            if saved_url:
+                values["button_url"] = saved_url
+            else:
+                invite = await bot.create_chat_invite_link(
+                    chat_id=chat.id, creates_join_request=True
+                )
+                values["button_url"] = invite.invite_link
     except TelegramAPIError:
         # Preserve the label update even if Telegram temporarily cannot resolve
         # the chat; a later edit can repair its URL.
