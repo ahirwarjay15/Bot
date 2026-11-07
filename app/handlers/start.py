@@ -98,7 +98,10 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     normalized = dict(cfg or {})
     frames = normalized.get("frames")
     frames = [str(frame) for frame in frames if str(frame).strip()] if isinstance(frames, list) else []
-    if not 1 <= len(frames) <= 6: frames = list(DEFAULT_ANIMATION_FRAMES)
+    # Legacy prefix-based configs used a five-frame default cycle. Preserve
+    # valid modern 1-6 frame configurations, but migrate incomplete legacy ones.
+    if not 1 <= len(frames) <= 6 or ("prefix" in normalized and len(frames) < 4):
+        frames = list(DEFAULT_ANIMATION_FRAMES)
     normalized["frames"] = frames[:6]
     mode = normalized.get("mode")
     if mode in ("new_message", "message"): mode = "message"
