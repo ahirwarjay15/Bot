@@ -46,6 +46,9 @@ async def test_idle_delivery_worker_waits_for_scheduler_wake(monkeypatch):
         async def __anext__(self):
             raise StopAsyncIteration
 
+        def limit(self, count):
+            return self
+
     class Tasks:
         def find(self, *args, **kwargs):
             return EmptyCursor()
