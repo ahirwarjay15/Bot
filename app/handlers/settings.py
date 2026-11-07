@@ -900,8 +900,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         channel_cfg = await db.settings.find_one(
             {"key": "force_join_channel", "channel": channel_id}
         ) or {}
-        if not await ensure_force_join_link(query.bot, db, channel_id, channel_cfg):
-            log.warning("Force Sub link setup is incomplete for %s; it can be repaired from the user-facing button", channel_id)
+        await ensure_force_join_link(query.bot, db, channel_id, channel_cfg)
         await remove_temporary_prompts(query.bot, pending)
         try:
             await query.bot.delete_message(
