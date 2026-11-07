@@ -19,6 +19,17 @@ async def test_force_sub_settings_uses_cached_channel_titles_without_telegram_re
                 }
             return None
 
+        def find(self, query):
+            class Cursor:
+                async def to_list(self, length=None):
+                    return [{
+                        "channel": "-100123",
+                        "channel_title": "Cached Private Channel",
+                        "button_url": "https://t.me/+stable",
+                        "metadata_cached_at": "cached",
+                    }]
+            return Cursor()
+
         async def update_one(self, *args, **kwargs):
             return None
 
