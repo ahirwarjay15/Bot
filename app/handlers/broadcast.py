@@ -162,7 +162,7 @@ async def _watch_broadcast_changes(db, wake_event: asyncio.Event, ready_event: a
         "operationType": {"$in": ["insert", "update", "replace"]},
         "fullDocument.status": {"$in": ["queued", "preparing", "pending", "processing"]},
     }}]
-    async with db.watch(
+    async with await db.watch(
         pipeline=pipeline, full_document="updateLookup", max_await_time_ms=600_000
     ) as stream:
         ready_event.set()

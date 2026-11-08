@@ -369,7 +369,7 @@ async def _watch_pending_delivery_tasks(db, wake_event: asyncio.Event, ready_eve
         "operationType": {"$in": ["insert", "update", "replace"]},
         "fullDocument.status": "pending",
     }}]
-    async with db.tasks.watch(
+    async with await db.tasks.watch(
         pipeline=pipeline, full_document="updateLookup", max_await_time_ms=600_000
     ) as stream:
         ready_event.set()
