@@ -14,4 +14,6 @@ async def get_bot_identity(bot):
         if hasattr(identity, "__await__"):
             identity = await identity
 
-    return identity if identity is not None else await bot.get_me()
+    if identity is None or callable(identity) or not hasattr(identity, "username"):
+        return await bot.get_me()
+    return identity
