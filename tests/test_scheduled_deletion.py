@@ -35,34 +35,40 @@ async def test_scheduled_message_deletion_skips_empty_id_list():
 
 
 @pytest.mark.asyncio
-async def test_idle_delivery_worker_waits_for_scheduler_wake(monkeypatch):
+async def test_idle_delivery_worker_uses_change_stream_and_bulk_startup_recovery(monkeypatch):
     import asyncio
+    from types import SimpleNamespace
     import app.services.delivery as delivery
 
-    class EmptyCursor:
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            raise StopAsyncIteration
-
-        def limit(self, count):
-            return self
-
     class Tasks:
-        def find(self, *args, **kwargs):
-            return EmptyCursor()
+        def __init__(self):
+            self.updated = None
+            self.deleted = None
 
-        async def find_one(self, *args, **kwargs):
-            return None
+        async def update_many(self, query, update):
+            self.updated = (query, update)
+            return SimpleNamespace(modified_count=0)
+
+        async def delete_many(self, query):
+            self.deleted = query
+            return SimpleNamespace(deleted_count=0)
+
+    tasks = Tasks()
 
     class DB:
-        tasks = Tasks()
+        pass
 
-    async def stop_after_sleep(seconds):
-        assert seconds == 60
+    db = DB()
+    db.tasks = tasks
+
+    async def stop_watcher(_db, _wake_event, ready_event):
+        ready_event.set()
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(delivery.asyncio, "sleep", stop_after_sleep)
+    monkeypatch.setattr(delivery, "_watch_pending_delivery_tasks", stop_watcher)
     with pytest.raises(asyncio.CancelledError):
-        await delivery.run_task_worker(None, DB())
+        await delivery.run_task_worker(None, db)
+
+    assert tasks.updated[0]["status"] == "delivering"
+    assert tasks.updated[0]["message_ids"] == {"$exists": True, "$ne": []}
+    assert tasks.deleted["$and"][0]["status"] == "delivering'

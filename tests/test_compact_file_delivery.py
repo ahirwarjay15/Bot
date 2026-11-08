@@ -84,9 +84,16 @@ async def test_delivery_sends_each_repeated_id_with_only_its_two_buttons():
             sent.append(kwargs)
             return SimpleNamespace(message_id=1000 + len(sent))
 
+    class EmptyCursor:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
     class FakeSettingsCollection:
-        async def find_one(self, query):
-            return None
+        def find(self, query):
+            return EmptyCursor()
 
     class FakeTasksCollection:
         pass
