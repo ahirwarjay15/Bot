@@ -1,8 +1,17 @@
 """Process-local cache for Telegram bot identity."""
 
 async def get_bot_identity(bot):
-    """Return aiogram's cached bot identity, fetching it only on first use."""
+    """Return the bot identity across aiogram versions exposing me as a value or method."""
     try:
-        return bot.me
+        identity = bot.me
     except (AttributeError, RuntimeError):
-        return await bot.get_me()
+        identity = None
+
+    # Some aiogram versions expose me as an async method instead of a
+    # cached User property. Resolve that method before callers read .username.
+    if callable(identity):
+        identity = identity()
+        if hasattr(identity, "__await__"):
+            identity = await identity
+
+    return identity if identity is not None else await bot.get_me()
