@@ -10,7 +10,7 @@ def test_settings_home_description_is_italic_in_navigation_renderer():
 
 def test_settings_home_description_remains_italic_after_page_normalization():
     page = format_settings_page(
-        "CUSTOMIZE\\n<i>✰ Name: Bot</i>\\n\\n"
+        "CUSTOMIZE\n<i>✰ Name: Bot</i>\n\n"
         "<i>Configure Bot Settings Using the Buttons Below.</i>"
     )
     assert "<i>Configure Bot Settings Using the Buttons Below.</i>" in page
