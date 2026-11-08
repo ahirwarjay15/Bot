@@ -71,4 +71,4 @@ async def test_idle_delivery_worker_uses_change_stream_and_bulk_startup_recovery
 
     assert tasks.updated[0]["status"] == "delivering"
     assert tasks.updated[0]["message_ids"] == {"$exists": True, "$ne": []}
-    assert tasks.deleted["$and"][0]["status"] == "delivering'
+    assert tasks.deleted["$and"][0]["status"] == "delivering"
