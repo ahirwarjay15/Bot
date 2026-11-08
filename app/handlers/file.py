@@ -39,6 +39,29 @@ def _panel_keyboard(count):
     ])
 
 
+def _source_channel_message_id(message, source_channel_id):
+    """Return the original channel-post ID for modern or legacy Telegram forwards."""
+    expected_chat_id = int(source_channel_id)
+    origin = getattr(message, "forward_origin", None)
+    origin_chat = getattr(origin, "chat", None)
+    origin_message_id = getattr(origin, "message_id", None)
+
+    # Compatibility for Telegram payloads/aiogram objects exposing legacy fields.
+    if origin_chat is None:
+        origin_chat = getattr(message, "forward_from_chat", None)
+    if origin_message_id is None:
+        origin_message_id = getattr(message, "forward_from_message_id", None)
+
+    if origin_chat is None or origin_message_id is None:
+        return None
+    try:
+        if int(origin_chat.id) != expected_chat_id:
+            return None
+        return int(origin_message_id)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def _url_keyboard(message):
     """Store each URL button as one compact entry: [row, column, text, URL, color]."""
     markup = getattr(message, "reply_markup", None)
@@ -366,13 +389,9 @@ async def _receive_collected(message: Message, state: FSMContext, settings: Sett
         return
 
     try:
-        origin = message.forward_origin
-        origin_chat = getattr(origin, "chat", None)
-        origin_id = getattr(origin, "message_id", None)
-        from_storage = False
-        if origin_chat and origin_id and int(origin_chat.id) == int(settings.source_channel_id):
-            source_id = int(origin_id)
-            from_storage = True
+        source_id = _source_channel_message_id(message, settings.source_channel_id)
+        from_storage = source_id is not None
+        if from_storage:
             item = {
                 "source_message_id": source_id,
                 "from_storage_channel": True,
