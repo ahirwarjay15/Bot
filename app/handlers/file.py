@@ -74,6 +74,38 @@ async def _delete(bot, chat_id, message_id):
         log.debug("Could not delete collection message %s", message_id, exc_info=True)
 
 
+async def _cleanup_storage_copies(bot, chat_id, message_ids):
+    """Best-effort rollback with retries; never let one failed delete block the rest."""
+    async def remove(message_id):
+        for attempt in range(3):
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+                return
+            except TelegramAPIError as exc:
+                # Telegram confirms the target is already absent: rollback is complete.
+                if "message to delete not found" in str(exc).lower():
+                    return
+                if attempt == 2:
+                    log.error(
+                        "Could not remove temporary storage message %s after 3 attempts",
+                        message_id,
+                        exc_info=True,
+                    )
+                    return
+            except Exception:
+                if attempt == 2:
+                    log.exception(
+                        "Unexpected error removing temporary storage message %s",
+                        message_id,
+                    )
+                    return
+            await asyncio.sleep(0.5 * (attempt + 1))
+
+    if not chat_id or not message_ids:
+        return
+    await asyncio.gather(*(remove(message_id) for message_id in dict.fromkeys(message_ids)))
+
+
 async def _clear_collection_ui(bot, state, fallback_chat_id):
     data = await state.get_data()
     await state.clear()
@@ -210,6 +242,8 @@ async def generate_file_link(
                     from_chat_id=int(item["original_chat_id"]),
                     message_id=int(item["original_message_id"]),
                 )
+                # Track immediately: if another item fails, this copy is still rolled back.
+                copied_ids.append(int(copied.message_id))
             return {
                 "source_message_id": int(copied.message_id),
                 "buttons": item.get("buttons"),
@@ -231,11 +265,6 @@ async def generate_file_link(
                     first_error = outcome
                 continue
             final_items.append(outcome)
-        copied_ids.extend(
-            int(outcome["source_message_id"])
-            for item, outcome in zip(collected, outcomes)
-            if not item.get("from_storage_channel") and not isinstance(outcome, Exception)
-        )
         if first_error is not None:
             raise first_error
 
@@ -289,12 +318,15 @@ async def generate_file_link(
         log.exception("Collection link generation failed")
         # Compensate for partial failure so abandoned attempts don't pollute storage.
         if record:
-            try:
-                await database.db.files.delete_one({"key": record.get("key")})
-            except Exception:
-                log.warning("Could not remove incomplete file record", exc_info=True)
-        for copied_id in copied_ids:
-            await _delete(callback.bot, settings.source_channel_id, copied_id)
+            record_key = record.get("key") or record.get("file_key")
+            if record_key:
+                try:
+                    await database.db.files.delete_one({"key": record_key})
+                except Exception:
+                    log.warning("Could not remove incomplete file record %s", record_key, exc_info=True)
+        await _cleanup_storage_copies(
+            callback.bot, settings.source_channel_id, copied_ids
+        )
         try:
             await progress_message.edit_text(
                 "Link generation failed. No new files should remain in the storage channel; "
