@@ -220,7 +220,15 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
     if not items:
         return (0, 0)
 
-    auto = await db.settings.find_one({"key": "auto_delete", "enabled": True})
+    # Read all delivery-related settings in one database round-trip.
+    settings_by_key = {}
+    async for setting in db.settings.find({"$or": [
+        {"key": "auto_delete", "enabled": True},
+        {"key": "after_delete", "enabled": True},
+        {"key": "custom_buttons"},
+    ]}):
+        settings_by_key[setting["key"]] = setting
+    auto = settings_by_key.get("auto_delete")
     task_key = None
     deadline = None
     minutes = None
@@ -229,7 +237,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
         deadline = None
         expiry_suffix = request_key or f"{user_id}:{token_urlsafe(12)}"
         task_key = f"batch-expiry:{expiry_suffix}"
-        after_cfg = await db.settings.find_one({"key": "after_delete", "enabled": True}) or {}
+        after_cfg = settings_by_key.get("after_delete") or {}
         task = {
             "user_id": user_id,
             "message_ids": [],
@@ -252,7 +260,7 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
             {"request_key": task_key}, {"$setOnInsert": task}, upsert=True
         )
 
-    custom_cfg = await db.settings.find_one({"key": "custom_buttons"}) or {}
+    custom_cfg = settings_by_key.get("custom_buttons") or {}
     custom_buttons = custom_cfg.get("buttons", [])
     is_batch = (
         (isinstance(batch.get("items"), list) and bool(batch.get("file_key")))
@@ -355,120 +363,158 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
     return (sent_count, failed_count)
 
 
+async def _watch_pending_delivery_tasks(db, wake_event: asyncio.Event, ready_event: asyncio.Event):
+    """Wait for new pending tasks without periodic MongoDB polling."""
+    pipeline = [{"$match": {
+        "operationType": {"$in": ["insert", "update", "replace"]},
+        "fullDocument.status": "pending",
+    }}]
+    async with db.tasks.watch(
+        pipeline=pipeline, full_document="updateLookup", max_await_time_ms=600_000
+    ) as stream:
+        ready_event.set()
+        async for _change in stream:
+            wake_event.set()
+
+
 async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
-    # Recover interrupted deliveries once on startup, not on every scheduler wake.
+    # Recover interrupted deliveries once on startup using bulk operations.
     now = _now()
     stale_before = now - timedelta(minutes=10)
-    async for stuck in db.tasks.find({
+    stale_delivering = {
         "status": "delivering",
         "$or": [
             {"updated_at": {"$lte": stale_before}},
             {"updated_at": {"$exists": False}, "created_at": {"$lte": stale_before}},
         ],
-    }).limit(50):
-        if stuck.get("message_ids"):
-            await db.tasks.update_one(
-                {"_id": stuck["_id"], "status": "delivering"},
-                {"$set": {"status": "pending", "deadline": now, "updated_at": now}},
-            )
-        else:
-            await db.tasks.delete_one({"_id": stuck["_id"], "status": "delivering"})
+    }
+    await db.tasks.update_many(
+        {**stale_delivering, "message_ids": {"$exists": True, "$ne": []}},
+        {"$set": {"status": "pending", "deadline": now, "updated_at": now}},
+    )
+    await db.tasks.delete_many({"$and": [stale_delivering, {"$or": [
+        {"message_ids": {"$exists": False}}, {"message_ids": None}, {"message_ids": []},
+    ]}]})
 
-    while True:
-        now = _now()
-        # Schedule the next wake at the earliest persisted deadline. A bounded
-        # 60-second discovery wait notices tasks created by the separate polling
-        # process without hammering MongoDB every few seconds.
-        next_task = await db.tasks.find_one(
-            {"status": "pending", "deadline": {"$exists": True}},
-            sort=[("deadline", 1)],
-            projection={"deadline": 1},
-        )
-        deadline = _as_utc_aware((next_task or {}).get("deadline"))
-        if deadline is None or deadline > now:
-            wait_seconds = poll_seconds if deadline is None else min(
-                poll_seconds, max(0.1, (deadline - now).total_seconds())
+    wake_event = asyncio.Event()
+    ready_event = asyncio.Event()
+    watcher = asyncio.create_task(_watch_pending_delivery_tasks(db, wake_event, ready_event))
+    watcher.add_done_callback(lambda _task: (wake_event.set(), ready_event.set()))
+    await ready_event.wait()
+    if watcher.done():
+        watcher.result()
+        raise RuntimeError("Delivery task change stream stopped during startup")
+    try:
+        while True:
+            wake_event.clear()
+            if watcher.done():
+                watcher.result()
+                raise RuntimeError("Delivery task change stream stopped unexpectedly")
+            now = _now()
+            # Schedule the next wake at the earliest persisted deadline. A bounded
+            # 60-second discovery wait notices tasks created by the separate polling
+            # process without hammering MongoDB every few seconds.
+            next_task = await db.tasks.find_one(
+                {"status": "pending", "deadline": {"$exists": True}},
+                sort=[("deadline", 1)],
+                projection={"deadline": 1},
             )
-            await asyncio.sleep(wait_seconds)
-            continue
-
-        # One indexed query loads all currently due tasks in a batch.
-        async for task in db.tasks.find({"status": "pending", "deadline": {"$lte": now}}).sort("deadline", 1).limit(100):
-            claimed = await db.tasks.update_one({"_id": task["_id"], "status": "pending"}, {"$set": {"status": "processing", "claimed_at": _now()}})
-            if not claimed.modified_count:
+            deadline = _as_utc_aware((next_task or {}).get("deadline"))
+            if deadline is None or deadline > now:
+                timeout = None if deadline is None else max(0.1, (deadline - now).total_seconds())
+                try:
+                    if timeout is None:
+                        await wake_event.wait()
+                    else:
+                        await asyncio.wait_for(wake_event.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    pass
+                if watcher.done():
+                    watcher.result()
+                    raise RuntimeError("Delivery task change stream stopped unexpectedly")
                 continue
-            try:
-                # Expiry tasks represent deliveries already scheduled while Auto Delete
-                # was enabled. Turning the setting off affects future deliveries only;
-                # it must not silently cancel existing expiries.
-                if not task.get("messages_deleted", False):
-                    try:
-                        await delete_scheduled_messages(
-                            bot, task["user_id"], task.get("message_ids", [])
+    
+            # One indexed query loads all currently due tasks in a batch.
+            async for task in db.tasks.find({"status": "pending", "deadline": {"$lte": now}}).sort("deadline", 1).limit(100):
+                claimed = await db.tasks.update_one({"_id": task["_id"], "status": "pending"}, {"$set": {"status": "processing", "claimed_at": _now()}})
+                if not claimed.modified_count:
+                    continue
+                try:
+                    # Expiry tasks represent deliveries already scheduled while Auto Delete
+                    # was enabled. Turning the setting off affects future deliveries only;
+                    # it must not silently cancel existing expiries.
+                    if not task.get("messages_deleted", False):
+                        try:
+                            await delete_scheduled_messages(
+                                bot, task["user_id"], task.get("message_ids", [])
+                            )
+                        except TelegramAPIError:
+                            log.warning(
+                                "Could not bulk-delete messages for user %s; task will retry",
+                                task["user_id"], exc_info=True,
+                            )
+                            raise RuntimeError(
+                                "Bulk message deletion failed; retrying expiry task"
+                            )
+                        await db.tasks.update_one(
+                            {"_id": task["_id"]},
+                            {"$set": {"messages_deleted": True}},
                         )
-                    except TelegramAPIError:
-                        log.warning(
-                            "Could not bulk-delete messages for user %s; task will retry",
-                            task["user_id"], exc_info=True,
-                        )
-                        raise RuntimeError(
-                            "Bulk message deletion failed; retrying expiry task"
-                        )
+                    # Use the per-delivery snapshot so disabling or editing the
+                    # feature cannot change work that was already scheduled.
+                    if "after_delete_snapshot" in task:
+                        after = task.get("after_delete_snapshot") or {}
+                        after = after if after.get("enabled") else None
+                    else:
+                        # Backward compatibility for tasks created before snapshots existed.
+                        after = await db.settings.find_one({"key": "after_delete", "enabled": True})
+                    notice_id = task.get("notice_message_id")
+                    if after and not task.get("after_delete_attempted", False):
+                        text = after.get("text") or "<blockquote><i>ʏᴏᴜʀ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ! ✅\nᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇsᴛᴏʀᴇ ʏᴏᴜʀ ғɪʟᴇ.</i></blockquote>"
+                        link = task.get("deeplink")
+                        markup = InlineKeyboardMarkup(inline_keyboard=[[
+                            InlineKeyboardButton(text=after.get("button_text") or "↻ ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!", url=link)
+                        ]]) if link else None
+                        try:
+                            if notice_id:
+                                await bot.edit_message_text(chat_id=task["user_id"], message_id=notice_id, text=text, reply_markup=markup, parse_mode="HTML")
+                            else:
+                                await bot.send_message(task["user_id"], text, reply_markup=markup, parse_mode="HTML")
+                        except (TelegramForbiddenError, TelegramBadRequest):
+                            await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"after_delete_attempted": True}})
+                            log.warning("After-delete replacement cannot be edited for user %s", task["user_id"])
+                        except TelegramAPIError:
+                            log.exception("Transient After-delete replacement failure; expiry task will retry")
+                            raise
+                        else:
+                            await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"after_delete_attempted": True}})
+                    elif not after and notice_id:
+                        try:
+                            await bot.delete_message(task["user_id"], notice_id)
+                        except TelegramAPIError:
+                            log.info("Could not delete auto-delete notice %s for user %s", notice_id, task["user_id"])
+                    await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"status": "done", "finished_at": _now()}})
+                    # Once expiry is complete, discard temporary delivery progress and IDs.
+                    # Keep user/file/batch source records untouched.
+                    expiry_key = task.get("request_key")
+                    if expiry_key:
+                        delivery_key = expiry_key.removeprefix("batch-expiry:")
+                        # Batch delivery queue was removed; Auto Delete uses tasks only.
+                        await db.delivery_requests.delete_one({"request_key": delivery_key, "status": "done"})
+                    await db.tasks.delete_one({"_id": task["_id"], "status": "done"})
+                except Exception:
+                    log.exception("Expiry task failed")
+                    retry_at = _now() + timedelta(seconds=60)
                     await db.tasks.update_one(
                         {"_id": task["_id"]},
-                        {"$set": {"messages_deleted": True}},
+                        {"$set": {
+                            "status": "pending",
+                            "deadline": retry_at,
+                            "last_error_at": _now(),
+                        }},
                     )
-                # Use the per-delivery snapshot so disabling or editing the
-                # feature cannot change work that was already scheduled.
-                if "after_delete_snapshot" in task:
-                    after = task.get("after_delete_snapshot") or {}
-                    after = after if after.get("enabled") else None
-                else:
-                    # Backward compatibility for tasks created before snapshots existed.
-                    after = await db.settings.find_one({"key": "after_delete", "enabled": True})
-                notice_id = task.get("notice_message_id")
-                if after and not task.get("after_delete_attempted", False):
-                    text = after.get("text") or "<blockquote><i>ʏᴏᴜʀ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ! ✅\nᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇsᴛᴏʀᴇ ʏᴏᴜʀ ғɪʟᴇ.</i></blockquote>"
-                    link = task.get("deeplink")
-                    markup = InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text=after.get("button_text") or "↻ ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!", url=link)
-                    ]]) if link else None
-                    try:
-                        if notice_id:
-                            await bot.edit_message_text(chat_id=task["user_id"], message_id=notice_id, text=text, reply_markup=markup, parse_mode="HTML")
-                        else:
-                            await bot.send_message(task["user_id"], text, reply_markup=markup, parse_mode="HTML")
-                    except (TelegramForbiddenError, TelegramBadRequest):
-                        await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"after_delete_attempted": True}})
-                        log.warning("After-delete replacement cannot be edited for user %s", task["user_id"])
-                    except TelegramAPIError:
-                        log.exception("Transient After-delete replacement failure; expiry task will retry")
-                        raise
-                    else:
-                        await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"after_delete_attempted": True}})
-                elif not after and notice_id:
-                    try:
-                        await bot.delete_message(task["user_id"], notice_id)
-                    except TelegramAPIError:
-                        log.info("Could not delete auto-delete notice %s for user %s", notice_id, task["user_id"])
-                await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"status": "done", "finished_at": _now()}})
-                # Once expiry is complete, discard temporary delivery progress and IDs.
-                # Keep user/file/batch source records untouched.
-                expiry_key = task.get("request_key")
-                if expiry_key:
-                    delivery_key = expiry_key.removeprefix("batch-expiry:")
-                    # Batch delivery queue was removed; Auto Delete uses tasks only.
-                    await db.delivery_requests.delete_one({"request_key": delivery_key, "status": "done"})
-                await db.tasks.delete_one({"_id": task["_id"], "status": "done"})
-            except Exception:
-                log.exception("Expiry task failed")
-                retry_at = _now() + timedelta(seconds=60)
-                await db.tasks.update_one(
-                    {"_id": task["_id"]},
-                    {"$set": {
-                        "status": "pending",
-                        "deadline": retry_at,
-                        "last_error_at": _now(),
-                    }},
-                )
-        # Loop immediately to find the next scheduled deadline; idle waits above.
+            # Loop immediately to find the next scheduled deadline; idle waits above.
+    
+    finally:
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)

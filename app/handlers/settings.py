@@ -14,6 +14,7 @@ from app.services.permissions import is_owner_or_moderator
 from app.services.text_format import normalize_telegram_text
 from app.services.links import shorten_url
 from app.handlers.start import effective_force_join_channels, normalize_animation_config, ensure_force_join_link, cleanup_pending_join_requests_for_channel
+from app.services.bot_identity import get_bot_identity
 
 router = Router(name="settings")
 
@@ -371,7 +372,7 @@ async def edit_page(query, text, keyboard):
     return replacement
 
 async def render_home(query):
-    me = await query.bot.get_me()
+    me = await get_bot_identity(query.bot)
     # The bot name remains a clickable mention, while previews are disabled in edit_page.
     import html
     name = f'<a href="https://t.me/{me.username}">{html.escape(me.full_name)}</a>' if me.username else html.escape(me.full_name)
@@ -809,7 +810,7 @@ async def render_mods(query, db):
 async def settings_command(message: Message, settings: Settings, database):
     if not await allowed(message, settings, database):
         return
-    me = await message.bot.get_me()
+    me = await get_bot_identity(message.bot)
     name = f'<a href="https://t.me/{me.username}">{__import__("html").escape(me.full_name)}</a>' if me.username else __import__("html").escape(me.full_name)
     panel = await message.answer(f"<b><u>CUSTOMIZE</u></b>\n\n<i>✰ Name: {name}</i>\n\n<i>Configure Bot Settings Using the Buttons Below.</i>", parse_mode="HTML", link_preview_options={"is_disabled": True}, reply_markup=kb([
         [("START", "settings:start"), ("FORCE SUB", "settings:forcejoin")],
@@ -1060,7 +1061,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             "forcejoin")
     elif action == "forcejoin_message_see":
         cfg = await db.settings.find_one({"key": "force_join"}) or {}
-        me = await query.bot.get_me()
+        me = await get_bot_identity(query.bot)
         preview = str(cfg.get("message") or DEFAULT_FORCE_JOIN_MESSAGE)
         user_label = query.from_user.full_name if query.from_user else "User"
         for token, replacement in {
@@ -1073,7 +1074,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         return
     elif action == "forcejoin_message_default":
         await patch(db, "force_join", {"message": DEFAULT_FORCE_JOIN_MESSAGE}, {"enabled": False, "channels": [], })
-        me = await query.bot.get_me()
+        me = await get_bot_identity(query.bot)
         preview = DEFAULT_FORCE_JOIN_MESSAGE.replace("{mention}", query.from_user.full_name if query.from_user else "User").replace("{remaining_count}", "3")
         preview = preview.replace("{bot_mention}", me.full_name or me.username or "Bot")
         await query.answer("✅ Force Sub message restored to the recommended default.\n\n" + plain_preview(preview)[:130], show_alert=True)
@@ -1147,7 +1148,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         from html import unescape
         cfg = await db.settings.find_one({"key": "start_message"}) or {}
         preview = normalize_telegram_text(cfg.get("text") or DEFAULT_START_TEXT)
-        me = await query.bot.get_me()
+        me = await get_bot_identity(query.bot)
         bot_label = me.full_name or me.username or "Bot"
         user_label = query.from_user.full_name or query.from_user.username or "User"
         values = {
@@ -1332,7 +1333,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             "invalid")
     elif action == "invalid_text_see":
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
-        me = await query.bot.get_me()
+        me = await get_bot_identity(query.bot)
         preview = str(cfg.get("text") or DEFAULT_INVALID)
         user_label = query.from_user.full_name if query.from_user else "User"
         for token, replacement in {
@@ -1345,7 +1346,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         return
     elif action == "invalid_text_default":
         await patch(db, "invalid_post", {"text": DEFAULT_INVALID}, {"enabled": False, "about_enabled": False})
-        me = await query.bot.get_me()
+        me = await get_bot_identity(query.bot)
         preview = DEFAULT_INVALID.replace("{mention}", query.from_user.full_name if query.from_user else "User")
         preview = preview.replace("{bot_mention}", me.full_name or me.username or "Bot")
         await query.answer("✅ Invalid-message text restored to the recommended default.\n\n" + plain_preview(preview)[:130], show_alert=True)
@@ -1662,7 +1663,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 await clear_state_preserving_prompts(state)
                 return
             expected_type = "channel" if shared.request_id == 5102 else "group"
-        me = await message.bot.get_me()
+        me = await get_bot_identity(message.bot)
         try:
             chat = await message.bot.get_chat(shared.chat_id if shared else forwarded_chat_id)
             allowed_types = {"channel"} if expected_type == "channel" else {"group", "supergroup"} if expected_type == "group" else {"channel", "group", "supergroup"}

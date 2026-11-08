@@ -8,6 +8,7 @@ from aiogram.exceptions import TelegramAPIError
 from app.config import Settings
 from app.services.permissions import is_owner_or_moderator, is_banned
 from app.database.files import FileRepository
+from app.services.bot_identity import get_bot_identity
 
 router = Router(name="misc")
 log = logging.getLogger(__name__)
@@ -182,7 +183,7 @@ async def invalid_post(message: Message, settings: Settings, database):
             log.info("Invalid-post skipped: setting disabled or missing")
             return
 
-        me = await message.bot.get_me()
+        me = await get_bot_identity(message.bot)
         text = _render_user_text(cfg.get("text") or DEFAULT_INVALID, user, me)
         markup = _invalid_markup(cfg)
         response = None
@@ -224,7 +225,7 @@ async def invalid_about(query: CallbackQuery, database, bot):
     cfg = await database.db.settings.find_one({"key": "invalid_post"}) or {}
     if not cfg.get("about_enabled", False):
         return
-    me = await bot.get_me()
+    me = await get_bot_identity(bot)
     raw = await load_shared_about_text(database.db)
     rendered = _render_user_text(raw, user, me).replace("{bot_name}", _render_user_text("{bot_mention}", user, me))
     await _edit_about_post(message, rendered, _about_markup())
@@ -241,7 +242,7 @@ async def invalid_about_back(query: CallbackQuery, settings: Settings, database)
     cfg = await database.db.settings.find_one({"key": "invalid_post", "enabled": True})
     if not cfg:
         return
-    me = await query.bot.get_me()
+    me = await get_bot_identity(query.bot)
     await _edit_about_post(
         message,
         _render_user_text(cfg.get("text") or DEFAULT_INVALID, user, me),

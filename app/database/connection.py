@@ -195,8 +195,6 @@ class Database:
                 [("invite_link", ASCENDING)], unique=True, name="invite_link_unique"
             )
             await remove_legacy_external_force_join_links(self.db)
-            cleanup_counts = await cleanup_completed_transients(self.db)
-            logger.info("Removed completed legacy records: %s", cleanup_counts)
             await self.db.broadcast_drafts.create_index([("admin_id", ASCENDING)], unique=True)
             await self.db.broadcast_jobs.create_index([("draft_id", ASCENDING)], unique=True)
             await self.db.broadcast_jobs.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
@@ -212,15 +210,23 @@ class Database:
             user_indexes = await self.db.users.index_information()
             if "blocked_1" in user_indexes:
                 await self.db.users.drop_index("blocked_1")
-            user_cleanup = await self.db.users.update_many(
-                {},
-                {"$unset": {
-                    "first_name": "", "last_name": "", "username": "",
-                    "created_at": "", "last_seen": "",
-                    "last_delivery_error": "", "last_delivery_error_at": "",
-                }},
-            )
-            logger.info("Compacted user records; records updated=%s", user_cleanup.modified_count)
+            # This full-collection cleanup is a one-time migration, not a startup task.
+            user_compaction_marker = "compact_user_profiles_v1"
+            if not await self.db.system_migrations.find_one({"_id": user_compaction_marker, "completed": True}):
+                user_cleanup = await self.db.users.update_many(
+                    {},
+                    {"$unset": {
+                        "first_name": "", "last_name": "", "username": "",
+                        "created_at": "", "last_seen": "",
+                        "last_delivery_error": "", "last_delivery_error_at": "",
+                    }},
+                )
+                await self.db.system_migrations.update_one(
+                    {"_id": user_compaction_marker},
+                    {"$setOnInsert": {"completed": True, "completed_at": datetime.now(timezone.utc)}},
+                    upsert=True,
+                )
+                logger.info("One-time user record compaction finished; records updated=%s", user_cleanup.modified_count)
             if self.recover_interrupted_jobs:
                 # Never reset jobs just because a second worker started. Only reclaim
                 # work whose claim/heartbeat has been stale long enough to indicate a crash.

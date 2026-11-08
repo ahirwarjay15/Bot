@@ -12,7 +12,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import get_settings
-from app.database.connection import Database
+from app.database.connection import Database, cleanup_completed_transients
 from app.database.legacy_cleanup import cleanup_legacy_database
 from app.handlers.start import router as start_router, cleanup_expired_pending_join_requests, migrate_force_join_links
 from app.handlers.file import router as file_router
@@ -31,35 +31,29 @@ VALID_SERVICE_ROLES = {"all", "polling", "worker"}
 
 
 async def run_daily_database_cleanup_worker(db):
-    """Run retention cleanup daily at 00:00 Asia/Kolkata."""
+    """Run all retention cleanup once daily at 04:00 Asia/Kolkata."""
     tz = ZoneInfo("Asia/Kolkata")
     while True:
         now_local = datetime.now(tz)
-        next_midnight = (now_local + timedelta(days=1)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        await asyncio.sleep(max(1, (next_midnight - now_local).total_seconds()))
+        next_run = now_local.replace(hour=4, minute=0, second=0, microsecond=0)
+        if next_run <= now_local:
+            next_run += timedelta(days=1)
+        await asyncio.sleep(max(1, (next_run - now_local).total_seconds()))
         cutoff = datetime.now(timezone.utc) - timedelta(days=1)
         try:
-            # Only completed/terminal broadcast history is disposable; never delete
-            # a running job or a recipient still pending/retrying.
-            old_jobs = db.broadcast_jobs.find(
-                {"status": "completed", "completed_at": {"$lte": cutoff}}, {"_id": 1}
-            )
-            old_ids = [job["_id"] async for job in old_jobs]
-            if old_ids:
-                await db.broadcast_recipients.delete_many({"job_id": {"$in": old_ids}})
-                await db.broadcast_jobs.delete_many({"_id": {"$in": old_ids}})
-            # Stale unfinished drafts should not accumulate indefinitely.
-            await db.broadcast_drafts.delete_many(
+            transient_counts = await cleanup_completed_transients(db)
+            deleted_drafts = await db.broadcast_drafts.delete_many(
                 {"status": "draft", "created_at": {"$lte": cutoff}}
             )
-            await cleanup_expired_pending_join_requests(db)
-            log.info("Daily retention cleanup finished; old broadcast jobs removed=%d", len(old_ids))
+            expired_requests = await cleanup_expired_pending_join_requests(db)
+            log.info(
+                "04:00 daily cleanup finished: transients=%s, old_drafts=%s, expired_join_requests=%s",
+                transient_counts, deleted_drafts.deleted_count, expired_requests,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("Daily database retention cleanup failed; will retry next midnight")
+            log.exception("Daily database retention cleanup failed; will retry next day at 04:00")
 
 
 def get_service_role() -> str:

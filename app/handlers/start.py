@@ -16,6 +16,7 @@ from app.database.files import FileRepository
 from app.services.delivery import deliver_reference,deliver_batch,claim_delivery_request,finish_delivery_request
 from app.services.permissions import is_owner_or_moderator
 from app.services.text_format import normalize_telegram_text
+from app.services.bot_identity import get_bot_identity
 router=Router(name="start");log=logging.getLogger(__name__)
 
 def ensure_default_quote_format(raw_text, kind):
@@ -274,7 +275,11 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
 
 
 async def migrate_force_join_links(bot, db) -> dict:
-    """One-time startup migration from expiring invites to stable URLs."""
+    """Migrate legacy Force Sub URLs once; new channels are handled during setup."""
+    migration_id = "force_sub_stable_links_v1"
+    if await db.system_migrations.find_one({"_id": migration_id, "completed": True}):
+        log.info("Force Sub migration already completed; startup scan skipped")
+        return {"migrated": 0, "skipped": 0, "already_completed": True}
     migrated = 0
     skipped = 0
     cursor = db.settings.find({"key": "force_join_channel"})
@@ -286,6 +291,12 @@ async def migrate_force_join_links(bot, db) -> dict:
             migrated += 1
         else:
             skipped += 1
+    if skipped == 0:
+        await db.system_migrations.update_one(
+            {"_id": migration_id},
+            {"$setOnInsert": {"completed": True, "completed_at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
     log.info("Force Sub link migration finished: migrated=%d skipped=%d", migrated, skipped)
     return {"migrated": migrated, "skipped": skipped}
 
@@ -688,7 +699,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     if verify_button:
         rows.append([InlineKeyboardButton(text=cfg.get("verify_text") or "♻️ 𝐓ʀʏ 𝐀ɢᴀɪɴ", callback_data=f"forcejoin:check:{payload}")])
     raw_text = ensure_default_quote_format(cfg.get("message") or "<blockquote><b><i>⚡ ʜᴇʏ {mention},</i></b></blockquote>\n\n<blockquote><i>ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ <b><i>ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs</i></b> ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!</i></blockquote>\n<blockquote><i>ᴛᴀᴘ <b>『 𝐓ʀʏ 𝐀ɢᴀɪɴ 』</b> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ.</i></blockquote>", "force_join")
-    me = await bot.get_me()
+    me = await get_bot_identity(bot)
     rendered = render_common_variables(raw_text, user, me).replace("{remaining_count}", str(len(missing)))
     markup = InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -759,7 +770,7 @@ async def delete_start_command_after(message: Message, db, *, delay: bool = True
 
 
 async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:dict,request_key:str|None=None):
-    me=await bot.get_me();link=f"https://t.me/{me.username}?start={payload}"
+    me=await get_bot_identity(bot);link=f"https://t.me/{me.username}?start={payload}"
     # Batch records contain ordered IDs; only external-source batches store "chat".
     ids = record.get("id")
     if (isinstance(ids, list) and len(ids) > 1) or isinstance(record.get("source_message_id"), list) or isinstance(ids, dict) or (isinstance(ids, str) and "," in ids):
@@ -863,7 +874,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             "⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
         )
         raw_text = normalize_telegram_text(ensure_default_quote_format(cfg.get("text") or default_start_text, "start"))
-        me = await message.bot.get_me()
+        me = await get_bot_identity(message.bot)
         text = render_common_variables(raw_text, user, me)
         # Normal /start stays static; animated frames are reserved for Force Sub prompts.
         if cfg.get("poster_photo_id"):
@@ -880,7 +891,7 @@ async def start_about(query: CallbackQuery, database):
     cfg = await database.db.settings.find_one({"key": "start_message"}) or {}
     if not cfg.get("enabled", True) or not cfg.get("about_enabled", True) or not query.message:
         return
-    me = await query.bot.get_me()
+    me = await get_bot_identity(query.bot)
     from app.handlers.misc import load_shared_about_text
     about_text = await load_shared_about_text(database.db)
     rendered = render_common_variables(about_text, query.from_user, me).replace("{bot_name}", render_common_variables("{bot_mention}", query.from_user, me))
@@ -908,7 +919,7 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
     cfg = await database.db.settings.find_one({"key": "start_message"}) or {}
     if not cfg.get("enabled", True):
         return
-    me = await query.bot.get_me()
+    me = await get_bot_identity(query.bot)
     rows = []
     url = cfg.get("button1_url", cfg.get("button_url", ""))
     label = cfg.get("button1_text", cfg.get("button_text", ""))
@@ -1128,7 +1139,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 join_buttons.append(button)
         rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
         rows.append([InlineKeyboardButton(text=force_cfg.get("verify_text") or "♻️ 𝐕ᴇʀɪғʏ 𝐀ɢᴀɪɴ", callback_data=f"forcejoin:check:{payload}")])
-        me = await bot.get_me()
+        me = await get_bot_identity(bot)
         raw_text = ensure_default_quote_format(force_cfg.get("message") or "<blockquote><b><i>⚡ ʜᴇʏ {mention},</i></b></blockquote>\n\n<blockquote><i>ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ <b><i>ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs</i></b> ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!</i></blockquote>\n<blockquote><i>ᴛᴀᴘ </i><b>『 ᴠᴇʀɪғʏ ᴀɢᴀɪɴ 』</b><i> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ.</i></blockquote>", "force_join")
         rendered = render_common_variables(normalize_telegram_text(raw_text), query.from_user, me).replace("{remaining_count}", str(len(missing)))
         markup = InlineKeyboardMarkup(inline_keyboard=rows)

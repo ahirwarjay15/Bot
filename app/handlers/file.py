@@ -16,6 +16,7 @@ from aiogram.types import (
 from app.config import Settings
 from app.database.files import FileRepository, build_deeplink_token
 from app.services.permissions import is_owner_or_moderator
+from app.services.bot_identity import get_bot_identity
 
 router = Router(name="file")
 log = logging.getLogger(__name__)
@@ -127,27 +128,6 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
         except TelegramAPIError:
             pass
         return
-    try:
-        chat = await message.bot.get_chat(settings.source_channel_id)
-        member = await message.bot.get_chat_member(
-            settings.source_channel_id, (await message.bot.get_me()).id
-        )
-        if member.status not in ("administrator", "creator"):
-            await message.answer(f"Bot must be an admin in {chat.title or 'the storage channel'}.")
-            try:
-                await message.delete()
-            except TelegramAPIError:
-                pass
-            return
-    except TelegramAPIError:
-        log.exception("Storage channel preflight failed")
-        await message.answer("Storage channel check failed. Verify SOURCE_CHANNEL_ID and bot admin access.")
-        try:
-            await message.delete()
-        except TelegramAPIError:
-            pass
-        return
-
     # Show the new prompt first so the chat never goes blank during navigation.
     old_data = await state.get_data()
     prompt = await message.answer(
@@ -280,7 +260,7 @@ async def generate_file_link(
             source_message_id=ids[0], buttons=buttons.get(str(ids[0]))
         )
 
-        me = await callback.bot.get_me()
+        me = await get_bot_identity(callback.bot)
         token = build_deeplink_token(record.get("key", record.get("file_key")))
         link = f"https://t.me/{me.username}?start={token}"
         await progress_message.edit_text(link, reply_markup=_link_keyboard(link), parse_mode=None)

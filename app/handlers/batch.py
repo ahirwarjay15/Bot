@@ -18,6 +18,7 @@ from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
 from app.database.files import FileRepository, build_deeplink_token
 from app.services.permissions import is_owner_or_moderator
+from app.services.bot_identity import get_bot_identity
 
 router = Router(name="batch")
 log = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ async def _bot_can_access_chat(bot, chat_id: int) -> bool:
         chat = await bot.get_chat(int(chat_id))
         if getattr(chat, "type", None) != "channel":
             return False
-        me = await bot.get_me()
+        me = await get_bot_identity(bot)
         member = await bot.get_chat_member(int(chat_id), me.id)
         return member.status in ("member", "administrator", "creator")
     except (TelegramAPIError, TypeError, ValueError):
@@ -360,7 +361,7 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         batch = await FileRepository(database.db).save_batch(
             items, chat_id=(source_chat_id if source_chat_id != int(settings.source_channel_id) else None)
         )
-        me = await message.bot.get_me()
+        me = await get_bot_identity(message.bot)
         link = f"https://t.me/{me.username}?start={build_deeplink_token(batch['key'])}"
         keyboard = _link_keyboard(link)
         link_send_attempted = True
