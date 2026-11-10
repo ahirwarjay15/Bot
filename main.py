@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeChat
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -168,51 +167,6 @@ async def supervise_worker(worker, *args, name: str, restart_delay: float = 5.0)
         except Exception:
             log.exception("Background worker %s crashed; restarting in %.1f seconds", name, restart_delay)
         await asyncio.sleep(restart_delay)
-
-
-async def configure_bot_commands(bot, settings, db):
-    """Register public commands and private privileged menus in Telegram."""
-    try:
-        await bot.set_my_commands(
-            USER_COMMANDS,
-            scope=BotCommandScopeAllPrivateChats(),
-        )
-
-        owner_ids = set(settings.owner_ids)
-        moderator_ids = set()
-        async for moderator in db.moderators.find({}, {"user_id": 1}):
-            user_id = moderator.get("user_id")
-            if isinstance(user_id, int) and user_id > 0 and user_id not in owner_ids:
-                moderator_ids.add(user_id)
-
-        for user_id in sorted(moderator_ids):
-            try:
-                await bot.set_my_commands(
-                    MODERATOR_COMMANDS,
-                    scope=BotCommandScopeChat(chat_id=user_id),
-                )
-            except Exception:
-                log.warning("Could not register moderator command menu for chat %s", user_id, exc_info=True)
-        for user_id in sorted(owner_ids):
-            try:
-                await bot.set_my_commands(
-                    PRIVILEGED_COMMANDS,
-                    scope=BotCommandScopeChat(chat_id=user_id),
-                )
-            except Exception:
-                log.warning("Could not register owner command menu for chat %s", user_id, exc_info=True)
-
-        log.info(
-            "Telegram command menus registered: public=%s, moderators=%s, owners=%s",
-            len(USER_COMMANDS),
-            len(moderator_ids),
-            len(owner_ids),
-        )
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        # A Telegram menu API failure must not prevent the bot from starting.
-        log.exception("Could not register Telegram command menus")
 
 
 async def main():
