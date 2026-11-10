@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeChat
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -26,6 +27,39 @@ from app.services.delivery import run_task_worker
 from app.services.polling_lease import run_polling_with_lease
 
 SERVICE_READY = False
+
+USER_COMMANDS = [
+    BotCommand(command="start", description="Start the bot"),
+    BotCommand(command="file", description="Get a file using its code"),
+    BotCommand(command="batch", description="Get multiple files"),
+    BotCommand(command="cancel", description="Cancel the current operation"),
+]
+
+PRIVILEGED_COMMANDS = [
+    *USER_COMMANDS,
+    BotCommand(command="settings", description="Open bot settings"),
+    BotCommand(command="stats", description="View bot statistics"),
+    BotCommand(command="broadcast", description="Broadcast a message"),
+    BotCommand(command="pbroadcast", description="Broadcast and pin a message"),
+    BotCommand(command="ban", description="Ban a user"),
+    BotCommand(command="unban", description="Unban a user"),
+    BotCommand(command="addmod", description="Add a moderator"),
+    BotCommand(command="delmod", description="Remove a moderator"),
+    BotCommand(command="export", description="Export the database"),
+    BotCommand(command="exportfiles", description="Export file records"),
+    BotCommand(command="shortener", description="Configure shortener"),
+    BotCommand(command="setstart", description="Set start message"),
+    BotCommand(command="setstarttext", description="Set start message text"),
+    BotCommand(command="setinvalid", description="Set invalid-post message"),
+    BotCommand(command="setinvalidtext", description="Set invalid-post text"),
+    BotCommand(command="setautodelete", description="Configure auto delete"),
+    BotCommand(command="setautodeletemin", description="Set auto-delete minimum"),
+    BotCommand(command="setnotice", description="Set notice message"),
+    BotCommand(command="setafterdelete", description="Configure after-delete message"),
+    BotCommand(command="setafterdeletetext", description="Set after-delete text"),
+    BotCommand(command="setafterdeletebutton", description="Set after-delete button"),
+    BotCommand(command="setshortener", description="Set shortener configuration"),
+]
 log = logging.getLogger(__name__)
 VALID_SERVICE_ROLES = {"all", "polling", "worker"}
 
@@ -114,6 +148,38 @@ async def supervise_worker(worker, *args, name: str, restart_delay: float = 5.0)
         await asyncio.sleep(restart_delay)
 
 
+async def configure_bot_commands(bot, settings, db):
+    """Register public commands and private privileged menus in Telegram."""
+    try:
+        await bot.set_my_commands(
+            USER_COMMANDS,
+            scope=BotCommandScopeAllPrivateChats(),
+        )
+
+        privileged_ids = set(settings.owner_ids)
+        async for moderator in db.moderators.find({}, {"user_id": 1}):
+            user_id = moderator.get("user_id")
+            if isinstance(user_id, int) and user_id > 0:
+                privileged_ids.add(user_id)
+
+        for user_id in sorted(privileged_ids):
+            await bot.set_my_commands(
+                PRIVILEGED_COMMANDS,
+                scope=BotCommandScopeChat(chat_id=user_id),
+            )
+
+        log.info(
+            "Telegram command menus registered: public=%s, privileged_chats=%s",
+            len(USER_COMMANDS),
+            len(privileged_ids),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # A Telegram menu API failure must not prevent the bot from starting.
+        log.exception("Could not register Telegram command menus")
+
+
 async def main():
     global SERVICE_READY
     logging.basicConfig(
@@ -137,6 +203,8 @@ async def main():
         # A polling-only process must not reset jobs being processed by the worker service.
         database = Database(settings, initialize_schema=(role != "polling"), recover_interrupted_jobs=(role != "polling"))
         await connect_database_with_retry(database)
+        if role in {"all", "polling"}:
+            await configure_bot_commands(bot, settings, database.db)
         if role in {"all", "worker"}:
             await migrate_force_join_links(bot, database.db)
         if role == "worker":
