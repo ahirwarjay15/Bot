@@ -3,7 +3,6 @@ import os
 import re
 from functools import lru_cache
 
-from dotenv import dotenv_values
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -52,15 +51,9 @@ class Settings(BaseSettings):
     def collect_numbered_owner_ids(self):
         """Merge OWNER_ID/OWNER_IDS and any OWNER_ID_N variables, preserving order."""
         values = list(self.owner_ids)
-        sources = [os.environ]
-        env_file = self.model_config.get("env_file")
-        if env_file:
-            paths = (env_file,) if isinstance(env_file, (str, os.PathLike)) else env_file
-            for path in paths:
-                file_values = dotenv_values(path)
-                sources.append({str(key).upper(): value for key, value in file_values.items() if value is not None})
-
-        for source in sources:
+        # BaseSettings already loads OWNER_ID/OWNER_IDS from .env; scan the
+        # process environment here for the unbounded numbered Render variables.
+        for source in (os.environ,):
             for key in ("OWNER_IDS", "OWNER_ID"):
                 raw = source.get(key)
                 if raw is not None:
