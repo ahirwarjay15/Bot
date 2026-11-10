@@ -71,7 +71,7 @@ async def add_mod(message: Message, settings: Settings, database):
 
 @router.message(Command("delmod"))
 async def del_mod(message: Message, settings: Settings, database):
-    if not message.from_user or message.from_user.id != settings.owner_id:
+    if not message.from_user or not is_owner(message.from_user.id, settings):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
@@ -127,7 +127,7 @@ async def stats_ok(query: CallbackQuery, settings: Settings, database):
 @router.message(Command("export"))
 async def export_database(message: Message, settings: Settings, database):
     """Export every MongoDB collection as numbered, valid Extended JSON TXT parts."""
-    if not message.from_user or message.from_user.id != settings.owner_id:
+    if not message.from_user or not is_owner(message.from_user.id, settings):
         return
 
     max_bytes = 25_000_000
