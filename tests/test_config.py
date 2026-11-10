@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
+from app.services.permissions import is_owner
 
 
 def _set_required_env(monkeypatch):
@@ -85,3 +86,12 @@ def test_owner_ids_are_deduplicated_and_must_be_positive(monkeypatch):
     monkeypatch.setenv("OWNER_IDS", "12345,0")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+
+def test_every_configured_id_has_owner_permissions(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("OWNER_ID", "12345,23456,34567")
+    settings = Settings(_env_file=None)
+    assert all(is_owner(owner_id, settings) for owner_id in settings.owner_ids)
+    assert not is_owner(99999, settings)
