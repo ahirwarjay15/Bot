@@ -124,9 +124,8 @@ async def stats_ok(query: CallbackQuery, settings: Settings, database):
     await query.answer(await build_stats_text(query.bot, database.db), show_alert=True)
 
 
-@router.message(Command("export"))
-async def export_database(message: Message, settings: Settings, database):
-    """Export every MongoDB collection as numbered, valid Extended JSON TXT parts."""
+async def _export_database_collections(message: Message, settings: Settings, database, *, files_only: bool = False):
+    """Export selected MongoDB collections as numbered, valid Extended JSON TXT parts."""
     if not message.from_user or not is_owner(message.from_user.id, settings):
         return
 
@@ -146,7 +145,10 @@ async def export_database(message: Message, settings: Settings, database):
         return bytearray(json.dumps(prefix, ensure_ascii=False).encode("utf-8")[:-1] + b', "collections": {')
 
     try:
-        collection_names = sorted(await database.db.list_collection_names())
+        available_collection_names = await database.db.list_collection_names()
+        collection_names = (
+            ["files"] if "files" in available_collection_names else []
+        ) if files_only else sorted(available_collection_names)
         output = start_part(1)
         part_number = 1
         part_documents = 0
@@ -237,3 +239,15 @@ async def export_database(message: Message, settings: Settings, database):
     except Exception:
         # Do not expose database errors or credentials in chat.
         await message.answer("Database export failed. Please check the bot logs and try again.")
+
+
+@router.message(Command("export"))
+async def export_database(message: Message, settings: Settings, database):
+    """Export every MongoDB collection, preserving the original /export behavior."""
+    await _export_database_collections(message, settings, database)
+
+
+@router.message(Command("exportfiles"))
+async def export_files(message: Message, settings: Settings, database):
+    """Export only documents stored in the files MongoDB collection."""
+    await _export_database_collections(message, settings, database, files_only=True)
