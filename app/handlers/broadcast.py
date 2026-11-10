@@ -156,11 +156,21 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         await query.message.edit_text("Broadcast queued. You will receive the delivery report when it finishes.")
 
 async def _watch_broadcast_changes(db, wake_event: asyncio.Event, ready_event: asyncio.Event):
-    """Listen for queued drafts/jobs; MongoDB pushes changes instead of polling."""
+    """Wake the worker for job creation and recipient progress; never poll for completion."""
     pipeline = [{"$match": {
-        "ns.coll": {"$in": ["broadcast_jobs", "broadcast_drafts"]},
-        "operationType": {"$in": ["insert", "update", "replace"]},
-        "fullDocument.status": {"$in": ["queued", "preparing", "pending", "processing"]},
+        "$or": [
+            {
+                "ns.coll": {"$in": ["broadcast_jobs", "broadcast_drafts"]},
+                "operationType": {"$in": ["insert", "update", "replace", "delete"]},
+                "fullDocument.status": {"$in": [
+                    "queued", "preparing", "pending", "processing", "reporting"
+                ]},
+            },
+            {
+                "ns.coll": "broadcast_recipients",
+                "operationType": {"$in": ["insert", "update", "replace", "delete"]},
+            },
+        ]
     }}]
     async with await db.watch(
         pipeline=pipeline, full_document="updateLookup", max_await_time_ms=600_000
@@ -267,15 +277,18 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
                     {"job_id": job_id, "status": {"$in": ["pending", "sending"]}}
                 )
                 if outstanding:
-                    await asyncio.sleep(0.5)
+                    # Recipient status changes (sent/failed/retry/skipped) wake this
+                    # wait through the database change stream. No interval polling.
+                    await wake_event.wait()
                     continue
                 finalized = await db.broadcast_jobs.update_one(
                     {"_id": job_id, "status": {"$in": ["preparing", "pending", "processing"]}},
                     {"$set": {"status": "reporting", "reporting_at": now()}},
                 )
                 if not finalized.modified_count:
-                    # Another worker is already publishing this job report.
-                    await asyncio.sleep(0.1)
+                    # Another worker already owns report finalization. Its job-state
+                    # change is observed by the same change stream.
+                    await wake_event.wait()
                     continue
                 counts = {}
                 for status in ("sent", "failed", "blocked", "unknown", "skipped_banned"):
