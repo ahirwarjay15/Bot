@@ -7,7 +7,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from app.config import Settings
-from app.services.permissions import is_owner_or_moderator
+from app.services.permissions import is_owner, is_owner_or_moderator
 
 router = Router(name="admin")
 
@@ -20,7 +20,7 @@ async def ban_user(message: Message, settings: Settings, database):
         await message.answer("Usage: /ban TELEGRAM_USER_ID")
         return
     uid = int(parts[1])
-    if uid == settings.owner_id or await database.db.moderators.find_one({"user_id": uid}):
+    if is_owner(uid, settings) or await database.db.moderators.find_one({"user_id": uid}):
         await message.answer("Owner/moderators cannot be banned.")
         return
     await database.db.users.update_one(
@@ -45,14 +45,14 @@ async def unban_user(message: Message, settings: Settings, database):
 
 @router.message(Command("addmod"))
 async def add_mod(message: Message, settings: Settings, database):
-    if not message.from_user or message.from_user.id != settings.owner_id:
+    if not message.from_user or not is_owner(message.from_user.id, settings):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) <= 0:
         await message.answer("Usage: /addmod TELEGRAM_USER_ID")
         return
     uid = int(parts[1])
-    if uid == settings.owner_id:
+    if is_owner(uid, settings):
         await message.answer("Owner is not stored as a moderator.")
         return
     banned_user = await database.db.users.find_one({"user_id": uid, "banned": True})
