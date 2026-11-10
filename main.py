@@ -35,6 +35,28 @@ USER_COMMANDS = [
     BotCommand(command="cancel", description="Cancel the current operation"),
 ]
 
+MODERATOR_COMMANDS = [
+    *USER_COMMANDS,
+    BotCommand(command="settings", description="Open bot settings"),
+    BotCommand(command="stats", description="View bot statistics"),
+    BotCommand(command="broadcast", description="Broadcast a message"),
+    BotCommand(command="pbroadcast", description="Broadcast and pin a message"),
+    BotCommand(command="ban", description="Ban a user"),
+    BotCommand(command="unban", description="Unban a user"),
+    BotCommand(command="shortener", description="Shorten a URL"),
+    BotCommand(command="setstart", description="Set start message"),
+    BotCommand(command="setstarttext", description="Set start message text"),
+    BotCommand(command="setinvalid", description="Set invalid-post message"),
+    BotCommand(command="setinvalidtext", description="Set invalid-post text"),
+    BotCommand(command="setautodelete", description="Configure auto delete"),
+    BotCommand(command="setautodeletemin", description="Set auto-delete minimum"),
+    BotCommand(command="setnotice", description="Set notice message"),
+    BotCommand(command="setafterdelete", description="Configure after-delete message"),
+    BotCommand(command="setafterdeletetext", description="Set after-delete text"),
+    BotCommand(command="setafterdeletebutton", description="Set after-delete button"),
+    BotCommand(command="setshortener", description="Set shortener configuration"),
+]
+
 PRIVILEGED_COMMANDS = [
     *USER_COMMANDS,
     BotCommand(command="settings", description="Open bot settings"),
@@ -156,22 +178,29 @@ async def configure_bot_commands(bot, settings, db):
             scope=BotCommandScopeAllPrivateChats(),
         )
 
-        privileged_ids = set(settings.owner_ids)
+        owner_ids = set(settings.owner_ids)
+        moderator_ids = set()
         async for moderator in db.moderators.find({}, {"user_id": 1}):
             user_id = moderator.get("user_id")
-            if isinstance(user_id, int) and user_id > 0:
-                privileged_ids.add(user_id)
+            if isinstance(user_id, int) and user_id > 0 and user_id not in owner_ids:
+                moderator_ids.add(user_id)
 
-        for user_id in sorted(privileged_ids):
+        for user_id in sorted(moderator_ids):
+            await bot.set_my_commands(
+                MODERATOR_COMMANDS,
+                scope=BotCommandScopeChat(chat_id=user_id),
+            )
+        for user_id in sorted(owner_ids):
             await bot.set_my_commands(
                 PRIVILEGED_COMMANDS,
                 scope=BotCommandScopeChat(chat_id=user_id),
             )
 
         log.info(
-            "Telegram command menus registered: public=%s, privileged_chats=%s",
+            "Telegram command menus registered: public=%s, moderators=%s, owners=%s",
             len(USER_COMMANDS),
-            len(privileged_ids),
+            len(moderator_ids),
+            len(owner_ids),
         )
     except asyncio.CancelledError:
         raise
