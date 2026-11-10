@@ -411,9 +411,9 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
                 watcher.result()
                 raise RuntimeError("Delivery task change stream stopped unexpectedly")
             now = _now()
-            # Schedule the next wake at the earliest persisted deadline. A bounded
-            # 60-second discovery wait notices tasks created by the separate polling
-            # process without hammering MongoDB every few seconds.
+            # Sleep until the earliest persisted deadline. New tasks created by the
+            # polling process wake this worker through the MongoDB change stream;
+            # an idle worker performs no periodic task-discovery queries.
             next_task = await db.tasks.find_one(
                 {"status": "pending", "deadline": {"$exists": True}},
                 sort=[("deadline", 1)],
