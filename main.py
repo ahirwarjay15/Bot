@@ -24,63 +24,10 @@ from app.handlers.shortener import router as shortener_router
 from app.handlers.misc import router as misc_router
 from app.services.delivery import run_task_worker
 from app.services.polling_lease import run_polling_with_lease
+from app.services.bot_commands import configure_bot_commands
 
 SERVICE_READY = False
 
-USER_COMMANDS = [
-    BotCommand(command="start", description="Start the bot"),
-    BotCommand(command="file", description="Get a file using its code"),
-    BotCommand(command="batch", description="Get multiple files"),
-    BotCommand(command="cancel", description="Cancel the current operation"),
-]
-
-MODERATOR_COMMANDS = [
-    *USER_COMMANDS,
-    BotCommand(command="settings", description="Open bot settings"),
-    BotCommand(command="stats", description="View bot statistics"),
-    BotCommand(command="broadcast", description="Broadcast a message"),
-    BotCommand(command="pbroadcast", description="Broadcast and pin a message"),
-    BotCommand(command="ban", description="Ban a user"),
-    BotCommand(command="unban", description="Unban a user"),
-    BotCommand(command="shortener", description="Shorten a URL"),
-    BotCommand(command="setstart", description="Set start message"),
-    BotCommand(command="setstarttext", description="Set start message text"),
-    BotCommand(command="setinvalid", description="Set invalid-post message"),
-    BotCommand(command="setinvalidtext", description="Set invalid-post text"),
-    BotCommand(command="setautodelete", description="Configure auto delete"),
-    BotCommand(command="setautodeletemin", description="Set auto-delete minimum"),
-    BotCommand(command="setnotice", description="Set notice message"),
-    BotCommand(command="setafterdelete", description="Configure after-delete message"),
-    BotCommand(command="setafterdeletetext", description="Set after-delete text"),
-    BotCommand(command="setafterdeletebutton", description="Set after-delete button"),
-    BotCommand(command="setshortener", description="Set shortener configuration"),
-]
-
-PRIVILEGED_COMMANDS = [
-    *USER_COMMANDS,
-    BotCommand(command="settings", description="Open bot settings"),
-    BotCommand(command="stats", description="View bot statistics"),
-    BotCommand(command="broadcast", description="Broadcast a message"),
-    BotCommand(command="pbroadcast", description="Broadcast and pin a message"),
-    BotCommand(command="ban", description="Ban a user"),
-    BotCommand(command="unban", description="Unban a user"),
-    BotCommand(command="addmod", description="Add a moderator"),
-    BotCommand(command="delmod", description="Remove a moderator"),
-    BotCommand(command="export", description="Export the database"),
-    BotCommand(command="exportfiles", description="Export file records"),
-    BotCommand(command="shortener", description="Configure shortener"),
-    BotCommand(command="setstart", description="Set start message"),
-    BotCommand(command="setstarttext", description="Set start message text"),
-    BotCommand(command="setinvalid", description="Set invalid-post message"),
-    BotCommand(command="setinvalidtext", description="Set invalid-post text"),
-    BotCommand(command="setautodelete", description="Configure auto delete"),
-    BotCommand(command="setautodeletemin", description="Set auto-delete minimum"),
-    BotCommand(command="setnotice", description="Set notice message"),
-    BotCommand(command="setafterdelete", description="Configure after-delete message"),
-    BotCommand(command="setafterdeletetext", description="Set after-delete text"),
-    BotCommand(command="setafterdeletebutton", description="Set after-delete button"),
-    BotCommand(command="setshortener", description="Set shortener configuration"),
-]
 log = logging.getLogger(__name__)
 VALID_SERVICE_ROLES = {"all", "polling", "worker"}
 
