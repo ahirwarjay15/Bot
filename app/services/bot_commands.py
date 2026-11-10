@@ -11,25 +11,41 @@ USER_COMMANDS = [
     BotCommand(command="start", description="Start the adventure ✨"),
 ]
 
-# Moderators added with /addmod get the operational menu, never owner-only controls.
+# Common commands are ordered by everyday usage. Keep the first four in the
+# exact order requested: start, settings, file, batch.
 MODERATOR_COMMANDS = [
     BotCommand(command="start", description="Start the adventure ✨"),
     BotCommand(command="settings", description="Open bot settings"),
     BotCommand(command="file", description="Generate a permanent file link"),
     BotCommand(command="batch", description="Generate a batch link for multiple files"),
-    BotCommand(command="cancel", description="Cancel the current operation"),
     BotCommand(command="shortener", description="Shorten a URL"),
-    BotCommand(command="ban", description="Ban a user by Telegram ID"),
-    BotCommand(command="unban", description="Unban a user by Telegram ID"),
     BotCommand(command="stats", description="View bot statistics"),
     BotCommand(command="broadcast", description="Broadcast a message to users"),
+    BotCommand(command="ban", description="Ban a user by Telegram ID"),
+    BotCommand(command="unban", description="Unban a user by Telegram ID"),
+    BotCommand(command="cancel", description="Cancel the current operation"),
+    # Settings shortcuts available to moderators and owners.
+    BotCommand(command="setstart", description="Set the start message"),
+    BotCommand(command="setstarttext", description="Set start message text"),
+    BotCommand(command="setinvalid", description="Set invalid-post message"),
+    BotCommand(command="setinvalidtext", description="Set invalid-post text"),
+    BotCommand(command="setautodelete", description="Configure auto delete"),
+    BotCommand(command="setautodeletemin", description="Set auto-delete minimum"),
+    BotCommand(command="setnotice", description="Set notice message"),
+    BotCommand(command="setafterdelete", description="Configure after-delete message"),
+    BotCommand(command="setafterdeletetext", description="Set after-delete text"),
+    BotCommand(command="setafterdeletebutton", description="Set after-delete button"),
+    BotCommand(command="setshortener", description="Set shortener configuration"),
 ]
 
-# Owners configured through Render environment variables get every listed command.
+# Owners configured through Render environment variables get every available
+# operational command plus owner-only moderator management and database export.
 OWNER_COMMANDS = [
     *MODERATOR_COMMANDS,
     BotCommand(command="addmod", description="Add a moderator (owner only)"),
     BotCommand(command="delmod", description="Remove a moderator (owner only)"),
+    BotCommand(command="export", description="Export the complete database"),
+    BotCommand(command="exportfiles", description="Export file records"),
 ]
 
 
