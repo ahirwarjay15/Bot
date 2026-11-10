@@ -10,7 +10,7 @@ from aiogram.types import Message, CallbackQuery, MessageEntity, InlineKeyboardM
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
-from app.services.permissions import is_owner_or_moderator
+from app.services.permissions import is_owner, is_owner_or_moderator
 from app.services.text_format import normalize_telegram_text
 from app.services.links import shorten_url
 from app.handlers.start import effective_force_join_channels, normalize_animation_config, ensure_force_join_link, cleanup_pending_join_requests_for_channel
@@ -1434,21 +1434,21 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await render_shortener(query, db)
     elif action == "mods": await render_mods(query, db)
     elif action == "mod_add":
-        if query.from_user.id != settings.owner_id:
+        if not is_owner(query.from_user.id, settings):
             await query.answer("Only the owner can add moderators.", show_alert=True); return
         if await db.moderators.count_documents({}) >= 3:
             await query.answer("Maximum 3 moderators allowed.", show_alert=True); return
         await state.set_state(SettingInput.waiting); await state.update_data(field="mod_id")
         if query.message: await tracked_answer(query.message, state, "Please send the Telegram user ID of the new moderator.")
     elif action == "mod_remove":
-        if query.from_user.id != settings.owner_id:
+        if not is_owner(query.from_user.id, settings):
             await query.answer("Only the owner can remove moderators.", show_alert=True); return
         mods = await db.moderators.find({}).sort("user_id", 1).to_list(length=3)
         rows = [[(m.get("first_name") or f"User {m['user_id']}", f"settings:mod_del:{m['user_id']}")] for m in mods]
         rows.append([("《 BACK", "settings:mods")])
         await edit_page(query, "REMOVE MODERATOR\nSelect the moderator you want to remove.", kb(rows))
     elif action.startswith("mod_del:"):
-        if query.from_user.id != settings.owner_id:
+        if not is_owner(query.from_user.id, settings):
             await query.answer("Only the owner can remove moderators.", show_alert=True); return
         uid = int(action.split(":", 1)[1])
         result = await db.moderators.delete_one({"user_id": uid})
@@ -2145,7 +2145,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             await tracked_answer(message, state, "Please send a valid numeric Telegram user ID.")
             return
         uid = int(value)
-        if uid == settings.owner_id:
+        if is_owner(uid, settings):
             await tracked_answer(message, state, "Owner is not stored as a moderator.")
             return
         if await db.users.find_one({"user_id": uid, "banned": True}):
