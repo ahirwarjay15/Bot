@@ -31,3 +31,38 @@ def test_retry_wait_seconds_never_returns_zero():
     now = datetime(2026, 11, 8, 4, 0, tzinfo=timezone.utc)
 
     assert _retry_wait_seconds(now - timedelta(seconds=5), now) == 0.1
+
+
+
+def test_broadcast_change_stream_subscribes_to_recipient_progress():
+    import asyncio
+    from app.handlers.broadcast import _watch_broadcast_changes
+
+    async def run():
+        class Stream:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            def __aiter__(self):
+                async def changes():
+                    yield {"operationType": "update", "ns": {"coll": "broadcast_recipients"}}
+                return changes()
+
+        class DB:
+            async def watch(self, *, pipeline, full_document, max_await_time_ms):
+                assert full_document == "updateLookup"
+                assert max_await_time_ms == 600_000
+                match = pipeline[0]["$match"]["$or"]
+                assert any(item.get("ns.coll") == "broadcast_recipients" for item in match)
+                return Stream()
+
+        wake_event = asyncio.Event()
+        ready_event = asyncio.Event()
+        await _watch_broadcast_changes(DB(), wake_event, ready_event)
+        assert ready_event.is_set()
+        assert wake_event.is_set()
+
+    asyncio.run(run())
