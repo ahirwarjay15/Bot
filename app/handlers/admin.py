@@ -8,6 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from app.config import Settings
 from app.services.permissions import is_owner, is_owner_or_moderator
+from app.services.bot_commands import set_moderator_commands, set_user_commands
 
 router = Router(name="admin")
 
@@ -67,6 +68,11 @@ async def add_mod(message: Message, settings: Settings, database):
         await message.answer("Maximum 3 moderators allowed.")
         return
     await database.db.moderators.insert_one({"user_id": uid, "first_name": f"User {uid}"})
+    try:
+        await set_moderator_commands(message.bot, uid)
+    except Exception:
+        # The database role remains authoritative; startup will retry menu registration.
+        pass
     await message.answer(f"Successfully added User {uid} as moderator.")
 
 @router.message(Command("delmod"))
@@ -77,7 +83,14 @@ async def del_mod(message: Message, settings: Settings, database):
     if len(parts) != 2 or not parts[1].isdigit():
         await message.answer("Usage: /delmod TELEGRAM_USER_ID")
         return
-    result = await database.db.moderators.delete_one({"user_id": int(parts[1])})
+    uid = int(parts[1])
+    result = await database.db.moderators.delete_one({"user_id": uid})
+    if result.deleted_count:
+        try:
+            # Remove the old per-chat override so the user falls back to /start only.
+            await set_user_commands(message.bot, uid)
+        except Exception:
+            pass
     await message.answer("Moderator removed." if result.deleted_count else "That user is not a moderator.")
 
 async def build_stats_text(bot, db):
