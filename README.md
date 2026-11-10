@@ -17,7 +17,10 @@ Async Telegram file and batch-delivery bot built with Python 3.12, aiogram 3 and
 Set these environment variables in your hosting provider or a private `.env` file:
 
 - `BOT_TOKEN`: token for this bot instance.
-- `OWNER_ID`: numeric Telegram owner ID.
+- `OWNER_ID`: numeric Telegram owner ID; also accepts comma-separated IDs (for example, `123,456,789`).
+- `OWNER_IDS`: optional alternative comma-separated owner list (for example, `123,456`).
+- `OWNER_ID_2`, `OWNER_ID_3`, ...: optional additional owners using numbered variables. Numbered values are merged with the IDs above; duplicate IDs are removed.
+- Every configured owner receives the same owner-level permissions. The first configured ID remains available as the legacy `settings.owner_id`.
 - `MONGODB_URI`: MongoDB connection string.
 - `MONGODB_DB_NAME`: required database name for this bot instance. Choose a dedicated name (for example, `my_file_bot`) to keep this bot's data isolated. The code has no implicit database-name default.
 - `SOURCE_CHANNEL_ID`: private source channel ID (legacy `DB_CHANNEL_ID` is also accepted).
