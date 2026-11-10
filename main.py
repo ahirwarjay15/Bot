@@ -186,15 +186,21 @@ async def configure_bot_commands(bot, settings, db):
                 moderator_ids.add(user_id)
 
         for user_id in sorted(moderator_ids):
-            await bot.set_my_commands(
-                MODERATOR_COMMANDS,
-                scope=BotCommandScopeChat(chat_id=user_id),
-            )
+            try:
+                await bot.set_my_commands(
+                    MODERATOR_COMMANDS,
+                    scope=BotCommandScopeChat(chat_id=user_id),
+                )
+            except Exception:
+                log.warning("Could not register moderator command menu for chat %s", user_id, exc_info=True)
         for user_id in sorted(owner_ids):
-            await bot.set_my_commands(
-                PRIVILEGED_COMMANDS,
-                scope=BotCommandScopeChat(chat_id=user_id),
-            )
+            try:
+                await bot.set_my_commands(
+                    PRIVILEGED_COMMANDS,
+                    scope=BotCommandScopeChat(chat_id=user_id),
+                )
+            except Exception:
+                log.warning("Could not register owner command menu for chat %s", user_id, exc_info=True)
 
         log.info(
             "Telegram command menus registered: public=%s, moderators=%s, owners=%s",
