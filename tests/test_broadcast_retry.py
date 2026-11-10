@@ -36,10 +36,8 @@ def test_retry_wait_seconds_never_returns_zero():
 
 def test_broadcast_change_stream_subscribes_to_recipient_progress():
     import asyncio
-    import pytest
     from app.handlers.broadcast import _watch_broadcast_changes
 
-    @pytest.mark.asyncio
     async def run():
         class Stream:
             async def __aenter__(self):
