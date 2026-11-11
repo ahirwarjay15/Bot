@@ -1103,7 +1103,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             item = links[index]
             label = str(item.get("button_text") or f"Join {index + 1}")
             url = html.escape(str(item.get("url") or ""))
-            await edit_page(query, f"OTHER LINK SETTINGS\\n\\nButton: {html.escape(label)}\\nURL: <code>{url}</code>\\n\\nThis optional link is not verified by Force Sub.", kb([
+            await edit_page(query, f"OTHER LINK SETTINGS\n\nButton: {html.escape(label)}\\nURL: <code>{url}</code>\n\nThis optional link is not verified by Force Sub.", kb([
                 [("REMOVE", f"settings:forcejoin_other_remove:{index}")],
                 [("《 BACK", "settings:forcejoin")],
             ]))
