@@ -103,7 +103,8 @@ def test_other_links_are_only_available_inside_force_sub_add_keyboard():
     add_flow = source.split('elif action == "forcejoin_add":', 1)[1].split(
         'elif action == "forcejoin_join_request":', 1
     )[0]
-    assert 'settings:forcejoin_other_links' not in page
+    assert 'settings:forcejoin_other_item:{i}' in page
+    assert 'ADDED OTHER LINKS ({len(other_links)})' in page
     assert 'KeyboardButton(text="Other Links")' in add_flow
     assert 'KeyboardButton(text="Group"' in add_flow
     assert 'KeyboardButton(text="Channel"' in add_flow
