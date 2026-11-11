@@ -46,3 +46,47 @@ async def test_force_sub_settings_uses_cached_channel_titles_without_telegram_re
     labels = [button.text for row in markup.inline_keyboard for button in row]
     assert "Cached Private Channel" in labels
     assert "FORCE SUB\\n\\n" not in text
+
+
+
+def test_other_force_sub_links_are_hidden_without_pending_required_chats():
+    from app.handlers.start import build_force_join_other_link_buttons
+
+    links = [{"url": "https://t.me/example"}]
+    assert build_force_join_other_link_buttons(links, 0) == []
+
+
+def test_other_force_sub_links_use_join_number_after_pending_channels():
+    from app.handlers.start import build_force_join_other_link_buttons
+
+    buttons = build_force_join_other_link_buttons(
+        [{"url": "https://t.me/example"}], 3
+    )
+    assert [button.text for button in buttons] == ["Join 4"]
+
+
+def test_other_force_sub_links_preserve_custom_button_text():
+    from app.handlers.start import build_force_join_other_link_buttons
+
+    buttons = build_force_join_other_link_buttons(
+        [{"button_text": "Visit Website", "url": "https://example.com"}], 2
+    )
+    assert [button.text for button in buttons] == ["Visit Website"]
+    assert buttons[0].url == "https://example.com"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("@samplechannel", "https://t.me/samplechannel"),
+        ("t.me/samplechannel", "https://t.me/samplechannel"),
+        ("telegram.me/joinchat/abc123", "https://telegram.me/joinchat/abc123"),
+        ("tg://resolve?domain=samplechannel", "https://t.me/samplechannel"),
+        ("tg://join?invite=abc123", "https://t.me/+abc123"),
+        ("example.com/path", "https://example.com/path"),
+    ],
+)
+def test_other_force_sub_link_formats_are_normalized(raw, expected):
+    from app.handlers.settings import normalize_forcejoin_other_url
+
+    assert normalize_forcejoin_other_url(raw) == expected
