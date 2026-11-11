@@ -432,9 +432,6 @@ async def build_forcejoin_page(bot, db, settings):
     rows = [channel_buttons[i:i+2] for i in range(0, len(channel_buttons), 2)]
     if len(channels) < 10:
         rows.append([("✚ ADD", "settings:forcejoin_add")])
-    other_links = cfg.get("other_links")
-    other_link_count = len(other_links) if isinstance(other_links, list) else 0
-    rows.append([(f"OTHER LINKS ({other_link_count})", "settings:forcejoin_other_links")])
     # Force Sub is active exactly while at least one channel is configured.
     enabled = bool(channels)
     if cfg.get("enabled") != enabled:
@@ -986,7 +983,10 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             [("《 BACK", "settings:forcejoin")],
         ]))
         if panel_message:
-            await state.update_data(forcejoin_panel_chat_id=panel_message.chat.id, forcejoin_panel_message_id=panel_message.message_id)
+            await state.update_data(
+                forcejoin_panel_chat_id=panel_message.chat.id,
+                forcejoin_panel_message_id=panel_message.message_id,
+            )
         if query.message:
             # Telegram requires a message to display a request-chat keyboard;
             # keep that carrier visually empty instead of adding another prompt.
@@ -1108,8 +1108,14 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 ]),
             )
     elif action == "forcejoin_other_default":
+        pending = await state.get_data()
         await state.set_state(SettingInput.waiting)
-        await state.update_data(field="forcejoin_other_link", forcejoin_other_button_text=None)
+        await state.update_data(
+            field="forcejoin_other_link",
+            forcejoin_other_button_text=None,
+            forcejoin_panel_chat_id=pending.get("forcejoin_panel_chat_id"),
+            forcejoin_panel_message_id=pending.get("forcejoin_panel_message_id"),
+        )
         if query.message:
             await tracked_answer(query.message, state, "Send the Other Link URL.")
     elif action.startswith("forcejoin_other_remove:"):
@@ -1717,8 +1723,13 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 await message.delete()
             except TelegramAPIError:
                 pass
+            pending = await state.get_data()
             await state.set_state(SettingInput.waiting)
-            await state.update_data(field="forcejoin_other_label")
+            await state.update_data(
+                field="forcejoin_other_label",
+                forcejoin_panel_chat_id=pending.get("forcejoin_panel_chat_id"),
+                forcejoin_panel_message_id=pending.get("forcejoin_panel_message_id"),
+            )
             await tracked_answer(
                 message, state, "Send the button text, or choose DEFAULT for automatic Join numbering.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -2044,14 +2055,32 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         return
     if field == "forcejoin_other_label":
         if not valid_button_text(value):
+            try:
+                await message.delete()
+            except TelegramAPIError:
+                pass
             await tracked_answer(message, state, "Button text must be between 1 and 64 characters.")
             return
+        pending = await state.get_data()
+        await remove_temporary_prompts(message.bot, pending)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
         await state.update_data(field="forcejoin_other_link", forcejoin_other_button_text=value)
-        await tracked_answer(message, state, "Send the Other Link URL.")
+        prompt = await tracked_answer(message, state, "Send the Other Link URL.")
+        await state.update_data(
+            input_prompt_chat_id=prompt.chat.id,
+            input_prompt_message_id=prompt.message_id,
+        )
         return
     if field == "forcejoin_other_link":
         url = normalize_forcejoin_other_url(value)
         if not url:
+            try:
+                await message.delete()
+            except TelegramAPIError:
+                pass
             await tracked_answer(
                 message, state,
                 "Invalid link. Send a Telegram link (@username, t.me, telegram.me, tg://) or a valid HTTP(S) URL.",
@@ -2070,6 +2099,11 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await db.settings.update_one(
             {"key": "force_join"}, {"$set": {"other_links": links}}, upsert=True
         )
+        await remove_temporary_prompts(message.bot, pending)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
         panel_chat_id = pending.get("forcejoin_panel_chat_id")
         panel_message_id = pending.get("forcejoin_panel_message_id")
         await clear_state_preserving_prompts(state)
