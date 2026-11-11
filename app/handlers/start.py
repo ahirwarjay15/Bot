@@ -163,6 +163,23 @@ def build_force_join_channel_button(
     return None
 
 
+def build_force_join_other_link_buttons(other_links: list, missing_count: int) -> list:
+    """Render unverified optional links only while at least one required chat is pending."""
+    if missing_count < 1 or not isinstance(other_links, list):
+        return []
+    buttons = []
+    for index, item in enumerate(other_links):
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        custom = str(item.get("button_text") or "").strip()
+        label = (custom or f"Join {missing_count + index + 1}")[:64]
+        buttons.append(InlineKeyboardButton(text=label, url=url))
+    return buttons
+
+
 async def _retire_legacy_force_join_links(bot, db, channel: str) -> None:
     """Revoke and remove old expiring invites after a stable link is saved."""
     cursor = db.force_join_links.find({
@@ -695,6 +712,9 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
         button = build_force_join_channel_button(channel_cfg, index + 1, target, channel)
         if button:
             join_buttons.append(button)
+    # Other Links are optional destinations, never part of join_status or verification.
+    # They are visible only while at least one real Force Sub chat remains pending.
+    join_buttons.extend(build_force_join_other_link_buttons(cfg.get("other_links"), len(missing)))
     rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
     if verify_button:
         rows.append([InlineKeyboardButton(text=cfg.get("verify_text") or "♻️ 𝐓ʀʏ 𝐀ɢᴀɪɴ", callback_data=f"forcejoin:check:{payload}")])
