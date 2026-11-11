@@ -811,14 +811,18 @@ def test_force_join_channel_custom_labels_are_limited_to_telegram_button_length(
     assert "Button text must be between 1 and 64 characters." in block
 
 
-def test_external_force_join_feature_is_completely_removed_from_runtime():
+def test_optional_other_links_stay_outside_required_chat_verification():
     from pathlib import Path
 
     settings_source = Path("app/handlers/settings.py").read_text()
     start_source = Path("app/handlers/start.py").read_text()
-    for retired_token in ("forcejoin_other", "other_links", "force_join_capacity_reached"):
-        assert retired_token not in settings_source
-        assert retired_token not in start_source
+    assert "forcejoin_other_links" in settings_source
+    assert "other_links" in settings_source
+    assert "build_force_join_other_link_buttons" in start_source
+    assert "force_join_capacity_reached" not in settings_source
+    assert "force_join_capacity_reached" not in start_source
+    # Only the configured verification-required channel list is passed to membership checks.
+    assert "join_status(bot, user.id, channels, database.db)" in start_source
 
 
 def test_legacy_external_force_join_setting_is_removed_once_at_startup():
