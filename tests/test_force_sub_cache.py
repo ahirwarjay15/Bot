@@ -103,7 +103,8 @@ def test_other_links_are_only_available_inside_force_sub_add_keyboard():
     add_flow = source.split('elif action == "forcejoin_add":', 1)[1].split(
         'elif action == "forcejoin_join_request":', 1
     )[0]
-    assert 'settings:forcejoin_other_links' not in page
+    assert 'settings:forcejoin_other_item:{i}' in page
+    assert 'ADDED OTHER LINKS ({len(other_links)})' in page
     assert 'KeyboardButton(text="Other Links")' in add_flow
     assert 'KeyboardButton(text="Group"' in add_flow
     assert 'KeyboardButton(text="Channel"' in add_flow
@@ -124,3 +125,18 @@ def test_other_link_input_messages_and_prompts_are_cleaned_up():
     assert "await message.delete()" in link_flow
     assert "await remove_temporary_prompts(message.bot, pending)" in link_flow
     assert 'forcejoin_panel_chat_id=pending.get("forcejoin_panel_chat_id")' in source
+
+
+
+def test_added_other_links_are_visible_and_manageable_from_force_sub_root():
+    from pathlib import Path
+
+    source = Path("app/handlers/settings.py").read_text()
+    page = source.split("async def build_forcejoin_page", 1)[1].split(
+        "async def render_forcejoin_media", 1
+    )[0]
+    assert 'cfg.get("other_links")' in page
+    assert 'settings:forcejoin_other_item:{i}' in page
+    assert 'ADDED OTHER LINKS ({len(other_links)})' in page
+    assert 'elif action.startswith("forcejoin_other_item:")' in source
+    assert 'settings:forcejoin_other_remove:{index}' in source

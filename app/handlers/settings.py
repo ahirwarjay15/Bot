@@ -430,6 +430,19 @@ async def build_forcejoin_page(bot, db, settings):
         )
         channel_buttons.append(((label or channel.lstrip("@"))[:64], f"settings:forcejoin_channel:{i}"))
     rows = [channel_buttons[i:i+2] for i in range(0, len(channel_buttons), 2)]
+    other_links = cfg.get("other_links") if isinstance(cfg.get("other_links"), list) else []
+    other_link_buttons = []
+    for i, item in enumerate(other_links[:10]):
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("button_text") or f"Join {i + 1}")[:64]
+        other_link_buttons.append((label, f"settings:forcejoin_other_item:{i}"))
+    rows.extend(
+        other_link_buttons[i:i+2]
+        for i in range(0, len(other_link_buttons), 2)
+    )
+    if other_links:
+        rows.append([(f"ADDED OTHER LINKS ({len(other_links)})", "settings:forcejoin_other_links")])
     if len(channels) < 10:
         rows.append([("✚ ADD", "settings:forcejoin_add")])
     # Force Sub is active exactly while at least one channel is configured.
@@ -1082,6 +1095,18 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             )
             await db.settings.delete_one({"key": "force_join_channel", "channel": channel})
         await render_forcejoin(query, db, settings)
+    elif action.startswith("forcejoin_other_item:"):
+        index = int(action.split(":", 1)[1])
+        cfg = await db.settings.find_one({"key": "force_join"}) or {}
+        links = cfg.get("other_links") if isinstance(cfg.get("other_links"), list) else []
+        if 0 <= index < len(links) and isinstance(links[index], dict):
+            item = links[index]
+            label = str(item.get("button_text") or f"Join {index + 1}")
+            url = html.escape(str(item.get("url") or ""))
+            await edit_page(query, f"OTHER LINK SETTINGS\n\nButton: {html.escape(label)}\\nURL: <code>{url}</code>\n\nThis optional link is not verified by Force Sub.", kb([
+                [("REMOVE", f"settings:forcejoin_other_remove:{index}")],
+                [("《 BACK", "settings:forcejoin")],
+            ]))
     elif action == "forcejoin_other_links":
         cfg = await db.settings.find_one({"key": "force_join"}) or {}
         links = cfg.get("other_links") if isinstance(cfg.get("other_links"), list) else []
