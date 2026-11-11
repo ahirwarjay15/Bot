@@ -73,3 +73,20 @@ def test_other_force_sub_links_preserve_custom_button_text():
     )
     assert [button.text for button in buttons] == ["Visit Website"]
     assert buttons[0].url == "https://example.com"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("@samplechannel", "https://t.me/samplechannel"),
+        ("t.me/samplechannel", "https://t.me/samplechannel"),
+        ("telegram.me/joinchat/abc123", "https://telegram.me/joinchat/abc123"),
+        ("tg://resolve?domain=samplechannel", "https://t.me/samplechannel"),
+        ("tg://join?invite=abc123", "https://t.me/+abc123"),
+        ("example.com/path", "https://example.com/path"),
+    ],
+)
+def test_other_force_sub_link_formats_are_normalized(raw, expected):
+    from app.handlers.settings import normalize_forcejoin_other_url
+
+    assert normalize_forcejoin_other_url(raw) == expected
