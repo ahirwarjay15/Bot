@@ -19,7 +19,7 @@ DEFAULT_ABOUT = (
     "<i>ᴏᴘᴇɴ ᴀ ᴠᴀʟɪᴅ ғɪʟᴇ ʟɪɴᴋ ᴏʀ sᴛᴀʀᴛ ᴛʜᴇ ʙᴏᴛ ᴡɪᴛʜ ɪᴛ, ᴛʜᴇɴ ᴛᴀᴘ <b>ɢᴇᴛ ғɪʟᴇ</b> ᴛᴏ ʀᴇᴄᴇɪᴠᴇ ʏᴏᴜʀ ғɪʟᴇ. ɪғ ʀᴇǫᴜɪʀᴇᴅ, ᴊᴏɪɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟs ᴀɴᴅ ᴛᴀᴘ <b>ᴠᴇʀɪғʏ ᴀɢᴀɪɴ</b>.</i>\n"
     "\n"
     "<b><i>✦ ɪɴғᴏʀᴍᴀᴛɪᴏɴ</i></b>\n"
-    "<b><i>➤ ɴᴀᴍᴇ : {bot_mention}</i></b>\n"
+    "<b><i>➤ ɴᴀᴍᴇ : {bot_name}</i></b>\n"
     "<b><i>➤ ᴄʀᴇᴀᴛᴏʀ : ʏᴜᴛᴀ</i></b>\n"
     "<b><i>➤ ᴏᴡɴᴇʀ : 𝓚𝔂𝓸𝓴𝓸</i></b>\n"
     "<b><i>➤ ᴍᴀᴅᴇ ғᴏʀ : {anime}</i></b>\n"
@@ -79,7 +79,14 @@ async def load_shared_about_text(db) -> str:
         "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
     )
     previous_default_v2 = DEFAULT_ABOUT.replace("{bot_name}", "ʟᴇxɪ ᴀɴɪᴍᴇ").replace("{bot_mention}", "ʟᴇxɪ ᴀɴɪᴍᴇ")
-    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default, PREVIOUS_DEFAULT_ABOUT, previous_default_v2):
+    previous_default_v3 = DEFAULT_ABOUT.replace(
+        "{bot_name} ɪs ᴀ ғɪʟᴇ",
+        "{bot_mention} ɪs ᴀ ғɪʟᴇ",
+    ).replace(
+        "ɴᴀᴍᴇ : {bot_name}",
+        "ɴᴀᴍᴇ : {bot_mention}",
+    )
+    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default, PREVIOUS_DEFAULT_ABOUT, previous_default_v2, previous_default_v3):
         await db.settings.update_one(
             {"key": "invalid_post"},
             {"$set": {"key": "invalid_post", "about_text": DEFAULT_ABOUT}},
