@@ -251,6 +251,8 @@ async def deliver_batch(bot: Bot, db, *, user_id: int, batch: dict, deeplink: st
                 "enabled": bool(after_cfg),
                 "text": after_cfg.get("text") or "",
                 "button_text": after_cfg.get("button_text") or "",
+                "callback_button_enabled": bool(after_cfg.get("callback_button_enabled", False)),
+                "callback_button_text": after_cfg.get("callback_button_text") or "",
             },
             "request_key": task_key,
         }
@@ -472,9 +474,18 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
                     if after and not task.get("after_delete_attempted", False):
                         text = after.get("text") or "<blockquote><i>ʏᴏᴜʀ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ! ✅\nᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇsᴛᴏʀᴇ ʏᴏᴜʀ ғɪʟᴇ.</i></blockquote>"
                         link = task.get("deeplink")
-                        markup = InlineKeyboardMarkup(inline_keyboard=[[
-                            InlineKeyboardButton(text=after.get("button_text") or "↻ ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!", url=link)
-                        ]]) if link else None
+                        after_buttons = []
+                        if link:
+                            after_buttons.append(InlineKeyboardButton(
+                                text=after.get("button_text") or "↻ ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!",
+                                url=link,
+                            ))
+                        if after.get("callback_button_enabled") and after.get("callback_button_text"):
+                            after_buttons.append(InlineKeyboardButton(
+                                text=after["callback_button_text"],
+                                callback_data="afterdelete:remove",
+                            ))
+                        markup = InlineKeyboardMarkup(inline_keyboard=[after_buttons]) if after_buttons else None
                         try:
                             if notice_id:
                                 await bot.edit_message_text(chat_id=task["user_id"], message_id=notice_id, text=text, reply_markup=markup, parse_mode="HTML")
