@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
 DEFAULT_ABOUT = (
     "<b><i>✦ ᴀʙᴏᴜᴛ ᴍᴇ</i></b>\n"
-    "<i>{bot_mention} ɪs ᴀ ғɪʟᴇ ᴅᴇʟɪᴠᴇʀʏ ʙᴏᴛ ᴛʜᴀᴛ ʜᴇʟᴘs ʏᴏᴜ ɢᴇᴛ ғɪʟᴇs ᴛʜʀᴏᴜɢʜ sɪᴍᴘʟᴇ ᴛᴇʟᴇɢʀᴀᴍ ʟɪɴᴋs.</i>\n"
+    "<i>{bot_name} ɪs ᴀ ғɪʟᴇ ᴅᴇʟɪᴠᴇʀʏ ʙᴏᴛ ᴛʜᴀᴛ ʜᴇʟᴘs ʏᴏᴜ ɢᴇᴛ ғɪʟᴇs ᴛʜʀᴏᴜɢʜ sɪᴍᴘʟᴇ ᴛᴇʟᴇɢʀᴀᴍ ʟɪɴᴋs.</i>\n"
     "<i>ᴏᴘᴇɴ ᴀ ᴠᴀʟɪᴅ ғɪʟᴇ ʟɪɴᴋ ᴏʀ sᴛᴀʀᴛ ᴛʜᴇ ʙᴏᴛ ᴡɪᴛʜ ɪᴛ, ᴛʜᴇɴ ᴛᴀᴘ <b>ɢᴇᴛ ғɪʟᴇ</b> ᴛᴏ ʀᴇᴄᴇɪᴠᴇ ʏᴏᴜʀ ғɪʟᴇ. ɪғ ʀᴇǫᴜɪʀᴇᴅ, ᴊᴏɪɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟs ᴀɴᴅ ᴛᴀᴘ <b>ᴠᴇʀɪғʏ ᴀɢᴀɪɴ</b>.</i>\n"
     "\n"
     "<b><i>✦ ɪɴғᴏʀᴍᴀᴛɪᴏɴ</i></b>\n"
@@ -78,7 +78,7 @@ async def load_shared_about_text(db) -> str:
         "➤ ᴍᴀᴅᴇ ғᴏʀ: {anime}\n\n"
         "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
     )
-    previous_default_v2 = DEFAULT_ABOUT.replace("{bot_mention}", "ʟᴇxɪ ᴀɴɪᴍᴇ")
+    previous_default_v2 = DEFAULT_ABOUT.replace("{bot_name}", "ʟᴇxɪ ᴀɴɪᴍᴇ").replace("{bot_mention}", "ʟᴇxɪ ᴀɴɪᴍᴇ")
     if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default, PREVIOUS_DEFAULT_ABOUT, previous_default_v2):
         await db.settings.update_one(
             {"key": "invalid_post"},
@@ -100,6 +100,7 @@ def _render_user_text(raw, user, bot=None):
     bot_mention = f'<a href="https://t.me/{escape(username)}">{bot_name}</a>' if username else bot_name
     values = {
         "{bot_mention}": bot_mention,
+        "{bot_name}": bot_name,
         "{bot}": bot_mention,
         "{user_mention}": _mention(user),
         "{user}": _mention(user),
@@ -242,7 +243,7 @@ async def invalid_about(query: CallbackQuery, database, bot):
         return
     me = await get_bot_identity(bot)
     raw = await load_shared_about_text(database.db)
-    rendered = _render_user_text(raw, user, me).replace("{bot_name}", _render_user_text("{bot_mention}", user, me))
+    rendered = _render_user_text(raw, user, me)
     await _edit_about_post(message, rendered, _about_markup())
 
 
