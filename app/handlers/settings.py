@@ -1155,7 +1155,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         rows = [[("✚ ADD LINK", "settings:forcejoin_other_add")]]
         for item_index, item in enumerate(links):
             if isinstance(item, dict):
-                label = str(item.get("button_text") or f"Join {item_index + 1}")[:64]
+                label = str(item.get("button_text") or "Other")[:64]
                 rows.append([(label, f"settings:forcejoin_other_remove:{item_index}")])
         rows.append([("《 BACK", "settings:forcejoin")])
         await edit_page(query, "FORCE SUB OTHER LINKS\n\nThese optional links are shown only while a required chat is pending.", kb(rows))
