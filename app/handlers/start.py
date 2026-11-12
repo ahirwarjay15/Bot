@@ -65,6 +65,7 @@ def render_common_variables(raw_text, user, bot):
     bot_mention = f'<a href="https://t.me/{html.escape(username)}">{bot_name}</a>' if username else bot_name
     values = {
         "{bot_mention}": bot_mention,
+        "{bot_name}": bot_name,
         "{bot}": bot_mention,
         "{user_mention}": user.mention_html(),
         "{user}": user.mention_html(),
@@ -935,9 +936,8 @@ async def start_about(query: CallbackQuery, database):
     if not cfg.get("enabled", True) or not cfg.get("about_enabled", True) or not query.message:
         return
     me = await get_bot_identity(query.bot)
-    from app.handlers.misc import load_shared_about_text
-    about_text = await load_shared_about_text(database.db)
-    rendered = render_common_variables(about_text, query.from_user, me).replace("{bot_name}", render_common_variables("{bot_mention}", query.from_user, me))
+    from app.handlers.misc import DEFAULT_ABOUT
+    rendered = render_common_variables(DEFAULT_ABOUT, query.from_user, me)
     back_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="《 BACK", callback_data="start:about_back")]])
     # Keep the original Start post and switch its content in place.
     try:
