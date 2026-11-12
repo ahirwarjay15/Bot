@@ -14,6 +14,19 @@ router = Router(name="misc")
 log = logging.getLogger(__name__)
 DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
 DEFAULT_ABOUT = (
+    "<b><i>✦ ᴀʙᴏᴜᴛ ᴍᴇ</i></b>\n"
+    "<i>ʟᴇxɪ ᴀɴɪᴍᴇ ɪs ᴀ ғɪʟᴇ ᴅᴇʟɪᴠᴇʀʏ ʙᴏᴛ ᴛʜᴀᴛ ʜᴇʟᴘs ʏᴏᴜ ɢᴇᴛ ғɪʟᴇs ᴛʜʀᴏᴜɢʜ sɪᴍᴘʟᴇ ᴛᴇʟᴇɢʀᴀᴍ ʟɪɴᴋs.</i>\n"
+    "<i>ᴏᴘᴇɴ ᴀ ᴠᴀʟɪᴅ ғɪʟᴇ ʟɪɴᴋ ᴏʀ sᴛᴀʀᴛ ᴛʜᴇ ʙᴏᴛ ᴡɪᴛʜ ɪᴛ, ᴛʜᴇɴ ᴛᴀᴘ <b>ɢᴇᴛ ғɪʟᴇ</b> ᴛᴏ ʀᴇᴄᴇɪᴠᴇ ʏᴏᴜʀ ғɪʟᴇ. ɪғ ʀᴇǫᴜɪʀᴇᴅ, ᴊᴏɪɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟs ᴀɴᴅ ᴛᴀᴘ <b>ᴠᴇʀɪғʏ ᴀɢᴀɪɴ</b>.</i>\n"
+    "\n"
+    "<b><i>✦ ɪɴғᴏʀᴍᴀᴛɪᴏɴ</i></b>\n"
+    "<b><i>➤ ɴᴀᴍᴇ : {bot_mention}</i></b>\n"
+    "<b><i>➤ ᴄʀᴇᴀᴛᴏʀ : ʏᴜᴛᴀ</i></b>\n"
+    "<b><i>➤ ᴏᴡɴᴇʀ : 𝓚𝔂𝓸𝓴𝓸</i></b>\n"
+    "<b><i>➤ ᴍᴀᴅᴇ ғᴏʀ : {anime}</i></b>\n"
+    "<b><i>➤ ᴠᴇʀsɪᴏɴ : ✧ ᴠ 0.1</i></b>"
+)
+
+PREVIOUS_DEFAULT_ABOUT = (
     "✨ <b>ᴀʙᴏᴜᴛ ᴍᴇ</b>\n"
     "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\n\n"
     "✦ <b>ʙᴏᴛ ɪɴғᴏ</b>\n\n"
@@ -65,7 +78,7 @@ async def load_shared_about_text(db) -> str:
         "➤ ᴍᴀᴅᴇ ғᴏʀ: {anime}\n\n"
         "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
     )
-    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default):
+    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default, PREVIOUS_DEFAULT_ABOUT):
         await db.settings.update_one(
             {"key": "invalid_post"},
             {"$set": {"key": "invalid_post", "about_text": DEFAULT_ABOUT}},
@@ -141,6 +154,7 @@ async def _edit_about_post(message, text, markup):
         else:
             await message.edit_text(
                 text, parse_mode="HTML", reply_markup=markup,
+                link_preview_options={"is_disabled": True},
             )
     except TelegramAPIError:
         log.exception("Could not edit existing invalid/About post")
