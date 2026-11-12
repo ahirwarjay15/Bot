@@ -26,76 +26,6 @@ DEFAULT_ABOUT = (
     "<b><i>➤ ᴠᴇʀsɪᴏɴ : ✧ ᴠ 0.1</i></b>"
 )
 
-PREVIOUS_DEFAULT_ABOUT = (
-    "✨ <b>ᴀʙᴏᴜᴛ ᴍᴇ</b>\n"
-    "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\n\n"
-    "✦ <b>ʙᴏᴛ ɪɴғᴏ</b>\n\n"
-    "➤ ɴᴀᴍᴇ: <b>{bot_name}</b>\n\n"
-    "➤ ᴄʀᴇᴀᴛᴏʀ: <b>{owner}</b>\n\n"
-    "➤ ᴏᴡɴᴇʀ: <b>{owner}</b>\n\n"
-    "➤ ᴍᴀᴅᴇ ғᴏʀ: <b>{anime}</b>\n\n"
-    "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
-)
-
-LEGACY_DEFAULT_ABOUT = (
-    "✨ ᴀʙᴏᴜᴛ ᴍᴇ\n\n"
-    "✰ ᴍʏ ɴᴀᴍᴇ: {bot_name}\n\n"
-    "✰ creator: {owner}\n\n"
-    "✰ ᴍʏ ᴏᴡɴᴇʀ: {owner}\n\n"
-    "✰ made for: {anime}\n\n"
-    "✰ ᴠᴇʀsɪᴏɴ: [V 0.1]"
-)
-
-
-async def load_shared_about_text(db) -> str:
-    """Load the single shared About template used by every About entry point."""
-    cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
-    raw = cfg.get("about_text")
-    # Upgrade built-in defaults only; preserve any owner-customized About text.
-    previous_default = (
-        "✨ ᴀʙᴏᴜᴛ ᴍᴇ\n"
-        "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\n\n"
-        "✦ ʙᴏᴛ ɪɴғᴏ\n\n"
-        "➤ ɴᴀᴍᴇ\n"
-        "✧ {bot_name}\n\n"
-        "➤ ᴄʀᴇᴀᴛᴏʀ\n"
-        "✧ {owner}\n\n"
-        "➤ ᴏᴡɴᴇʀ\n"
-        "✧ {owner}\n\n"
-        "➤ ᴍᴀᴅᴇ ғᴏʀ\n"
-        "✧ {anime}\n\n"
-        "➤ ᴠᴇʀsɪᴏɴ\n"
-        "✧ V 0.1\n\n"
-        "<i>ᴛʜᴀɴᴋs ғᴏʀ ᴜsɪɴɢ ᴏᴜʀ ʙᴏᴛ 💗</i>"
-    )
-    unbolded_current_default = (
-        "✨ ᴀʙᴏᴜᴛ ᴍᴇ\n"
-        "<i>ʟᴇxɪ ᴀɴɪᴍᴇ • ғɪʟᴇ ʙᴏᴛ</i>\n\n"
-        "✦ ʙᴏᴛ ɪɴғᴏ\n\n"
-        "➤ ɴᴀᴍᴇ: {bot_name}\n\n"
-        "➤ ᴄʀᴇᴀᴛᴏʀ: {owner}\n\n"
-        "➤ ᴏᴡɴᴇʀ: {owner}\n\n"
-        "➤ ᴍᴀᴅᴇ ғᴏʀ: {anime}\n\n"
-        "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
-    )
-    previous_default_v2 = DEFAULT_ABOUT.replace("{bot_name}", "ʟᴇxɪ ᴀɴɪᴍᴇ").replace("{bot_mention}", "ʟᴇxɪ ᴀɴɪᴍᴇ")
-    previous_default_v3 = DEFAULT_ABOUT.replace(
-        "{bot_name} ɪs ᴀ ғɪʟᴇ",
-        "{bot_mention} ɪs ᴀ ғɪʟᴇ",
-    ).replace(
-        "ɴᴀᴍᴇ : {bot_name}",
-        "ɴᴀᴍᴇ : {bot_mention}",
-    )
-    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default, PREVIOUS_DEFAULT_ABOUT, previous_default_v2, previous_default_v3):
-        await db.settings.update_one(
-            {"key": "invalid_post"},
-            {"$set": {"key": "invalid_post", "about_text": DEFAULT_ABOUT}},
-            upsert=True,
-        )
-        return DEFAULT_ABOUT
-    return str(raw)
-
-
 def _mention(user):
     return f'<a href="tg://user?id={user.id}">{escape(user.first_name or "there")}</a>'
 
@@ -249,8 +179,7 @@ async def invalid_about(query: CallbackQuery, database, bot):
     if not cfg.get("about_enabled", False):
         return
     me = await get_bot_identity(bot)
-    raw = await load_shared_about_text(database.db)
-    rendered = _render_user_text(raw, user, me)
+    rendered = _render_user_text(DEFAULT_ABOUT, user, me)
     await _edit_about_post(message, rendered, _about_markup())
 
 
