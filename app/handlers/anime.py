@@ -21,6 +21,7 @@ from app.services.permissions import is_owner_or_moderator
 router = Router(name="anime")
 log = logging.getLogger(__name__)
 MAX_ANIME_FILES = 100
+_panel_tasks = {}
 
 PANEL_TEXT = (
     "<i>Send more anime episode files/messages. When you're done, generate "
@@ -104,39 +105,52 @@ async def _clear_collection_ui(bot, state: FSMContext, fallback_chat_id):
 
 
 async def _show_panel(message: Message, state: FSMContext):
-    data = await state.get_data()
-    count = len(data.get("collected", []))
-    if count < MAX_ANIME_FILES:
-        panel_text = PANEL_TEXT + f"\n\n<i>Files added: {count}/{MAX_ANIME_FILES}</i>"
-    else:
-        panel_text = (
-            f"<i>LIMIT REACHED — maximum {MAX_ANIME_FILES} files. Generate your links below.</i>"
-            f"\n\n<i>Files added: {MAX_ANIME_FILES}/{MAX_ANIME_FILES}</i>"
-        )
-    old_chat_id = data.get("panel_chat_id")
-    old_message_id = data.get("panel_message_id")
+    """Send a fresh panel after one full second without another collected message."""
+    key = (message.chat.id, message.from_user.id if message.from_user else 0)
+    previous_task = _panel_tasks.get(key)
+    if previous_task and not previous_task.done():
+        previous_task.cancel()
 
-    # Keep one live confirmation message instead of sending a new panel
-    # for every file. A short pause makes each count update easier to follow.
-    if old_chat_id and old_message_id:
-        await asyncio.sleep(1)
+    async def send_after_quiet_period():
         try:
-            await message.bot.edit_message_text(
-                chat_id=old_chat_id,
-                message_id=old_message_id,
-                text=panel_text,
-                reply_markup=_panel_keyboard(),
-                parse_mode="HTML",
+            # Every newly received file restarts this quiet-period timer.
+            await asyncio.sleep(1)
+            data = await state.get_data()
+            if await state.get_state() != AnimeStates.collecting.state:
+                return
+
+            count = len(data.get("collected", []))
+            if count < MAX_ANIME_FILES:
+                panel_text = PANEL_TEXT + f"\\n\\n<i>Files added: {count}/{MAX_ANIME_FILES}</i>"
+            else:
+                panel_text = (
+                    f"<i>LIMIT REACHED — maximum {MAX_ANIME_FILES} files. Generate your links below.</i>"
+                    f"\\n\\n<i>Files added: {MAX_ANIME_FILES}/{MAX_ANIME_FILES}</i>"
+                )
+
+            old_chat_id = data.get("panel_chat_id")
+            old_message_id = data.get("panel_message_id")
+
+            # A new batch always gets a new message; never edit the previous panel.
+            if old_chat_id and old_message_id:
+                await _delete(message.bot, old_chat_id, old_message_id)
+
+            panel = await message.answer(
+                panel_text, reply_markup=_panel_keyboard(), parse_mode="HTML"
             )
-            return
-        except TelegramAPIError:
-            log.debug("Could not edit anime panel %s; sending a replacement", old_message_id, exc_info=True)
+            await state.update_data(
+                panel_message_id=panel.message_id,
+                panel_chat_id=panel.chat.id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Could not send anime collection confirmation")
+        finally:
+            if _panel_tasks.get(key) is asyncio.current_task():
+                _panel_tasks.pop(key, None)
 
-    panel = await message.answer(panel_text, reply_markup=_panel_keyboard(), parse_mode="HTML")
-    await state.update_data(panel_message_id=panel.message_id, panel_chat_id=panel.chat.id)
-    if old_chat_id and old_message_id:
-        await _delete(message.bot, old_chat_id, old_message_id)
-
+    _panel_tasks[key] = asyncio.create_task(send_after_quiet_period())
 
 async def _skip_command(message: Message, state: FSMContext):
     if not message.text or not message.text.startswith("/"):
