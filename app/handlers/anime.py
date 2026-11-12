@@ -206,7 +206,16 @@ async def generate_anime_links(
     await state.clear()
 
     repo = FileRepository(database.db)
-    me = await get_bot_identity(callback.bot)
+    try:
+        me = await get_bot_identity(callback.bot)
+    except Exception:
+        log.exception("Could not resolve bot identity for anime links")
+        await progress.edit_text("Could not generate anime links right now. Please try again.")
+        await _delete(
+            callback.bot, data.get("prompt_chat_id", callback.message.chat.id),
+            data.get("prompt_message_id"),
+        )
+        return
     successes = 0
     published = 0
     failures = []
