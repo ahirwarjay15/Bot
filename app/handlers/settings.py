@@ -750,8 +750,10 @@ async def render_after(query, db):
     auto = await db.settings.find_one({"key": "auto_delete"}) or {}
     after = await db.settings.find_one({"key": "after_delete"}) or {}
     enabled = bool(after.get("enabled", False) and auto.get("enabled", False))
-    await edit_page(query, f"AFTER DELETE\nCustomize the message and button shown after delivered files are deleted.\nStatus: {'ENABLED ✅' if enabled else 'DISABLED ❌'}", kb([
+    callback_status = "ON ✅" if after.get("callback_button_enabled", False) else "OFF ❌"
+    await edit_page(query, f"AFTER DELETE\nCustomize the message and button shown after delivered files are deleted.\nStatus: {'ENABLED ✅' if enabled else 'DISABLED ❌'}\nDelete Post Button: {callback_status}", kb([
         [("DISABLE" if enabled else "ENABLE", "settings:after_toggle")],
+        [("DELETE POST BUTTON: " + callback_status, "settings:after_callback_toggle")],
         [("TEXT", "settings:after_text")],
         [("《 BACK", "settings:auto")],
     ]))
@@ -1340,6 +1342,8 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 "enabled": bool(after_cfg.get("enabled", False)),
                 "text": after_cfg.get("text") or DEFAULT_AFTER_TEXT,
                 "button_text": after_cfg.get("button_text") or DEFAULT_AFTER_BUTTON,
+                "callback_button_enabled": bool(after_cfg.get("callback_button_enabled", False)),
+                "callback_button_text": after_cfg.get("callback_button_text") or "",
             }
             await db.tasks.update_many(
                 {"status": {"$in": ["pending", "processing"]}, "after_delete_snapshot": {"$exists": False}},
@@ -1409,6 +1413,8 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 "enabled": True,
                 "text": cfg.get("text") or DEFAULT_AFTER_TEXT,
                 "button_text": cfg.get("button_text") or DEFAULT_AFTER_BUTTON,
+                "callback_button_enabled": bool(cfg.get("callback_button_enabled", False)),
+                "callback_button_text": cfg.get("callback_button_text") or "",
             }
             await db.tasks.update_many(
                 {"status": {"$in": ["pending", "processing"]}, "after_delete_snapshot": {"$exists": False}},
@@ -1422,6 +1428,20 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 upsert=True,
             )
         await render_after(query, db)
+    elif action == "after_callback_toggle":
+        cfg = await db.settings.find_one({"key": "after_delete"}) or {}
+        if cfg.get("callback_button_enabled", False):
+            await patch(db, "after_delete", {"callback_button_enabled": False}, {"enabled": False, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON})
+            await render_after(query, db)
+        else:
+            await state.set_state(SettingInput.waiting)
+            await state.update_data(
+                field="after_callback_button_text",
+                panel_chat_id=query.message.chat.id if query.message else None,
+                panel_message_id=query.message.message_id if query.message else None,
+            )
+            if query.message:
+                await tracked_answer(query.message, state, "Send the text for the After Delete callback button.")
     elif action == "after_text": await render_after_text(query)
     elif action in ("after_text_message", "after_text_button"):
         await state.set_state(SettingInput.waiting); await state.update_data(field=action)
@@ -1675,6 +1695,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     button_label_fields = {
         "custom_button_text", "forcejoin_label", "forcejoin_verify_text",
         "start_button_text", "invalid_button_text", "after_text_button",
+        "after_callback_button_text",
     }
     dynamic_button_label = (
         isinstance(field, str)
@@ -2301,6 +2322,29 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     elif field == "after_text_button":
         await patch(db, "after_delete", {"button_text": value}, {"enabled": False, "text": DEFAULT_AFTER_TEXT})
         await tracked_answer(message, state, "✨ After-delete button text updated successfully.")
+    elif field == "after_callback_button_text":
+        await patch(
+            db, "after_delete",
+            {"callback_button_text": value, "callback_button_enabled": True},
+            {"enabled": False, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON},
+        )
+        await clear_state_preserving_prompts(state)
+        auto = await db.settings.find_one({"key": "auto_delete"}) or {}
+        after = await db.settings.find_one({"key": "after_delete"}) or {}
+        enabled = bool(after.get("enabled", False) and auto.get("enabled", False))
+        callback_status = "ON ✅" if after.get("callback_button_enabled", False) else "OFF ❌"
+        await refresh_settings_panel(
+            message.bot, data.get("panel_chat_id"), data.get("panel_message_id"),
+            f"AFTER DELETE\nCustomize the message and button shown after delivered files are deleted.\nStatus: {'ENABLED ✅' if enabled else 'DISABLED ❌'}\nDelete Post Button: {callback_status}",
+            kb([
+                [("DISABLE" if enabled else "ENABLE", "settings:after_toggle")],
+                [("DELETE POST BUTTON: " + callback_status, "settings:after_callback_toggle")],
+                [("TEXT", "settings:after_text")],
+                [("《 BACK", "settings:auto")],
+            ]),
+        )
+        await tracked_answer(message, state, "✨ After Delete callback button saved successfully.")
+        return
     elif field == "invalid_text":
         value = formatted_input_text(message, value)
         await patch(db, "invalid_post", {"text": value}, {"enabled": False, "about_enabled": False})
