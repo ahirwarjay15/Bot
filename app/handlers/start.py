@@ -400,18 +400,22 @@ def _pending_request_is_recent(pending: dict | None, now=None, max_age_seconds: 
 
 async def join_status(bot, user_id: int, channels: list[str], db=None) -> list[str]:
     """Check memberships concurrently and load all channel configs in one DB query."""
-    # Fetch Force Sub configuration once instead of issuing one find_one per channel.
-    configs_by_channel = {}
-    if db is not None and channels:
+    async def load_channel_configs() -> dict:
+        if db is None or not channels:
+            return {}
+        # One $in query replaces one find_one round-trip per required channel.
         channel_configs = await db.settings.find({
             "key": "force_join_channel",
             "channel": {"$in": list(dict.fromkeys(
                 channel.strip() for channel in channels if channel.strip()
             ))},
         }).to_list(length=None)
-        configs_by_channel = {
+        return {
             str(config.get("channel")): config for config in channel_configs
         }
+
+    # Start the single DB lookup before Telegram calls so both kinds of I/O overlap.
+    configs_task = asyncio.create_task(load_channel_configs())
 
     async def check_channel(raw: str) -> str | None:
         channel = raw.strip()
@@ -419,9 +423,12 @@ async def join_status(bot, user_id: int, channels: list[str], db=None) -> list[s
             return None
         try:
             chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
-            # Telegram accepts @channelusername or numeric chat IDs directly in
-            # getChatMember. Membership checks remain parallel across channels.
-            member = await bot.get_chat_member(chat_id=chat_arg, user_id=user_id)
+            # Telegram membership checks remain parallel across channels and overlap
+            # with the shared MongoDB configuration lookup.
+            member, configs_by_channel = await asyncio.gather(
+                bot.get_chat_member(chat_id=chat_arg, user_id=user_id),
+                configs_task,
+            )
             channel_cfg = configs_by_channel.get(channel)
             if _is_member_status(member):
                 return None
