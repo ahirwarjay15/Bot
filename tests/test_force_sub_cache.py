@@ -93,7 +93,7 @@ def test_other_force_sub_link_formats_are_normalized(raw, expected):
 
 
 
-def test_other_links_are_only_available_inside_force_sub_add_keyboard():
+def test_other_links_are_directly_visible_without_added_links_management_button():
     from pathlib import Path
 
     source = Path("app/handlers/settings.py").read_text()
@@ -104,10 +104,12 @@ def test_other_links_are_only_available_inside_force_sub_add_keyboard():
         'elif action == "forcejoin_join_request":', 1
     )[0]
     assert 'settings:forcejoin_other_item:{i}' in page
-    assert 'ADDED OTHER LINKS ({len(other_links)})' in page
+    assert 'item.get("button_text") or "Other"' in page
+    assert 'ADDED OTHER LINKS' not in page
     assert 'KeyboardButton(text="Other Links")' in add_flow
     assert 'KeyboardButton(text="Group"' in add_flow
     assert 'KeyboardButton(text="Channel"' in add_flow
+    assert 'settings:forcejoin_other_item:' in source.split('def kb(rows):', 1)[1].split('def format_settings_page', 1)[0]
 
 
 def test_other_link_input_messages_and_prompts_are_cleaned_up():
@@ -128,15 +130,21 @@ def test_other_link_input_messages_and_prompts_are_cleaned_up():
 
 
 
-def test_added_other_links_are_visible_and_manageable_from_force_sub_root():
+def test_force_sub_panel_uses_clean_other_labels_and_newlines():
     from pathlib import Path
 
     source = Path("app/handlers/settings.py").read_text()
     page = source.split("async def build_forcejoin_page", 1)[1].split(
         "async def render_forcejoin_media", 1
     )[0]
+    other_detail = source.split('elif action.startswith("forcejoin_other_item:"):', 1)[1].split(
+        'elif action == "forcejoin_other_links":', 1
+    )[0]
     assert 'cfg.get("other_links")' in page
-    assert 'settings:forcejoin_other_item:{i}' in page
-    assert 'ADDED OTHER LINKS ({len(other_links)})' in page
+    assert 'item.get("button_text") or "Other"' in page
+    assert 'ADDED OTHER LINKS' not in page
+    assert 'item.get("button_text") or "Other"' in other_detail
+    assert 'f"OTHER LINK SETTINGS\\n\\n' not in other_detail
     assert 'elif action.startswith("forcejoin_other_item:")' in source
     assert 'settings:forcejoin_other_remove:{index}' in source
+    assert 'f"Join {index + 1}"' not in page
