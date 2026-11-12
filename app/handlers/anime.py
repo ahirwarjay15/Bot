@@ -279,29 +279,37 @@ async def generate_anime_links(
             token = build_deeplink_token(record["key"])
             link = f"https://t.me/{me.username}?start={token}"
 
+            # Keep the original caption/text directly below its link in the
+            # same message, separated by one blank line. Shift entity offsets
+            # so the original caption formatting remains exactly aligned.
+            reply_text = item.get("reply_text") or item.get("file_name") or "File"
+            raw_entities = item.get("reply_entities") or []
+            entity_offset = len(link) + 2
+            entities = []
+            for raw_entity in raw_entities:
+                entity_data = dict(raw_entity)
+                entity_data["offset"] = int(entity_data.get("offset", 0)) + entity_offset
+                entities.append(MessageEntity.model_validate(entity_data))
+            link_text = f"{link}\n\n{reply_text}"
+
             if first_link_message is None:
-                await progress.edit_text(link, reply_markup=_link_keyboard(link), parse_mode=None)
+                await progress.edit_text(
+                    link_text,
+                    entities=entities or None,
+                    reply_markup=_link_keyboard(link),
+                    parse_mode=None,
+                )
                 link_message = progress
                 first_link_message = progress
             else:
                 link_message = await callback.message.answer(
-                    link, reply_markup=_link_keyboard(link), parse_mode=None
+                    link_text,
+                    entities=entities or None,
+                    reply_markup=_link_keyboard(link),
+                    parse_mode=None,
                 )
             link_sent = True
             published += 1
-
-            # Reply with the exact original caption/text and Telegram entities;
-            # do not convert through HTML/Markdown, which can alter formatting.
-            reply_text = item.get("reply_text") or item.get("file_name") or "File"
-            raw_entities = item.get("reply_entities") or []
-            entities = [MessageEntity.model_validate(entity) for entity in raw_entities]
-            await callback.bot.send_message(
-                chat_id=link_message.chat.id,
-                text=reply_text,
-                entities=entities or None,
-                parse_mode=None,
-                reply_to_message_id=link_message.message_id,
-            )
 
             # Delete only the submitted copy in the admin chat after both
             # the link and its caption reply have been sent successfully.
