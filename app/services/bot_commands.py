@@ -17,6 +17,7 @@ MODERATOR_COMMANDS = [
     BotCommand(command="start", description="Start the adventure ✨"),
     BotCommand(command="settings", description="Open bot settings"),
     BotCommand(command="file", description="Generate a permanent file link"),
+    BotCommand(command="anime", description="Generate individual anime episode links"),
     BotCommand(command="batch", description="Generate a batch link for multiple files"),
     BotCommand(command="shortener", description="Shorten a URL"),
     BotCommand(command="stats", description="View bot statistics"),
