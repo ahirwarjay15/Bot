@@ -454,7 +454,6 @@ async def build_forcejoin_page(bot, db, settings):
     rows.extend([
         [("CAPTION", "settings:forcejoin_message"), ("MEDIA", "settings:forcejoin_media")],
         [("VERIFY", "settings:forcejoin_verify_text")],
-        [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")],
         [("《 BACK", "settings:home")],
     ])
     text = ("FORCE SUB\n\n"
@@ -987,10 +986,6 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         return
     if action in {"home", "home_back"}: await render_home(query)
     elif action == "forcejoin": await render_forcejoin(query, db, settings)
-    elif action == "forcejoin_toggle":
-        cfg = await db.settings.find_one({"key": "force_join"}) or {}
-        await patch(db, "force_join", {"enabled": not cfg.get("enabled", False)}, {"channels": [], "message": "Hey {mention}\nPlease Join My {remaining_count} Channel's To Use Me!"})
-        await render_forcejoin(query, db, settings)
     elif action == "forcejoin_add":
         panel_message = await edit_page(query, "ADD FORCE SUB\n\n<i>Choose Group or Channel from the keyboard below.\nOr forward any message from the target Group/Channel here with its Forward tag.\n\nPublic chats use Normal Mode automatically; private chats use Join Request Mode automatically.</i>", kb([
             [("《 BACK", "settings:forcejoin")],
