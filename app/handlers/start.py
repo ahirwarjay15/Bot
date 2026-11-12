@@ -19,6 +19,25 @@ from app.services.text_format import normalize_telegram_text
 from app.services.bot_identity import get_bot_identity
 router=Router(name="start");log=logging.getLogger(__name__)
 
+
+def build_start_markup(cfg: dict):
+    """Build the same configured Start buttons for /start and About → Back."""
+    configured_buttons = []
+    for index in range(1, 5):
+        button_url = cfg.get(f"button{index}_url", cfg.get("button_url", "") if index == 1 else "")
+        button_text = cfg.get(f"button{index}_text", cfg.get("button_text", "") if index == 1 else "")
+        parsed = urlparse(button_url)
+        enabled = cfg.get(f"button{index}_enabled", cfg.get("button_enabled", False) if index == 1 else False)
+        if enabled and button_text and parsed.scheme in ("http", "https") and parsed.netloc:
+            configured_buttons.append(InlineKeyboardButton(text=button_text, url=button_url))
+    rows = [configured_buttons[i:i+2] for i in range(0, len(configured_buttons), 2)]
+    if cfg.get("about_enabled", True):
+        rows.append([InlineKeyboardButton(
+            text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"),
+            callback_data="start:about",
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
 def ensure_default_quote_format(raw_text, kind):
     """Repair legacy persisted defaults so old MongoDB values render the intended Telegram quotes."""
     text = str(raw_text or "")
@@ -878,28 +897,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         return
     cfg=await database.db.settings.find_one({"key":"start_message"}) or {}
     if cfg.get("enabled", True):
-        rows = []
-        button1_url = cfg.get("button1_url", cfg.get("button_url", ""))
-        button1_text = cfg.get("button1_text", cfg.get("button_text", ""))
-        parsed1 = urlparse(button1_url)
-        configured_buttons = []
-        if cfg.get("button1_enabled", cfg.get("button_enabled", False)) and button1_text and parsed1.scheme in ("http", "https") and parsed1.netloc:
-            configured_buttons.append(InlineKeyboardButton(text=button1_text, url=button1_url))
-        button2_url = cfg.get("button2_url", "")
-        button2_text = cfg.get("button2_text", "")
-        parsed2 = urlparse(button2_url)
-        if cfg.get("button2_enabled", False) and button2_text and parsed2.scheme in ("http", "https") and parsed2.netloc:
-            configured_buttons.append(InlineKeyboardButton(text=button2_text, url=button2_url))
-        for index in (3, 4):
-            button_url = cfg.get(f"button{index}_url", "")
-            button_text = cfg.get(f"button{index}_text", "")
-            parsed_button = urlparse(button_url)
-            if cfg.get(f"button{index}_enabled", False) and button_text and parsed_button.scheme in ("http", "https") and parsed_button.netloc:
-                configured_buttons.append(InlineKeyboardButton(text=button_text, url=button_url))
-        rows.extend(configured_buttons[i:i+2] for i in range(0, len(configured_buttons), 2))
-        if cfg.get("about_enabled", True):
-            rows.append([InlineKeyboardButton(text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="start:about")])
-        markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+        markup = build_start_markup(cfg)
         default_start_text = (
             "<b>✨ ʜᴇʟʟᴏ</b> <i>{mention}</i>\n\n"
             "ɪ'm {bot_mention} ꜰɪʟᴇ ʙᴏᴛ ʙʏ <b><a href=\"https://t.me/lexianime\">Lexi Anime</a></b>.\n"
@@ -914,6 +912,19 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         else:
             await message.answer(text, reply_markup=markup, parse_mode="HTML")
     await delete_start_command_after(message, database.db)
+
+@router.callback_query(F.data == "afterdelete:remove")
+async def delete_after_delete_post(query: CallbackQuery):
+    """Delete only the After Delete post that owns this callback button."""
+    if not query.message:
+        await query.answer()
+        return
+    await query.answer()
+    try:
+        await query.message.delete()
+    except TelegramAPIError:
+        log.debug("Could not delete After Delete post from callback", exc_info=True)
+
 
 @router.callback_query(F.data == "start:about")
 async def start_about(query: CallbackQuery, database):
@@ -952,31 +963,7 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
     if not cfg.get("enabled", True):
         return
     me = await get_bot_identity(query.bot)
-    rows = []
-    url = cfg.get("button1_url", cfg.get("button_url", ""))
-    label = cfg.get("button1_text", cfg.get("button_text", ""))
-    parsed = urlparse(url)
-    configured_buttons = []
-    if cfg.get("button1_enabled", cfg.get("button_enabled", False)) and label and parsed.scheme in ("http", "https") and parsed.netloc:
-        configured_buttons.append(InlineKeyboardButton(text=label, url=url))
-    url2 = cfg.get("button2_url", "")
-    label2 = cfg.get("button2_text", "")
-    parsed2 = urlparse(url2)
-    if cfg.get("button2_enabled", False) and label2 and parsed2.scheme in ("http", "https") and parsed2.netloc:
-        configured_buttons.append(InlineKeyboardButton(text=label2, url=url2))
-    url3 = cfg.get("button3_url", "")
-    label3 = cfg.get("button3_text", "")
-    parsed3 = urlparse(url3)
-    button3 = None
-    if cfg.get("button3_enabled", False) and label3 and parsed3.scheme in ("http", "https") and parsed3.netloc:
-        button3 = InlineKeyboardButton(text=label3, url=url3)
-    if configured_buttons:
-        rows.append(configured_buttons)
-    if button3:
-        rows.append([button3])
-    if cfg.get("about_enabled", True):
-        rows.append([InlineKeyboardButton(text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="start:about")])
-    markup = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+    markup = build_start_markup(cfg)
     raw = cfg.get("text") or '<b>✨ ʜᴇʟʟᴏ</b> <i>{mention}</i>\n\nɪ\'m {bot_mention} ꜰɪʟᴇ ʙᴏᴛ ʙʏ <b><a href="https://t.me/lexianime">Lexi Anime</a></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!'
     rendered = render_common_variables(raw, user, me)
     # Restore the Start content on the same message.
