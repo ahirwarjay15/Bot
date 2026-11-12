@@ -282,6 +282,10 @@ async def generate_anime_links(
                 await _delete(callback.bot, settings.source_channel_id, copied_id)
             # Keep the original submitted message whenever any step failed.
             log.warning("Anime item %s failed: %s", index, exc)
+            # A published link must receive its caption before the next link is sent.
+            if link_sent:
+                failures.extend(range(index + 1, len(collected) + 1))
+                break
 
     await _delete(
         callback.bot, data.get("prompt_chat_id", callback.message.chat.id),
