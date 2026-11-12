@@ -386,6 +386,9 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
             "file_name": file_name,
         }
         collected.append(item)
+        # Telegram message IDs increase in the order messages were sent in this chat.
+        # Sort before saving so concurrent handler completion cannot reorder uploads.
+        collected.sort(key=lambda entry: int(entry.get("original_message_id", 0)))
         await state.update_data(collected=collected)
         await _show_panel(message, state)
         await _delete(
