@@ -144,7 +144,7 @@ def test_force_sub_panel_uses_clean_other_labels_and_newlines():
     assert 'item.get("button_text") or "Other"' in page
     assert 'ADDED OTHER LINKS' not in page
     assert 'item.get("button_text") or "Other"' in other_detail
-    assert 'f"OTHER LINK SETTINGS\\n\\n' not in other_detail
+    assert 'f"OTHER LINK SETTINGS\\\\n\\\\n' not in other_detail
     assert 'elif action.startswith("forcejoin_other_item:")' in source
     assert 'settings:forcejoin_other_remove:{index}' in source
     assert 'f"Join {index + 1}"' not in page
