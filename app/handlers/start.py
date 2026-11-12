@@ -948,6 +948,7 @@ async def start_about(query: CallbackQuery, database):
         else:
             await query.message.edit_text(
                 rendered, parse_mode="HTML", reply_markup=back_markup,
+                link_preview_options={"is_disabled": True},
             )
     except TelegramAPIError:
         log.warning("Could not edit Start post into About", exc_info=True)
