@@ -180,6 +180,62 @@ async def _watch_broadcast_changes(db, wake_event: asyncio.Event, ready_event: a
             wake_event.set()
 
 
+async def _deliver_broadcast_recipient(bot, db, job: dict, recipient: dict):
+    """Deliver one claimed recipient and persist its individual outcome."""
+    uid = recipient["user_id"]
+    latest_user = await db.users.find_one({"user_id": uid}, {"banned": 1})
+    if not latest_user or latest_user.get("banned", False):
+        await db.broadcast_recipients.update_one(
+            {"_id": recipient["_id"]},
+            {"$set": {"status": "skipped_banned", "finished_at": now()}},
+        )
+        return
+
+    try:
+        markup_data = job.get("reply_markup")
+        markup = InlineKeyboardMarkup.model_validate(markup_data) if markup_data else None
+        copied = await bot.copy_message(
+            chat_id=uid, from_chat_id=job["source_chat_id"],
+            message_id=job["source_message_id"], reply_markup=markup,
+        )
+        if job.get("pin_after_send"):
+            try:
+                await bot.pin_chat_message(chat_id=uid, message_id=copied.message_id, disable_notification=True)
+            except TelegramAPIError:
+                # A pin failure should not mark a successfully delivered broadcast as failed.
+                log.warning("Could not pin /pbroadcast message for user %s", uid, exc_info=True)
+        await db.broadcast_recipients.update_one(
+            {"_id": recipient["_id"]},
+            {"$set": {"status": "sent", "finished_at": now()}},
+        )
+        # Successful delivery means this user is reachable again.
+        await db.users.update_one({"user_id": uid}, {"$set": {"blocked": False}})
+    except RetryAfter as exc:
+        retry_at = now() + timedelta(seconds=max(0.0, float(exc.retry_after)) + 0.5)
+        await db.broadcast_recipients.update_one(
+            {"_id": recipient["_id"]},
+            {"$set": {"status": "pending", "retry_at": retry_at}},
+        )
+    except TelegramForbiddenError:
+        await db.broadcast_recipients.update_one(
+            {"_id": recipient["_id"]},
+            {"$set": {"status": "blocked", "finished_at": now()}},
+        )
+        # This is Telegram delivery status, not an admin ban.
+        await db.users.update_one({"user_id": uid}, {"$set": {"blocked": True}})
+    except TelegramAPIError as exc:
+        await db.broadcast_recipients.update_one(
+            {"_id": recipient["_id"]},
+            {"$set": {"status": "failed", "error": type(exc).__name__, "finished_at": now()}},
+        )
+    except Exception as exc:
+        log.exception("Unexpected broadcast failure for user %s", uid)
+        await db.broadcast_recipients.update_one(
+            {"_id": recipient["_id"]},
+            {"$set": {"status": "failed", "error": type(exc).__name__, "finished_at": now()}},
+        )
+
+
 async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
     """Resume queued broadcasts without resetting recipients owned by a live worker."""
     # Only recover recipients whose send attempt has been stale for 10+ minutes.
@@ -244,16 +300,25 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
                 await db.broadcast_jobs.update_one(
                     {"_id": job_id}, {"$set": {"recipients_loaded": True, "recipient_count": len(ids), "status": "processing"}}
                 )
-            claim_time = now()
-            recipient = await db.broadcast_recipients.find_one_and_update(
-                _eligible_broadcast_recipient_filter(job_id, claim_time),
-                {
-                    "$set": {"status": "sending", "attempted_at": claim_time},
-                    "$unset": {"retry_at": ""},
-                },
-                sort=[("user_id", 1)],
-            )
-            if not recipient:
+            # Claim a small batch atomically, then deliver it concurrently.
+            # This keeps progress durable while avoiding one-user-at-a-time latency.
+            batch_size = 10
+            recipients = []
+            for _ in range(batch_size):
+                claim_time = now()
+                recipient = await db.broadcast_recipients.find_one_and_update(
+                    _eligible_broadcast_recipient_filter(job_id, claim_time),
+                    {
+                        "$set": {"status": "sending", "attempted_at": claim_time},
+                        "$unset": {"retry_at": ""},
+                    },
+                    sort=[("user_id", 1)],
+                )
+                if not recipient:
+                    break
+                recipients.append(recipient)
+
+            if not recipients:
                 # A rate-limited recipient stays pending but must not be reclaimed
                 # until Telegram's RetryAfter deadline has passed. Sleep until the
                 # earliest deferred recipient instead of spinning MongoDB every 0.1s.
@@ -270,7 +335,7 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
                 if deferred:
                     await asyncio.sleep(_retry_wait_seconds(deferred["retry_at"], retry_now))
                     continue
-    
+
                 # A job can be observed by multiple workers. Wait for every claimed send
                 # to finish and atomically claim report finalization exactly once.
                 outstanding = await db.broadcast_recipients.count_documents(
@@ -306,46 +371,10 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
                 await db.broadcast_recipients.delete_many({"job_id": job_id})
                 await db.broadcast_jobs.delete_one({"_id": job_id})
                 continue
-            uid = recipient["user_id"]
-            latest_user = await db.users.find_one({"user_id": uid}, {"banned": 1})
-            if not latest_user or latest_user.get("banned", False):
-                await db.broadcast_recipients.update_one(
-                    {"_id": recipient["_id"]},
-                    {"$set": {"status": "skipped_banned", "finished_at": now()}},
-                )
-                continue
-            try:
-                markup_data = job.get("reply_markup")
-                markup = InlineKeyboardMarkup.model_validate(markup_data) if markup_data else None
-                copied = await bot.copy_message(
-                    chat_id=uid, from_chat_id=job["source_chat_id"],
-                    message_id=job["source_message_id"], reply_markup=markup,
-                )
-                if job.get("pin_after_send"):
-                    try:
-                        await bot.pin_chat_message(chat_id=uid, message_id=copied.message_id, disable_notification=True)
-                    except TelegramAPIError:
-                        # A pin failure should not mark a successfully delivered broadcast as failed.
-                        log.warning("Could not pin /pbroadcast message for user %s", uid, exc_info=True)
-                await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "sent", "finished_at": now()}})
-                # Successful delivery means this user is reachable again.
-                await db.users.update_one({"user_id": uid}, {"$set": {"blocked": False}})
-            except RetryAfter as exc:
-                retry_at = now() + timedelta(seconds=max(0.0, float(exc.retry_after)) + 0.5)
-                await db.broadcast_recipients.update_one(
-                    {"_id": recipient["_id"]},
-                    {"$set": {"status": "pending", "retry_at": retry_at}},
-                )
-            except TelegramForbiddenError:
-                await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "blocked", "finished_at": now()}})
-                # This is Telegram delivery status, not an admin ban.
-                await db.users.update_one({"user_id": uid}, {"$set": {"blocked": True}})
-            except TelegramAPIError as exc:
-                await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "failed", "error": type(exc).__name__, "finished_at": now()}})
-            except Exception as exc:
-                log.exception("Unexpected broadcast failure for user %s", uid)
-                await db.broadcast_recipients.update_one({"_id": recipient["_id"]}, {"$set": {"status": "failed", "error": type(exc).__name__, "finished_at": now()}})
-            # Avoid a fixed per-recipient delay; RetryAfter is handled explicitly above.
+
+            await asyncio.gather(
+                *(_deliver_broadcast_recipient(bot, db, job, recipient) for recipient in recipients)
+            )
     
     finally:
         watcher.cancel()
