@@ -1,4 +1,5 @@
 """Create one individual deeplink per anime message, in upload order."""
+import asyncio
 import logging
 
 from aiogram import F, Router
@@ -114,6 +115,23 @@ async def _show_panel(message: Message, state: FSMContext):
         )
     old_chat_id = data.get("panel_chat_id")
     old_message_id = data.get("panel_message_id")
+
+    # Keep one live confirmation message instead of sending a new panel
+    # for every file. A short pause makes each count update easier to follow.
+    if old_chat_id and old_message_id:
+        await asyncio.sleep(1)
+        try:
+            await message.bot.edit_message_text(
+                chat_id=old_chat_id,
+                message_id=old_message_id,
+                text=panel_text,
+                reply_markup=_panel_keyboard(),
+                parse_mode="HTML",
+            )
+            return
+        except TelegramAPIError:
+            log.debug("Could not edit anime panel %s; sending a replacement", old_message_id, exc_info=True)
+
     panel = await message.answer(panel_text, reply_markup=_panel_keyboard(), parse_mode="HTML")
     await state.update_data(panel_message_id=panel.message_id, panel_chat_id=panel.chat.id)
     if old_chat_id and old_message_id:
