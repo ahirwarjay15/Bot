@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
 DEFAULT_ABOUT = (
     "<b><i>✦ ᴀʙᴏᴜᴛ ᴍᴇ</i></b>\n"
-    "<i>ʟᴇxɪ ᴀɴɪᴍᴇ ɪs ᴀ ғɪʟᴇ ᴅᴇʟɪᴠᴇʀʏ ʙᴏᴛ ᴛʜᴀᴛ ʜᴇʟᴘs ʏᴏᴜ ɢᴇᴛ ғɪʟᴇs ᴛʜʀᴏᴜɢʜ sɪᴍᴘʟᴇ ᴛᴇʟᴇɢʀᴀᴍ ʟɪɴᴋs.</i>\n"
+    "<i>{bot_mention} ɪs ᴀ ғɪʟᴇ ᴅᴇʟɪᴠᴇʀʏ ʙᴏᴛ ᴛʜᴀᴛ ʜᴇʟᴘs ʏᴏᴜ ɢᴇᴛ ғɪʟᴇs ᴛʜʀᴏᴜɢʜ sɪᴍᴘʟᴇ ᴛᴇʟᴇɢʀᴀᴍ ʟɪɴᴋs.</i>\n"
     "<i>ᴏᴘᴇɴ ᴀ ᴠᴀʟɪᴅ ғɪʟᴇ ʟɪɴᴋ ᴏʀ sᴛᴀʀᴛ ᴛʜᴇ ʙᴏᴛ ᴡɪᴛʜ ɪᴛ, ᴛʜᴇɴ ᴛᴀᴘ <b>ɢᴇᴛ ғɪʟᴇ</b> ᴛᴏ ʀᴇᴄᴇɪᴠᴇ ʏᴏᴜʀ ғɪʟᴇ. ɪғ ʀᴇǫᴜɪʀᴇᴅ, ᴊᴏɪɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟs ᴀɴᴅ ᴛᴀᴘ <b>ᴠᴇʀɪғʏ ᴀɢᴀɪɴ</b>.</i>\n"
     "\n"
     "<b><i>✦ ɪɴғᴏʀᴍᴀᴛɪᴏɴ</i></b>\n"
@@ -78,7 +78,8 @@ async def load_shared_about_text(db) -> str:
         "➤ ᴍᴀᴅᴇ ғᴏʀ: {anime}\n\n"
         "➤ ᴠᴇʀsɪᴏɴ: ✧ V 0.1 ⚡"
     )
-    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default, PREVIOUS_DEFAULT_ABOUT):
+    previous_default_v2 = DEFAULT_ABOUT.replace("{bot_mention}", "ʟᴇxɪ ᴀɴɪᴍᴇ")
+    if not raw or str(raw) in (LEGACY_DEFAULT_ABOUT, previous_default, unbolded_current_default, PREVIOUS_DEFAULT_ABOUT, previous_default_v2):
         await db.settings.update_one(
             {"key": "invalid_post"},
             {"$set": {"key": "invalid_post", "about_text": DEFAULT_ABOUT}},
