@@ -208,6 +208,7 @@ async def generate_anime_links(
     repo = FileRepository(database.db)
     me = await get_bot_identity(callback.bot)
     successes = 0
+    published = 0
     failures = []
     first_link_message = None
 
@@ -246,6 +247,7 @@ async def generate_anime_links(
                     link, reply_markup=_link_keyboard(link), parse_mode=None
                 )
             link_sent = True
+            published += 1
 
             # Reply with the exact original caption/text and Telegram entities;
             # do not convert through HTML/Markdown, which can alter formatting.
@@ -286,12 +288,12 @@ async def generate_anime_links(
         data.get("prompt_message_id"),
     )
     # If no item could publish a link, turn the progress panel into a clear result.
-    if successes == 0:
+    if published == 0:
         try:
             await progress.edit_text("No anime links were generated. Failed items: " + ", ".join(map(str, failures)))
         except TelegramAPIError:
             pass
-    summary = f"Anime links generated: {successes}/{len(collected)}."
+    summary = f"Individual links published: {published}/{len(collected)}; captions replied: {successes}/{len(collected)}."
     if failures:
         summary += " Failed item numbers: " + ", ".join(map(str, failures)) + "."
     await callback.message.answer(summary)
