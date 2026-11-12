@@ -1097,7 +1097,12 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         load_animation_config(database.db),
     )
     force_cfg = force_cfg_result or {}
-    channels = await effective_force_join_channels(database, settings) if force_cfg.get("enabled", False) else []
+    channels = await effective_force_join_channels(database, settings)
+    force_sub_enabled = bool(channels)
+    if force_cfg.get("enabled") != force_sub_enabled:
+        await database.db.settings.update_one(
+            {"key": "force_join"}, {"$set": {"enabled": force_sub_enabled}}, upsert=True
+        )
     animation_enabled = bool(animation_cfg.get("enabled"))
     animation_mode = animation_cfg.get("mode", "poster")
     animation_post = None
