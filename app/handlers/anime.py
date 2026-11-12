@@ -121,11 +121,11 @@ async def _show_panel(message: Message, state: FSMContext):
 
             count = len(data.get("collected", []))
             if count < MAX_ANIME_FILES:
-                panel_text = PANEL_TEXT + f"\\n\\n<i>Files added: {count}/{MAX_ANIME_FILES}</i>"
+                panel_text = PANEL_TEXT + f"\n\n<i>Files added: {count}/{MAX_ANIME_FILES}</i>"
             else:
                 panel_text = (
                     f"<i>LIMIT REACHED — maximum {MAX_ANIME_FILES} files. Generate your links below.</i>"
-                    f"\\n\\n<i>Files added: {MAX_ANIME_FILES}/{MAX_ANIME_FILES}</i>"
+                    f"\n\n<i>Files added: {MAX_ANIME_FILES}/{MAX_ANIME_FILES}</i>"
                 )
 
             old_chat_id = data.get("panel_chat_id")
