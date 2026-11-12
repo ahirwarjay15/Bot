@@ -399,7 +399,20 @@ def _pending_request_is_recent(pending: dict | None, now=None, max_age_seconds: 
 
 
 async def join_status(bot, user_id: int, channels: list[str], db=None) -> list[str]:
-    """Check memberships concurrently, avoiding an unnecessary getChat call for members."""
+    """Check memberships concurrently and load all channel configs in one DB query."""
+    # Fetch Force Sub configuration once instead of issuing one find_one per channel.
+    configs_by_channel = {}
+    if db is not None and channels:
+        channel_configs = await db.settings.find({
+            "key": "force_join_channel",
+            "channel": {"$in": list(dict.fromkeys(
+                channel.strip() for channel in channels if channel.strip()
+            ))},
+        }).to_list(length=None)
+        configs_by_channel = {
+            str(config.get("channel")): config for config in channel_configs
+        }
+
     async def check_channel(raw: str) -> str | None:
         channel = raw.strip()
         if not channel:
@@ -407,17 +420,9 @@ async def join_status(bot, user_id: int, channels: list[str], db=None) -> list[s
         try:
             chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
             # Telegram accepts @channelusername or numeric chat IDs directly in
-            # getChatMember. Check membership first; resolving getChat on every
-            # /start added an extra network round trip for every required channel.
-            member_task = bot.get_chat_member(chat_id=chat_arg, user_id=user_id)
-            cfg_task = (
-                db.settings.find_one({"key": "force_join_channel", "channel": channel})
-                if db is not None else None
-            )
-            if cfg_task is not None:
-                member, channel_cfg = await asyncio.gather(member_task, cfg_task)
-            else:
-                member, channel_cfg = await asyncio.gather(member_task, asyncio.sleep(0, result=None))
+            # getChatMember. Membership checks remain parallel across channels.
+            member = await bot.get_chat_member(chat_id=chat_arg, user_id=user_id)
+            channel_cfg = configs_by_channel.get(channel)
             if _is_member_status(member):
                 return None
 
