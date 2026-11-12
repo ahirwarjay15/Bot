@@ -186,7 +186,7 @@ def kb(rows):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text=str(label) if str(data).startswith("settings:forcejoin_channel:") else unicode_buttons(label),
+                text=str(label) if str(data).startswith(("settings:forcejoin_channel:", "settings:forcejoin_other_item:")) else unicode_buttons(label),
                 callback_data=data,
             )
             for label, data in row
@@ -435,14 +435,12 @@ async def build_forcejoin_page(bot, db, settings):
     for i, item in enumerate(other_links[:10]):
         if not isinstance(item, dict):
             continue
-        label = str(item.get("button_text") or f"Join {i + 1}")[:64]
+        label = str(item.get("button_text") or "Other")[:64]
         other_link_buttons.append((label, f"settings:forcejoin_other_item:{i}"))
     rows.extend(
         other_link_buttons[i:i+2]
         for i in range(0, len(other_link_buttons), 2)
     )
-    if other_links:
-        rows.append([(f"ADDED OTHER LINKS ({len(other_links)})", "settings:forcejoin_other_links")])
     if len(channels) < 10:
         rows.append([("✚ ADD", "settings:forcejoin_add")])
     # Force Sub is active exactly while at least one channel is configured.
@@ -1101,9 +1099,9 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         links = cfg.get("other_links") if isinstance(cfg.get("other_links"), list) else []
         if 0 <= index < len(links) and isinstance(links[index], dict):
             item = links[index]
-            label = str(item.get("button_text") or f"Join {index + 1}")
+            label = str(item.get("button_text") or "Other")
             url = html.escape(str(item.get("url") or ""))
-            await edit_page(query, f"OTHER LINK SETTINGS\n\nButton: {html.escape(label)}\\nURL: <code>{url}</code>\n\nThis optional link is not verified by Force Sub.", kb([
+            await edit_page(query, f"OTHER LINK SETTINGS\n\nButton: {html.escape(label)}\nURL: <code>{url}</code>\n\nThis optional link is not verified by Force Sub.", kb([
                 [("REMOVE", f"settings:forcejoin_other_remove:{index}")],
                 [("《 BACK", "settings:forcejoin")],
             ]))
@@ -1114,10 +1112,10 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         for index, item in enumerate(links):
             if not isinstance(item, dict):
                 continue
-            label = str(item.get("button_text") or f"Join {index + 1}")[:64]
+            label = str(item.get("button_text") or "Other")[:64]
             rows.append([(label, f"settings:forcejoin_other_remove:{index}")])
         rows.append([("《 BACK", "settings:forcejoin")])
-        await edit_page(query, "FORCE SUB OTHER LINKS\\n\\nAdd optional links shown only while at least one required chat is still pending. These links are never verified.", kb(rows))
+        await edit_page(query, "FORCE SUB OTHER LINKS\n\nAdd optional links shown only while at least one required chat is still pending. These links are never verified.", kb(rows))
     elif action == "forcejoin_other_add":
         await state.set_state(SettingInput.waiting)
         await state.update_data(
@@ -1127,7 +1125,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         )
         if query.message:
             await tracked_answer(
-                query.message, state, "Send the button text, or choose DEFAULT for automatic Join numbering.",
+                query.message, state, "Send a custom button text, or choose DEFAULT to use Other.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="DEFAULT", callback_data="settings:forcejoin_other_default")]
                 ]),
@@ -1157,10 +1155,10 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         rows = [[("✚ ADD LINK", "settings:forcejoin_other_add")]]
         for item_index, item in enumerate(links):
             if isinstance(item, dict):
-                label = str(item.get("button_text") or f"Join {item_index + 1}")[:64]
+                label = str(item.get("button_text") or "Other")[:64]
                 rows.append([(label, f"settings:forcejoin_other_remove:{item_index}")])
         rows.append([("《 BACK", "settings:forcejoin")])
-        await edit_page(query, "FORCE SUB OTHER LINKS\\n\\nThese optional links are shown only while a required chat is pending.", kb(rows))
+        await edit_page(query, "FORCE SUB OTHER LINKS\n\nThese optional links are shown only while a required chat is pending.", kb(rows))
     elif action == "forcejoin_message": await render_forcejoin_message(query)
     elif action == "forcejoin_message_edit":
         await show_input_prompt(query, state, "forcejoin_message",
