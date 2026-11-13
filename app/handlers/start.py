@@ -21,21 +21,21 @@ router=Router(name="start");log=logging.getLogger(__name__)
 
 
 def build_start_markup(cfg: dict):
-    """Build the same configured Start buttons for /start and About → Back."""
-    configured_buttons = []
-    for index in range(1, 5):
-        button_url = cfg.get(f"button{index}_url", cfg.get("button_url", "") if index == 1 else "")
-        button_text = cfg.get(f"button{index}_text", cfg.get("button_text", "") if index == 1 else "")
-        parsed = urlparse(button_url)
-        enabled = cfg.get(f"button{index}_enabled", cfg.get("button_enabled", False) if index == 1 else False)
-        if enabled and button_text and parsed.scheme in ("http", "https") and parsed.netloc:
-            configured_buttons.append(InlineKeyboardButton(text=button_text, url=button_url))
-    rows = [configured_buttons[i:i+2] for i in range(0, len(configured_buttons), 2)]
+    """Build fixed button pairs (1+2, 3+4) and keep About on the last row."""
+    rows = []
+    for first, second in ((1, 2), (3, 4)):
+        row = []
+        for index in (first, second):
+            button_url = cfg.get(f"button{index}_url", cfg.get("button_url", "") if index == 1 else "")
+            button_text = cfg.get(f"button{index}_text", cfg.get("button_text", "") if index == 1 else "")
+            parsed = urlparse(button_url or "")
+            enabled = cfg.get(f"button{index}_enabled", cfg.get("button_enabled", False) if index == 1 else False)
+            if enabled and button_text and parsed.scheme in ("http", "https") and parsed.netloc:
+                row.append(InlineKeyboardButton(text=button_text, url=button_url))
+        if row:
+            rows.append(row)
     if cfg.get("about_enabled", True):
-        rows.append([InlineKeyboardButton(
-            text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"),
-            callback_data="start:about",
-        )])
+        rows.append([InlineKeyboardButton(text="ᴀʙᴏᴜᴛ", callback_data="start:about")])
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 def ensure_default_quote_format(raw_text, kind):
@@ -908,7 +908,9 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         me = await get_bot_identity(message.bot)
         text = render_common_variables(raw_text, user, me)
         # Normal /start stays static; animated frames are reserved for Force Sub prompts.
-        if cfg.get("poster_photo_id"):
+        if cfg.get("poster_file_id"):
+            await message.answer_animation(cfg["poster_file_id"], caption=text, reply_markup=markup, parse_mode="HTML")
+        elif cfg.get("poster_photo_id"):
             await message.answer_photo(cfg["poster_photo_id"], caption=text, reply_markup=markup, parse_mode="HTML")
         else:
             await message.answer(text, reply_markup=markup, parse_mode="HTML")
@@ -936,9 +938,9 @@ async def start_about(query: CallbackQuery, database):
     if not cfg.get("enabled", True) or not cfg.get("about_enabled", True) or not query.message:
         return
     me = await get_bot_identity(query.bot)
-    from app.handlers.misc import DEFAULT_ABOUT
+    from app.handlers.about import DEFAULT_ABOUT
     rendered = render_common_variables(DEFAULT_ABOUT, query.from_user, me)
-    back_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="《 BACK", callback_data="start:about_back")]])
+    back_markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❮❮ ʙᴀᴄᴋ", callback_data="start:about_back")]])
     # Keep the original Start post and switch its content in place.
     try:
         if query.message.photo or query.message.animation or query.message.document:
