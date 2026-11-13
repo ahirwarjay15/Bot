@@ -494,8 +494,10 @@ async def render_invalid_text(query):
 
 
 def start_status_lines(cfg):
+    caption = cfg.get("text")
+    caption_is_default = not caption or caption == DEFAULT_START_TEXT
     return (
-        "Added ✅" if cfg.get("text") else "Default ✨",
+        "Default ✨" if caption_is_default else "Added ✅",
         "Added ✅" if cfg.get("poster_file_id") or cfg.get("poster_photo_id") else "None ❌",
         "Enabled ✅" if cfg.get("about_enabled", True) else "Disabled ❌",
     )
@@ -1292,8 +1294,10 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         bot_label = me.full_name or me.username or "Bot"
         user_label = query.from_user.full_name or query.from_user.username or "User"
         values = {
-            "{bot_mention}": bot_label, "{bot}": bot_label,
+            "{bot_mention}": bot_label, "{bot_name}": me.full_name or me.first_name or "Bot", "{bot}": bot_label,
             "{mention}": user_label, "{user_mention}": user_label, "{user}": user_label,
+            "{first_name}": query.from_user.first_name if query.from_user else "User",
+            "{last_name}": query.from_user.last_name if query.from_user else "",
             "{owner}": "Lexi", "{hindi_anime}": "Lexi Anime Hindi", "{anime}": "Lexi Anime",
         }
         for token, replacement in values.items():
