@@ -1518,17 +1518,24 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             )
         await render_after(query, db)
     elif action == "after_callback_toggle":
-        cfg = await db.settings.find_one({"key": "after_delete"}) or {}
-        turning_on = not cfg.get("callback_button_enabled", False)
-        update = {"callback_button_enabled": turning_on}
-        if turning_on and not cfg.get("callback_button_text"):
-            update["callback_button_text"] = "Delete Post"
-        await db.settings.update_one(
-            {"key": "after_delete", "channel": {"$exists": False}},
-            {"$set": {"key": "after_delete", **update}},
-            upsert=True,
-        )
-        await render_after(query, db)
+        cfg = await db.settings.find_one({"key": "after_delete", "channel": {"$exists": False}}) or {}
+        if cfg.get("callback_button_enabled", False):
+            # Turning OFF removes the saved callback label from the database.
+            await db.settings.update_one(
+                {"key": "after_delete", "channel": {"$exists": False}},
+                {"$set": {"callback_button_enabled": False}, "$unset": {"callback_button_text": ""}},
+            )
+            await render_after(query, db)
+        else:
+            # Ask for a label; the feature turns ON only after the label is saved.
+            await state.set_state(SettingInput.waiting)
+            await state.update_data(
+                field="after_callback_button_text",
+                panel_chat_id=query.message.chat.id if query.message else None,
+                panel_message_id=query.message.message_id if query.message else None,
+            )
+            if query.message:
+                await tracked_answer(query.message, state, "Send the text for the After Delete callback button.")
     elif action == "after_text":
         # Keep old inline keyboards functional, but never show the removed submenu.
         await render_after(query, db)
@@ -2530,6 +2537,27 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             page_text, page_markup,
         )
         await tracked_answer(message, state, success_text)
+        return
+    elif field == "after_callback_button_text":
+        await db.settings.update_one(
+            {"key": "after_delete", "channel": {"$exists": False}},
+            {"$set": {"key": "after_delete", "callback_button_text": value, "callback_button_enabled": True}},
+            upsert=True,
+        )
+        await remove_temporary_prompts(message.bot, data)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        await clear_state_preserving_prompts(state)
+        auto = await db.settings.find_one({"key": "auto_delete"}) or {}
+        after = await db.settings.find_one({"key": "after_delete"}) or {}
+        page_text, page_markup = build_after_page(auto, after)
+        await refresh_settings_panel(
+            message.bot, data.get("panel_chat_id"), data.get("panel_message_id"),
+            page_text, page_markup,
+        )
+        await tracked_answer(message, state, "✨ After Delete callback button saved successfully.")
         return
     elif field == "invalid_text":
         value = formatted_input_text(message, value)
