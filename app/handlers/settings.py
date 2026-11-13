@@ -529,7 +529,7 @@ async def render_start(query, db):
     caption_status, media_status, about_status = start_status_lines(cfg)
     await db.settings.update_one({"key": "start_message"}, {"$set": {"enabled": True}}, upsert=True)
     text = (
-        "START MESSAGE\n\nCustomize your bot's start message using the following options.\n\n"
+        "START MESSAGE\n\nCustomize bot's start message using the following options.\n\n"
         f"Caption: {caption_status}\nMedia: {media_status}\nAbout: {about_status}"
     )
     await edit_page(query, text, kb([
@@ -1641,7 +1641,7 @@ async def handle_button_settings_reply_keyboard(message: Message, state: FSMCont
         await clear_state_preserving_prompts(state)
         # Return directly to the parent settings page while removing the reply keyboard.
         if kind == "start":
-            parent_text = format_settings_page("START\nCustomize your bot's start message using the following options.")
+            parent_text = format_settings_page("START\nCustomize bot's start message using the following options.")
             parent_kb = kb([
                 [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
                 [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about")], [("❮❮ BACK", "settings:home")],
