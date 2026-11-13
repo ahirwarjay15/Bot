@@ -331,12 +331,18 @@ async def refresh_media_parent_panel(bot, chat_id, message_id, kind, db, setting
         markup = kb(media_rows)
     else:
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
-        about_enabled = bool(cfg.get("about_enabled", False))
-        text = f"INVALID\nSet a response for users who send normal messages to the bot.\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
+        caption = cfg.get("text")
+        caption_status = "Default ✨" if not caption or caption == DEFAULT_INVALID else "Added ✅"
+        media_status = "Added ✅" if cfg.get("poster_file_id") or cfg.get("poster_photo_id") else "None ❌"
+        about_status = "Enabled ✅" if cfg.get("about_enabled", False) else "Disabled ❌"
+        text = (
+            "INVALID MESSAGE\\n\\n"
+            "<i>Customize your bot's Invalid Message using the following options.</i>\\n\\n"
+            f"<i>Caption: {caption_status}\\nMedia: {media_status}\\nAbout: {about_status}</i>"
+        )
         markup = kb([
-            [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:invalid_toggle")],
-            [("CAPTION", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
-            [("MEDIA", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")],
+            [("CAPTION", "settings:invalid_text"), ("MEDIA", "settings:invalid_poster")],
+            [("BUTTONS", "settings:invalid_button"), ("ABOUT", "settings:invalid_about_toggle")],
             [("❮❮ BACK", "settings:home")],
         ])
     try:
@@ -485,8 +491,22 @@ async def render_forcejoin_message(query):
     ]))
 
 
+INVALID_VARIABLES = START_VARIABLES
+
+
+def invalid_caption_page_text():
+    variables = "\\n".join(
+        f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
+        for token, description in INVALID_VARIABLES
+    )
+    return (
+        "CAPTION\\n\\n<i>Customize your bot's Invalid Message Caption.</i>\\n\\n"
+        "<i>Available variables (tap any code to copy):</i>\\n" + variables
+    )
+
+
 async def render_invalid_text(query):
-    await edit_page(query, "CAPTION\nCustomize the reply shown when users send messages instead of a valid file link.", kb([
+    await edit_page(query, invalid_caption_page_text(), kb([
         [("EDIT", "settings:invalid_text_edit"), ("SEE", "settings:invalid_text_see")],
         [("DEFAULT", "settings:invalid_text_default")],
         [("❮❮ BACK", "settings:invalid")],
@@ -805,24 +825,36 @@ async def render_after_text(query):
 
 async def render_invalid(query, db):
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
-    about_enabled = bool(cfg.get("about_enabled", False))
-    await edit_page(query, f"INVALID\nSet a response for users who send normal messages to the bot.\nStatus: {'ENABLED ✅' if cfg.get('enabled', False) else 'DISABLED ❌'}\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
-        [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:invalid_toggle")],
-        [("CAPTION", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
-        [("MEDIA", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")],
+    await db.settings.update_one({"key": "invalid_post"}, {"$set": {"enabled": True}}, upsert=True)
+    caption = cfg.get("text")
+    caption_status = "Default ✨" if not caption or caption == DEFAULT_INVALID else "Added ✅"
+    media_status = "Added ✅" if cfg.get("poster_file_id") or cfg.get("poster_photo_id") else "None ❌"
+    about_status = "Enabled ✅" if cfg.get("about_enabled", False) else "Disabled ❌"
+    text = (
+        "INVALID MESSAGE\\n\\n"
+        "<i>Customize your bot's Invalid Message using the following options.</i>\\n\\n"
+        f"<i>Caption: {caption_status}\\nMedia: {media_status}\\nAbout: {about_status}</i>"
+    )
+    await edit_page(query, text, kb([
+        [("CAPTION", "settings:invalid_text"), ("MEDIA", "settings:invalid_poster")],
+        [("BUTTONS", "settings:invalid_button"), ("ABOUT", "settings:invalid_about_toggle")],
         [("❮❮ BACK", "settings:home")],
     ]))
 
 async def render_invalid_button(query, db):
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
-    status1 = "ON ✅" if cfg.get("button1_enabled", bool(cfg.get("button_text") and cfg.get("button_url"))) else "OFF ❌"
-    status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
-    status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
-    status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
-    text = f"INVALID BUTTONS\nCustomize buttons shown with invalid items.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
+    statuses = {
+        str(i): ("ON ✅" if cfg.get(f"button{i}_enabled", bool(cfg.get("button_text") and cfg.get("button_url")) if i == 1 else False) else "OFF ❌")
+        for i in range(1, 5)
+    }
+    text = (
+        "INVALID MESSAGE BUTTONS\\n\\n"
+        "<i>Customize buttons shown with your Invalid Message.</i>\\n\\n"
+        + "\\n".join(f"Button {i}: {statuses[str(i)]}" for i in range(1, 5))
+    )
     await edit_page(query, text, kb([
-        [(f"1 {status1}", "settings:invalid_button_toggle:1"), (f"2 {status2}", "settings:invalid_button_toggle:2")],
-        [(f"3 {status3}", "settings:invalid_button_toggle:3"), (f"4 {status4}", "settings:invalid_button_toggle:4")],
+        [(f"1 {statuses['1']}", "settings:invalid_button_toggle:1"), (f"2 {statuses['2']}", "settings:invalid_button_toggle:2")],
+        [(f"3 {statuses['3']}", "settings:invalid_button_toggle:3"), (f"4 {statuses['4']}", "settings:invalid_button_toggle:4")],
         [("❮❮ BACK", "settings:invalid")],
     ]))
     return query.message
@@ -833,7 +865,7 @@ async def render_poster(query, db):
     media_buttons = [("✚ ADD", "settings:poster_add")]
     if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
         media_buttons.append(("REMOVE", "settings:poster_remove"))
-    await edit_page(query, "MEDIA\nAdd an image or GIF to the invalid response.", kb([
+    await edit_page(query, "MEDIA\\n\\n<i>Include an image or GIF with your Invalid Message.</i>", kb([
         media_buttons,
         [("❮❮ BACK", "settings:invalid")],
     ]))
