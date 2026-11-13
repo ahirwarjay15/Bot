@@ -751,14 +751,12 @@ async def refresh_animation_panel(bot, chat_id, message_id, db):
 
 async def render_auto(query, db):
     cfg = await db.settings.find_one({"key": "auto_delete"}) or {}
-    after = await db.settings.find_one({"key": "after_delete"}) or {}
     minutes = int(cfg.get("minutes", 5))
     status = "ENABLED ✅" if cfg.get("enabled", False) else "DISABLED ❌"
-    after_status = "ENABLED ✅" if after.get("enabled", False) and cfg.get("enabled", False) else "DISABLED ❌"
     await edit_page(query, f"AUTO DELETE\nAutomatically delete delivered files and the auto-delete message after {time_label(minutes)}.\nStatus: {status}", kb([
-        [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:auto_toggle")],
         [("TIME", "settings:auto_time"), ("MESSAGE", "settings:auto_message")],
-        [("AFTER DELETE", "settings:after")],
+        [("ENABLE" if not cfg.get("enabled", False) else "DISABLE", "settings:auto_toggle"),
+         ("AFTER DELETE", "settings:after")],
         [("❮❮ BACK", "settings:home")],
     ]))
 
@@ -810,24 +808,28 @@ async def refresh_auto_button_panel(bot, chat_id, message_id, db):
     except TelegramAPIError:
         pass
 
+def build_after_page(auto, after):
+    enabled = bool(after.get("enabled", False) and auto.get("enabled", False))
+    callback_status = "ON ✅" if after.get("callback_button_enabled", False) else "OFF ❌"
+    text = (
+        "AFTER DELETE\n"
+        "Customize the message and button shown after delivered files are deleted.\n"
+        f"Status: {'ENABLED ✅' if enabled else 'DISABLED ❌'}"
+    )
+    markup = kb([
+        [("DISABLE" if enabled else "ENABLE", "settings:after_toggle"),
+         ("CLEAR CALLBACK: " + callback_status, "settings:after_callback_toggle")],
+        [("TEXT", "settings:after_text_message"), ("BUTTON", "settings:after_text_button")],
+        [("❮❮ BACK", "settings:auto")],
+    ])
+    return text, markup
+
+
 async def render_after(query, db):
     auto = await db.settings.find_one({"key": "auto_delete"}) or {}
     after = await db.settings.find_one({"key": "after_delete"}) or {}
-    enabled = bool(after.get("enabled", False) and auto.get("enabled", False))
-    callback_status = "ON ✅" if after.get("callback_button_enabled", False) else "OFF ❌"
-    await edit_page(query, f"AFTER DELETE\nCustomize the message and button shown after delivered files are deleted.\nStatus: {'ENABLED ✅' if enabled else 'DISABLED ❌'}\nDelete Post Button: {callback_status}", kb([
-        [("DISABLE" if enabled else "ENABLE", "settings:after_toggle")],
-        [("DELETE POST BUTTON: " + callback_status, "settings:after_callback_toggle")],
-        [("TEXT", "settings:after_text")],
-        [("❮❮ BACK", "settings:auto")],
-    ]))
-
-async def render_after_text(query):
-    await edit_page(query, "AFTER DELETE TEXT\nCustomize the message and button text shown after file deletion.", kb([
-        [("MESSAGE TEXT", "settings:after_text_message")],
-        [("BUTTON TEXT", "settings:after_text_button")],
-        [("❮❮ BACK", "settings:after")],
-    ]))
+    text, markup = build_after_page(auto, after)
+    await edit_page(query, text, markup)
 
 async def render_invalid(query, db):
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
@@ -1517,22 +1519,29 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await render_after(query, db)
     elif action == "after_callback_toggle":
         cfg = await db.settings.find_one({"key": "after_delete"}) or {}
-        if cfg.get("callback_button_enabled", False):
-            await patch(db, "after_delete", {"callback_button_enabled": False}, {"enabled": False, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON})
-            await render_after(query, db)
-        else:
-            await state.set_state(SettingInput.waiting)
-            await state.update_data(
-                field="after_callback_button_text",
-                panel_chat_id=query.message.chat.id if query.message else None,
-                panel_message_id=query.message.message_id if query.message else None,
-            )
-            if query.message:
-                await tracked_answer(query.message, state, "Send the text for the After Delete callback button.")
-    elif action == "after_text": await render_after_text(query)
+        turning_on = not cfg.get("callback_button_enabled", False)
+        update = {"callback_button_enabled": turning_on}
+        if turning_on and not cfg.get("callback_button_text"):
+            update["callback_button_text"] = "Delete Post"
+        await db.settings.update_one(
+            {"key": "after_delete", "channel": {"$exists": False}},
+            {"$set": {"key": "after_delete", **update}},
+            upsert=True,
+        )
+        await render_after(query, db)
+    elif action == "after_text":
+        # Keep old inline keyboards functional, but never show the removed submenu.
+        await render_after(query, db)
     elif action in ("after_text_message", "after_text_button"):
-        await state.set_state(SettingInput.waiting); await state.update_data(field=action)
-        if query.message: await tracked_answer(query.message, state, "Send the new after-delete message text." if action == "after_text_message" else "Send new button text for the after-delete message.")
+        await state.set_state(SettingInput.waiting)
+        await state.update_data(
+            field=action,
+            panel_chat_id=query.message.chat.id if query.message else None,
+            panel_message_id=query.message.message_id if query.message else None,
+        )
+        if query.message:
+            prompt = "Send the new After Delete message text." if action == "after_text_message" else "Send the new After Delete button text."
+            await tracked_answer(query.message, state, prompt)
     elif action == "invalid": await render_invalid(query, db)
     elif action == "invalid_toggle":
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
@@ -2499,35 +2508,28 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             {"enabled": False, "minutes": 5},
         )
         await tracked_answer(message, state, "✨ Auto-delete message updated successfully.")
-    elif field == "after_text_message":
-        value = formatted_input_text(message, value)
-        await patch(db, "after_delete", {"text": value}, {"enabled": False, "button_text": DEFAULT_AFTER_BUTTON})
-        await tracked_answer(message, state, "✨ After-delete message text updated successfully.")
-    elif field == "after_text_button":
-        await patch(db, "after_delete", {"button_text": value}, {"enabled": False, "text": DEFAULT_AFTER_TEXT})
-        await tracked_answer(message, state, "✨ After-delete button text updated successfully.")
-    elif field == "after_callback_button_text":
-        await patch(
-            db, "after_delete",
-            {"callback_button_text": value, "callback_button_enabled": True},
-            {"enabled": False, "text": DEFAULT_AFTER_TEXT, "button_text": DEFAULT_AFTER_BUTTON},
-        )
+    elif field in ("after_text_message", "after_text_button"):
+        if field == "after_text_message":
+            value = formatted_input_text(message, value)
+            await patch(db, "after_delete", {"text": value}, {"enabled": False, "button_text": DEFAULT_AFTER_BUTTON})
+            success_text = "✨ After Delete message text updated successfully."
+        else:
+            await patch(db, "after_delete", {"button_text": value}, {"enabled": False, "text": DEFAULT_AFTER_TEXT})
+            success_text = "✨ After Delete button text updated successfully."
+        await remove_temporary_prompts(message.bot, data)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
         await clear_state_preserving_prompts(state)
         auto = await db.settings.find_one({"key": "auto_delete"}) or {}
         after = await db.settings.find_one({"key": "after_delete"}) or {}
-        enabled = bool(after.get("enabled", False) and auto.get("enabled", False))
-        callback_status = "ON ✅" if after.get("callback_button_enabled", False) else "OFF ❌"
+        page_text, page_markup = build_after_page(auto, after)
         await refresh_settings_panel(
             message.bot, data.get("panel_chat_id"), data.get("panel_message_id"),
-            f"AFTER DELETE\nCustomize the message and button shown after delivered files are deleted.\nStatus: {'ENABLED ✅' if enabled else 'DISABLED ❌'}\nDelete Post Button: {callback_status}",
-            kb([
-                [("DISABLE" if enabled else "ENABLE", "settings:after_toggle")],
-                [("DELETE POST BUTTON: " + callback_status, "settings:after_callback_toggle")],
-                [("TEXT", "settings:after_text")],
-                [("❮❮ BACK", "settings:auto")],
-            ]),
+            page_text, page_markup,
         )
-        await tracked_answer(message, state, "✨ After Delete callback button saved successfully.")
+        await tracked_answer(message, state, success_text)
         return
     elif field == "invalid_text":
         value = formatted_input_text(message, value)
