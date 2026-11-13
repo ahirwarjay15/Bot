@@ -86,7 +86,7 @@ DEFAULT_NOTICE = "<blockquote><b><i>Tʜɪs ғɪʟᴇ ᴡɪʟʟ ʙᴇ ᴀᴜᴛ�
 DEFAULT_START_TEXT = "<blockquote><b><i>✨ ʜᴇʟʟᴏ {mention}</i></b></blockquote>\n\nɪ'm ᴀ ᴘᴇʀᴍᴀɴᴇɴᴛ ꜰɪʟᴇ ꜱᴛᴏʀᴇ ʙᴏᴛ ʙʏ <b><i>{anime}</i></b>.\n⚡ ᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴅɪꜱᴄᴏᴠᴇʀ ᴍᴏʀᴇ ᴅᴇᴛᴀɪʟꜱ!"
 DEFAULT_AFTER_TEXT = "<blockquote><i>ʏᴏᴜʀ ғɪʟᴇ ʜᴀs ʙᴇᴇɴ sᴜᴄᴄᴇssғᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ! ✅\nᴛᴀᴘ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇsᴛᴏʀᴇ ʏᴏᴜʀ ғɪʟᴇ.</i></blockquote>"
 DEFAULT_AFTER_BUTTON = "↻ ʀᴇsᴛᴏʀᴇ ғɪʟᴇ ɴᴏᴡ!"
-DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
+DEFAULT_INVALID = "<b><i>🚫 Do Not Send Unnecessary Messages to the Bot!</i></b>"
 DEFAULT_FORCE_JOIN_MESSAGE = "<blockquote><b><i>⚡ ʜᴇʏ {mention},</i></b></blockquote>\n\n<blockquote><i>ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ <b><i>ʀᴇǫᴜɪʀᴇᴅ ᴄʜᴀɴɴᴇʟs</i></b> ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇss!</i></blockquote>\n<blockquote><i>ᴛᴀᴘ </i><b>『 ᴠᴇʀɪғʏ ᴀɢᴀɪɴ 』</b><i> ᴀғᴛᴇʀ ᴊᴏɪɴɪɴɢ ᴛᴏ ᴠᴇʀɪғʏ.</i></blockquote>"
 
 
