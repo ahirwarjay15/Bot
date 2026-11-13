@@ -71,7 +71,7 @@ def normalize_forcejoin_other_url(raw: str) -> str | None:
 
 
 def unicode_buttons(value: str) -> str:
-    if str(value) == "❮❮ BACK" or str(value) == "📟 UPDATE CHANNEL":
+    if str(value) == "📟 UPDATE CHANNEL":
         return str(value)
     table = str.maketrans({
         "A": "ᴀ", "B": "ʙ", "C": "ᴄ", "D": "ᴅ", "E": "ᴇ", "F": "ꜰ",
@@ -2253,9 +2253,14 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         else:
             await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
             return
-        await clear_state_preserving_prompts(state)
+        await remove_temporary_prompts(message.bot, data)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        await state.clear()
         await refresh_media_parent_panel(message.bot, data.get("panel_chat_id"), data.get("panel_message_id"), "start", db, settings)
-        await tracked_answer(message, state, "✨ Start Message media added successfully.")
+        await message.answer("<i>✨ Start Message media added successfully.</i>", parse_mode="HTML")
         return
     if field == "poster":
         if message.animation:
@@ -2290,7 +2295,16 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         return
     if field.startswith("start_button_") and field.endswith("_text"):
         index = field.split("_")[2]
-        await state.update_data(button_text=value, field=f"start_button_{index}_link")
+        await remove_temporary_prompts(message.bot, data)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        await state.update_data(
+            button_text=value,
+            field=f"start_button_{index}_link",
+            temporary_prompt_ids=[],
+        )
         await tracked_answer(message, state, f"Now send the URL for Start Message Button {index}.")
         return
     if field.startswith("start_button_") and field.endswith("_link"):
@@ -2298,12 +2312,16 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         if not normalized_url:
             await tracked_answer(message, state, "Button link must be a valid URL, e.g. example.com, t.me/channel, @channel, or https://example.com.")
             return
-        value = normalized_url
         index = field.split("_")[2]
         prev = await state.get_data()
-        await patch(db, "start_message", {f"button{index}_text": prev.get("button_text", ""), f"button{index}_url": value, f"button{index}_enabled": True}, {"enabled": True, "text": DEFAULT_START_TEXT})
+        await patch(db, "start_message", {f"button{index}_text": prev.get("button_text", ""), f"button{index}_url": normalized_url, f"button{index}_enabled": True}, {"enabled": True, "text": DEFAULT_START_TEXT})
+        await remove_temporary_prompts(message.bot, prev)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
         await refresh_button_panel(message.bot, prev.get("panel_chat_id"), prev.get("panel_message_id"), db, "start")
-        await clear_state_preserving_prompts(state)
+        await state.clear()
         await message.answer(
             f"<i>✨ Start Message Button {index} added successfully.</i>",
             parse_mode="HTML",
@@ -2329,7 +2347,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     if field == "start_text":
         value = formatted_input_text(message, value)
         await patch(db, "start_message", {"text": value}, {"enabled": True})
-        await remove_input_prompt(message.bot, data)
+        await remove_temporary_prompts(message.bot, data)
         try:
             await message.delete()
         except TelegramAPIError:
@@ -2344,7 +2362,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                     [("❮❮ BACK", "settings:start")],
                 ]),
             )
-        await clear_state_preserving_prompts(state)
+        await state.clear()
         await message.answer(
             "<i>✨ Successfully Updated New Start Message Caption.</i>",
             parse_mode="HTML",
