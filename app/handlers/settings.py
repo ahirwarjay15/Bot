@@ -71,7 +71,7 @@ def normalize_forcejoin_other_url(raw: str) -> str | None:
 
 
 def unicode_buttons(value: str) -> str:
-    if str(value) == "《 BACK" or str(value) == "📟 UPDATE CHANNEL":
+    if str(value) == "❮❮ BACK" or str(value) == "📟 UPDATE CHANNEL":
         return str(value)
     table = str.maketrans({
         "A": "ᴀ", "B": "ʙ", "C": "ᴄ", "D": "ᴅ", "E": "ᴇ", "F": "ꜰ",
@@ -323,13 +323,12 @@ async def refresh_media_parent_panel(bot, chat_id, message_id, kind, db, setting
         text, markup = await build_forcejoin_page(bot, db, settings)
     elif kind == "start":
         cfg = await db.settings.find_one({"key": "start_message"}) or {}
-        about_enabled = bool(cfg.get("about_enabled", True))
-        text = f"START\n\nCustomize your bot's start message using the following options.\n\nStatus: ENABLED ✅\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}"
-        markup = kb([
-            [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
-            [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about_toggle")],
-            [("《 BACK", "settings:home")],
-        ])
+        text = "MEDIA\n\nInclude an image or GIF with your start message."
+        media_rows = [[("✚ ADD", "settings:start_poster_add")]]
+        if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
+            media_rows[0].append(("REMOVE", "settings:start_poster_remove"))
+        media_rows.append([("❮❮ BACK", "settings:start")])
+        markup = kb(media_rows)
     else:
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
         about_enabled = bool(cfg.get("about_enabled", False))
@@ -338,7 +337,7 @@ async def refresh_media_parent_panel(bot, chat_id, message_id, kind, db, setting
             [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:invalid_toggle")],
             [("CAPTION", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
             [("MEDIA", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")],
-            [("《 BACK", "settings:home")],
+            [("❮❮ BACK", "settings:home")],
         ])
     try:
         await bot.edit_message_text(
@@ -454,7 +453,7 @@ async def build_forcejoin_page(bot, db, settings):
     rows.extend([
         [("CAPTION", "settings:forcejoin_message"), ("MEDIA", "settings:forcejoin_media")],
         [("VERIFY", "settings:forcejoin_verify_text")],
-        [("《 BACK", "settings:home")],
+        [("❮❮ BACK", "settings:home")],
     ])
     text = ("FORCE SUB\n\n"
             f"Status: {'ENABLED ✅' if enabled else 'DISABLED ❌'}\n\n"
@@ -470,7 +469,7 @@ async def render_forcejoin_media(query, db):
         media_buttons.append(("REMOVE", "settings:forcejoin_media_remove"))
     await edit_page(query, "FORCE SUB MEDIA\n\nAdd or remove the image/GIF shown with the Force Sub message.", kb([
         media_buttons,
-        [("《 BACK", "settings:forcejoin")],
+        [("❮❮ BACK", "settings:forcejoin")],
     ]))
 
 
@@ -482,7 +481,7 @@ async def render_forcejoin_message(query):
     await edit_page(query, "FORCE SUB CAPTION\nCustomize the caption shown to users who still need to join required channels.", kb([
         [("EDIT", "settings:forcejoin_message_edit"), ("SEE", "settings:forcejoin_message_see")],
         [("DEFAULT", "settings:forcejoin_message_default")],
-        [("《 BACK", "settings:forcejoin")],
+        [("❮❮ BACK", "settings:forcejoin")],
     ]))
 
 
@@ -490,38 +489,76 @@ async def render_invalid_text(query):
     await edit_page(query, "CAPTION\nCustomize the reply shown when users send messages instead of a valid file link.", kb([
         [("EDIT", "settings:invalid_text_edit"), ("SEE", "settings:invalid_text_see")],
         [("DEFAULT", "settings:invalid_text_default")],
-        [("《 BACK", "settings:invalid")],
+        [("❮❮ BACK", "settings:invalid")],
     ]))
+
+
+def start_status_lines(cfg):
+    return (
+        "Added ✅" if cfg.get("text") else "Default ✨",
+        "Added ✅" if cfg.get("poster_file_id") or cfg.get("poster_photo_id") else "None ❌",
+        "Enabled ✅" if cfg.get("about_enabled", True) else "Disabled ❌",
+    )
+
+
+START_VARIABLES = (
+    ("{mention}", "Mention the user"), ("{user_mention}", "Mention the user"),
+    ("{user}", "Mention the user"), ("{first_name}", "User's first name"),
+    ("{last_name}", "User's last name"), ("{bot_mention}", "Clickable bot mention"),
+    ("{bot_name}", "Bot name"), ("{bot}", "Clickable bot mention"),
+    ("{owner}", "Owner link"), ("{anime}", "Lexi Anime link"),
+    ("{hindi_anime}", "Lexi Anime Hindi link"),
+)
+
+
+def start_caption_page_text():
+    variables = "\n".join(
+        f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
+        for token, description in START_VARIABLES
+    )
+    return (
+        "CAPTION\n\n<i>Customize your bot's start message Caption.</i>\n\n"
+        "<i>Available variables (tap any code to copy):</i>\n" + variables
+    )
 
 
 async def render_start(query, db):
     cfg = await db.settings.find_one({"key": "start_message"}) or {}
-    about_enabled = bool(cfg.get("about_enabled", True))
+    caption_status, media_status, about_status = start_status_lines(cfg)
     await db.settings.update_one({"key": "start_message"}, {"$set": {"enabled": True}}, upsert=True)
-    await edit_page(query, f"START\n\nCustomize your bot's start message using the following options.\n\nStatus: ENABLED ✅\nAbout Button: {'ON ✅' if about_enabled else 'OFF ❌'}", kb([
-        [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
-        [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about_toggle")],
-        [("《 BACK", "settings:home")],
+    text = (
+        "START MESSAGE\n\nCustomize your bot's start message using the following options.\n\n"
+        f"Caption: {caption_status}\nMedia: {media_status}\nAbout: {about_status}"
+    )
+    await edit_page(query, text, kb([
+        [("CAPTION", "settings:start_text"), ("MEDIA", "settings:start_poster")],
+        [("BUTTONS", "settings:start_button"), ("ABOUT", "settings:start_about_toggle")],
+        [("❮❮ BACK", "settings:home")],
     ]))
 
+
 async def render_start_text(query):
-    await edit_page(query, "CAPTION\n\nCustomize your bot's start message.", kb([
+    await edit_page(query, start_caption_page_text(), kb([
         [("EDIT", "settings:start_text_edit"), ("SEE", "settings:start_text_see")],
         [("DEFAULT", "settings:start_text_default")],
-        [("《 BACK", "settings:start")],
+        [("❮❮ BACK", "settings:start")],
     ]))
+
 
 async def render_start_button(query, db):
     cfg = await db.settings.find_one({"key": "start_message"}) or {}
-    status1 = "ON ✅" if cfg.get("button1_enabled", cfg.get("button_enabled", False)) else "OFF ❌"
-    status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
-    status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
-    status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
-    text = f"START BUTTONS\nCustomize buttons shown with your start message.\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
+    statuses = {
+        str(i): ("ON ✅" if cfg.get(f"button{i}_enabled", cfg.get("button_enabled", False) if i == 1 else False) else "OFF ❌")
+        for i in range(1, 5)
+    }
+    text = (
+        "START BUTTONS\n\nCustomize buttons shown with your start message.\n\n"
+        + "\n".join(f"Button {i}: {statuses[str(i)]}" for i in range(1, 5))
+    )
     await edit_page(query, text, kb([
-        [(f"1 {status1}", "settings:start_button_toggle:1"), (f"2 {status2}", "settings:start_button_toggle:2")],
-        [(f"3 {status3}", "settings:start_button_toggle:3"), (f"4 {status4}", "settings:start_button_toggle:4")],
-        [("《 BACK", "settings:start")],
+        [(f"1 {statuses['1']}", "settings:start_button_toggle:1"), (f"2 {statuses['2']}", "settings:start_button_toggle:2")],
+        [(f"3 {statuses['3']}", "settings:start_button_toggle:3"), (f"4 {statuses['4']}", "settings:start_button_toggle:4")],
+        [("❮❮ BACK", "settings:start")],
     ]))
     return query.message
 
@@ -546,7 +583,7 @@ async def refresh_button_panel(bot, chat_id, message_id, db, kind):
     keyboard = kb([
         [(f"1 {status1}", f"settings:{prefix}_button_toggle:1"), (f"2 {status2}", f"settings:{prefix}_button_toggle:2")],
         [(f"3 {status3}", f"settings:{prefix}_button_toggle:3"), (f"4 {status4}", f"settings:{prefix}_button_toggle:4")],
-        [("《 BACK", back)],
+        [("❮❮ BACK", back)],
     ])
     try:
         # Keep the inline controls attached when refreshing the existing panel.
@@ -569,7 +606,7 @@ async def render_start_poster(query, db):
         media_buttons.append(("REMOVE", "settings:start_poster_remove"))
     await edit_page(query, "MEDIA\n\nInclude an image or GIF with your start message.", kb([
         media_buttons,
-        [("《 BACK", "settings:start")],
+        [("❮❮ BACK", "settings:start")],
     ]))
 
 
@@ -596,7 +633,7 @@ def build_animation_page(cfg):
     markup = kb([
         [("FRAMES", "settings:animation_frames"), ("SPEED", "settings:animation_speed")],
         [("MODE", "settings:animation_mode_toggle"), ("BLINK", "settings:file_animation")],
-        [("《 BACK", "settings:home")],
+        [("❮❮ BACK", "settings:home")],
     ])
     return text, markup
 
@@ -694,7 +731,7 @@ async def render_auto(query, db):
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:auto_toggle")],
         [("TIME", "settings:auto_time"), ("MESSAGE", "settings:auto_message")],
         [("AFTER DELETE", "settings:after")],
-        [("《 BACK", "settings:home")],
+        [("❮❮ BACK", "settings:home")],
     ]))
 
 async def render_auto_time(query, db):
@@ -703,7 +740,7 @@ async def render_auto_time(query, db):
     label = time_label(minutes)
     await edit_page(query, f"AUTO DELETE TIME\nCurrent time: {label}\nTap below to change the auto-delete time.", kb([
         [("CHANGE TIME", "settings:auto_time_change")],
-        [("《 BACK", "settings:auto")],
+        [("❮❮ BACK", "settings:auto")],
     ]))
 
 async def render_auto_message(query, db):
@@ -711,7 +748,7 @@ async def render_auto_message(query, db):
     await edit_page(query, "AUTO DELETE MESSAGE\nCustomize the message and buttons sent after file delivery.", kb([
         [("EDIT", "settings:auto_message_edit"), ("SEE", "settings:auto_message_see")],
         [("BUTTONS", "settings:auto_buttons"), ("DEFAULT", "settings:auto_message_default")],
-        [("《 BACK", "settings:auto")],
+        [("❮❮ BACK", "settings:auto")],
     ]))
 
 
@@ -721,7 +758,7 @@ async def render_auto_buttons(query, db):
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     await edit_page(query, f"AUTO DELETE MESSAGE BUTTONS\nCustomize the two buttons shown with the auto-delete notice.\n\nButton 1: {status1}\nButton 2: {status2}", kb([
         [(f"1 {status1}", "settings:auto_button_toggle:1"), (f"2 {status2}", "settings:auto_button_toggle:2")],
-        [("《 BACK", "settings:auto_message")],
+        [("❮❮ BACK", "settings:auto_message")],
     ]))
 
 
@@ -738,7 +775,7 @@ async def refresh_auto_button_panel(bot, chat_id, message_id, db):
             parse_mode="HTML",
             reply_markup=kb([
                 [(f"1 {status1}", "settings:auto_button_toggle:1"), (f"2 {status2}", "settings:auto_button_toggle:2")],
-                [("《 BACK", "settings:auto_message")],
+                [("❮❮ BACK", "settings:auto_message")],
             ]),
             link_preview_options={"is_disabled": True},
         )
@@ -754,14 +791,14 @@ async def render_after(query, db):
         [("DISABLE" if enabled else "ENABLE", "settings:after_toggle")],
         [("DELETE POST BUTTON: " + callback_status, "settings:after_callback_toggle")],
         [("TEXT", "settings:after_text")],
-        [("《 BACK", "settings:auto")],
+        [("❮❮ BACK", "settings:auto")],
     ]))
 
 async def render_after_text(query):
     await edit_page(query, "AFTER DELETE TEXT\nCustomize the message and button text shown after file deletion.", kb([
         [("MESSAGE TEXT", "settings:after_text_message")],
         [("BUTTON TEXT", "settings:after_text_button")],
-        [("《 BACK", "settings:after")],
+        [("❮❮ BACK", "settings:after")],
     ]))
 
 async def render_invalid(query, db):
@@ -771,7 +808,7 @@ async def render_invalid(query, db):
         [("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:invalid_toggle")],
         [("CAPTION", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
         [("MEDIA", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")],
-        [("《 BACK", "settings:home")],
+        [("❮❮ BACK", "settings:home")],
     ]))
 
 async def render_invalid_button(query, db):
@@ -784,7 +821,7 @@ async def render_invalid_button(query, db):
     await edit_page(query, text, kb([
         [(f"1 {status1}", "settings:invalid_button_toggle:1"), (f"2 {status2}", "settings:invalid_button_toggle:2")],
         [(f"3 {status3}", "settings:invalid_button_toggle:3"), (f"4 {status4}", "settings:invalid_button_toggle:4")],
-        [("《 BACK", "settings:invalid")],
+        [("❮❮ BACK", "settings:invalid")],
     ]))
     return query.message
 
@@ -796,28 +833,28 @@ async def render_poster(query, db):
         media_buttons.append(("REMOVE", "settings:poster_remove"))
     await edit_page(query, "MEDIA\nAdd an image or GIF to the invalid response.", kb([
         media_buttons,
-        [("《 BACK", "settings:invalid")],
+        [("❮❮ BACK", "settings:invalid")],
     ]))
 
 async def render_about(query, db):
     cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
     await edit_page(query, f"ABOUT BUTTON\n\nChoose whether to show the About button with invalid items.\n\nStatus: {'ENABLED ✅' if cfg.get('about_enabled', False) else 'DISABLED ❌'}", kb([
         [("DISABLE" if cfg.get("about_enabled", False) else "ENABLE", "settings:invalid_about_toggle")],
-        [("《 BACK", "settings:invalid")],
+        [("❮❮ BACK", "settings:invalid")],
     ]))
 
 async def render_shortener(query, db):
     cfg = await db.settings.find_one({"key": "shortener", "enabled": True})
     if not cfg:
         await edit_page(query, "LINK SHORTENER\nAdd a shortener provider to shorten links.", kb([
-            [("✚ ADD", "settings:shortener_add")], [("《 BACK", "settings:home")],
+            [("✚ ADD", "settings:shortener_add")], [("❮❮ BACK", "settings:home")],
         ]))
         return
     host = urlparse(cfg.get("url", "")).netloc or "Configured provider"
     token = cfg.get("token", "")
     masked = (token[:2] + "••••••" + token[-2:]) if len(token) > 4 else "••••••"
     await edit_page(query, f"LINK SHORTENER\nShortener: {host}\nShortener API: {masked}\nYou can now use /shortener to shorten links.", kb([
-        [("REMOVE", "settings:shortener_remove")], [("《 BACK", "settings:home")],
+        [("REMOVE", "settings:shortener_remove")], [("❮❮ BACK", "settings:home")],
     ]))
 
 async def render_custom_buttons(query, db):
@@ -826,7 +863,7 @@ async def render_custom_buttons(query, db):
     rows = custom_button_settings_rows(buttons)
     if len(buttons) < 2:
         rows.append([InlineKeyboardButton(text="✚", callback_data="settings:custom_button_add")])
-    rows.append([InlineKeyboardButton(text="《 BACK", callback_data="settings:home")])
+    rows.append([InlineKeyboardButton(text="❮❮ BACK", callback_data="settings:home")])
     markup = InlineKeyboardMarkup(inline_keyboard=rows)
     await edit_page(query, "Custom Button:\n\nYou can add a custom buttons to your files.", markup)
 
@@ -839,24 +876,16 @@ async def render_mods(query, db):
         rows.append([("✚ ADD", "settings:mod_add")])
     if mods:
         rows.append([("REMOVE", "settings:mod_remove")])
-    rows.append([("《 BACK", "settings:home")])
+    rows.append([("❮❮ BACK", "settings:home")])
     await edit_page(query, "MODERATORS\nModerators can manage bot features, including broadcasting.\n\nModerators List\n" + ("\n".join(lines) if lines else "No moderators added."), kb(rows))
 
-@router.message(Command("settings"))
+@router.message(Command("settings", "commands"))
 async def settings_command(message: Message, settings: Settings, database):
     if not await allowed(message, settings, database):
         return
     me = await get_bot_identity(message.bot)
     name = f'<a href="https://t.me/{me.username}">{__import__("html").escape(me.full_name)}</a>' if me.username else __import__("html").escape(me.full_name)
-    panel = await message.answer(f"<b><u>CUSTOMIZE</u></b>\n\n<i>✰ Name: {name}</i>\n\n<i>Configure Bot Settings Using the Buttons Below.</i>", parse_mode="HTML", link_preview_options={"is_disabled": True}, reply_markup=kb([
-        [("START", "settings:start"), ("FORCE SUB", "settings:forcejoin")],
-        [("ANIMATION", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
-        [("INVALID", "settings:invalid"), ("SHORTENER", "settings:shortener")],
-        [("MODERATORS", "settings:mods"), ("STATS", "settings:stats")],
-        [("CUSTOM BUTTON", "settings:custom_button")],
-    ]))
-    # Track and replace only the previous /settings panel for this owner.
-    # Do not sweep or delete any other bot/user messages.
+    # Remove the previous panel before publishing a fresh /settings or /commands panel.
     previous = await database.db.settings.find_one({"key": "settings_panel", "owner_id": message.from_user.id})
     if previous:
         try:
@@ -866,6 +895,13 @@ async def settings_command(message: Message, settings: Settings, database):
             )
         except (TelegramAPIError, KeyError, TypeError, ValueError):
             pass
+    panel = await message.answer(f"<b><u>CUSTOMIZE</u></b>\n\n<i>✰ Name: {name}</i>\n\n<i>Configure Bot Settings Using the Buttons Below.</i>", parse_mode="HTML", link_preview_options={"is_disabled": True}, reply_markup=kb([
+        [("START", "settings:start"), ("FORCE SUB", "settings:forcejoin")],
+        [("ANIMATION", "settings:forcejoin_animation"), ("AUTO DELETE", "settings:auto")],
+        [("INVALID", "settings:invalid"), ("SHORTENER", "settings:shortener")],
+        [("MODERATORS", "settings:mods"), ("STATS", "settings:stats")],
+        [("CUSTOM BUTTON", "settings:custom_button")],
+    ]))
     await database.db.settings.update_one(
         {"key": "settings_panel", "owner_id": message.from_user.id},
         {"$set": {"key": "settings_panel", "owner_id": message.from_user.id,
@@ -988,7 +1024,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "forcejoin": await render_forcejoin(query, db, settings)
     elif action == "forcejoin_add":
         panel_message = await edit_page(query, "ADD FORCE SUB\n\n<i>Choose Group or Channel from the keyboard below.\nOr forward any message from the target Group/Channel here with its Forward tag.\n\nPublic chats use Normal Mode automatically; private chats use Join Request Mode automatically.</i>", kb([
-            [("《 BACK", "settings:forcejoin")],
+            [("❮❮ BACK", "settings:forcejoin")],
         ]))
         if panel_message:
             await state.update_data(
@@ -1049,7 +1085,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 details += f"\nMode: {mode_label}"
             await edit_page(query, f"{chat_kind} SETTINGS\n\n{details}\n\nSelect an option below.", kb([
                 [("BUTTON TEXT", f"settings:forcejoin_label:{index}"), ("REMOVE", f"settings:forcejoin_remove_one:{index}")],
-                [("《 BACK", "settings:forcejoin")],
+                [("❮❮ BACK", "settings:forcejoin")],
             ]))
     elif action.startswith("forcejoin_label:"):
         channels = await effective_force_join_channels(database, settings)
@@ -1100,7 +1136,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             url = html.escape(str(item.get("url") or ""))
             await edit_page(query, f"OTHER LINK SETTINGS\n\nButton: {html.escape(label)}\nURL: <code>{url}</code>\n\nThis optional link is not verified by Force Sub.", kb([
                 [("REMOVE", f"settings:forcejoin_other_remove:{index}")],
-                [("《 BACK", "settings:forcejoin")],
+                [("❮❮ BACK", "settings:forcejoin")],
             ]))
     elif action == "forcejoin_other_links":
         cfg = await db.settings.find_one({"key": "force_join"}) or {}
@@ -1111,7 +1147,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 continue
             label = str(item.get("button_text") or "Other")[:64]
             rows.append([(label, f"settings:forcejoin_other_remove:{index}")])
-        rows.append([("《 BACK", "settings:forcejoin")])
+        rows.append([("❮❮ BACK", "settings:forcejoin")])
         await edit_page(query, "FORCE SUB OTHER LINKS\n\nAdd optional links shown only while at least one required chat is still pending. These links are never verified.", kb(rows))
     elif action == "forcejoin_other_add":
         await state.set_state(SettingInput.waiting)
@@ -1154,7 +1190,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             if isinstance(item, dict):
                 label = str(item.get("button_text") or "Other")[:64]
                 rows.append([(label, f"settings:forcejoin_other_remove:{item_index}")])
-        rows.append([("《 BACK", "settings:forcejoin")])
+        rows.append([("❮❮ BACK", "settings:forcejoin")])
         await edit_page(query, "FORCE SUB OTHER LINKS\n\nThese optional links are shown only while a required chat is pending.", kb(rows))
     elif action == "forcejoin_message": await render_forcejoin_message(query)
     elif action == "forcejoin_message_edit":
@@ -1197,7 +1233,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "forcejoin_remove":
         channels = await effective_force_join_channels(database, settings)
         rows = [[(channel, f"settings:forcejoin_del:{i}")] for i, channel in enumerate(channels)]
-        rows.append([("《 BACK", "settings:forcejoin")])
+        rows.append([("❮❮ BACK", "settings:forcejoin")])
         await edit_page(query, "REMOVE FORCE SUB CHANNEL\nSelect a channel to remove.", kb(rows))
     elif action.startswith("forcejoin_del:"):
         channels = await effective_force_join_channels(database, settings)
@@ -1242,9 +1278,11 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start": await render_start(query, db)
     elif action == "start_text": await render_start_text(query)
     elif action == "start_text_edit":
-        await show_input_prompt(query, state, "start_text",
-            "Send the new Caption text.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — link to the owner\n<code>{hindi_anime}</code> — link to Lexi Anime Hindi",
-            "start_text")
+        await show_input_prompt(
+            query, state, "start_text", "Send The New Caption text.", "start_text",
+            panel_chat_id=query.message.chat.id if query.message else None,
+            panel_message_id=query.message.message_id if query.message else None,
+        )
     elif action == "start_text_see":
         import re
         from html import unescape
@@ -1267,7 +1305,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start_text_default":
         await patch(db, "start_message", {"text": DEFAULT_START_TEXT}, {"enabled": True})
         preview = plain_preview(DEFAULT_START_TEXT).replace("{user_mention}", query.from_user.full_name if query.from_user else "User")
-        await query.answer("✅ Start caption restored to the recommended default.\n\n" + preview[:130], show_alert=True)
+        await query.answer("✨ Successfully Restored to default.", show_alert=True)
         await render_start_text(query)
         return
     elif action == "start_button":
@@ -1283,17 +1321,23 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         text_value = cfg.get(f"button{index}_text", cfg.get("button_text", "") if index == "1" else "")
         url_value = cfg.get(f"button{index}_url", cfg.get("button_url", "") if index == "1" else "")
         if enabled:
-            await patch(db, "start_message", {key: False}, {"enabled": True, "text": DEFAULT_START_TEXT})
+            unset_fields = {f"button{index}_text": "", f"button{index}_url": ""}
+            if index == "1":
+                unset_fields.update({"button_text": "", "button_url": "", "button_enabled": ""})
+            await db.settings.update_one(
+                {"key": "start_message"},
+                {"$set": {key: False}, "$unset": unset_fields},
+            )
             await render_start_button(query, db)
         else:
             await state.set_state(SettingInput.waiting)
             await state.update_data(field=f"start_button_{index}_text", button_index=index, panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="start")
             if query.message:
-                await tracked_answer(query.message, state, f"Send text for Start Button {index}.")
+                await tracked_answer(query.message, state, f"Send text for Start Message Button {index}.")
     elif action in ("start_button_1", "start_button_2", "start_button_3", "start_button_4"):
         index = action.rsplit("_", 1)[1]
         await state.set_state(SettingInput.waiting); await state.update_data(field=f"start_button_{index}_text", button_index=index, panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="start")
-        if query.message: await tracked_answer(query.message, state, f"Send text for Start Button {index}.")
+        if query.message: await tracked_answer(query.message, state, f"Send text for Start Message Button {index}.")
     elif action in ("start_button_text", "start_button_link"):
         await state.set_state(SettingInput.waiting); await state.update_data(field="start_button_1_text" if action == "start_button_text" else "start_button_1_link", button_index="1", panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="start")
         if query.message: await tracked_answer(query.message, state, "Send text for Start Button 1." if action == "start_button_text" else "Now send the URL for Start Button 1.")
@@ -1565,7 +1609,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             await query.answer("Only the owner can remove moderators.", show_alert=True); return
         mods = await db.moderators.find({}).sort("user_id", 1).to_list(length=3)
         rows = [[(m.get("first_name") or f"User {m['user_id']}", f"settings:mod_del:{m['user_id']}")] for m in mods]
-        rows.append([("《 BACK", "settings:mods")])
+        rows.append([("❮❮ BACK", "settings:mods")])
         await edit_page(query, "REMOVE MODERATOR\nSelect the moderator you want to remove.", kb(rows))
     elif action.startswith("mod_del:"):
         if not is_owner(query.from_user.id, settings):
@@ -1588,7 +1632,7 @@ async def handle_button_settings_reply_keyboard(message: Message, state: FSMCont
     value = (message.text or "").strip()
     data = await state.get_data()
     kind = data.get("button_panel_kind")
-    if value == "《 BACK" and kind in ("start", "invalid"):
+    if value == "❮❮ BACK" and kind in ("start", "invalid"):
         await remove_temporary_prompts(message.bot, data)
         await clear_state_preserving_prompts(state)
         # Return directly to the parent settings page while removing the reply keyboard.
@@ -1596,13 +1640,13 @@ async def handle_button_settings_reply_keyboard(message: Message, state: FSMCont
             parent_text = format_settings_page("START\nCustomize your bot's start message using the following options.")
             parent_kb = kb([
                 [("BUTTON", "settings:start_button"), ("CAPTION", "settings:start_text")],
-                [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about")], [("《 BACK", "settings:home")],
+                [("MEDIA", "settings:start_poster"), ("ABOUT", "settings:start_about")], [("❮❮ BACK", "settings:home")],
             ])
         else:
             parent_text = format_settings_page("INVALID\nSet a response for users who send normal messages to the bot.")
             parent_kb = kb([
                 [("DISABLE/ENABLE", "settings:invalid_toggle")], [("TEXT", "settings:invalid_text"), ("BUTTON", "settings:invalid_button")],
-                [("MEDIA", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")], [("《 BACK", "settings:home")],
+                [("MEDIA", "settings:invalid_poster"), ("ABOUT", "settings:invalid_about_toggle")], [("❮❮ BACK", "settings:home")],
             ])
         parent = await message.answer(parent_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove(), link_preview_options={"is_disabled": True})
         try:
@@ -1644,7 +1688,7 @@ async def send_button_settings_reply_panel(message: Message, db, kind: str, pane
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     title = "START BUTTONS" if is_start else "INVALID BUTTONS"
     body = "Customize buttons shown with your start message." if is_start else "Customize buttons shown with invalid items."
-    markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=f"1 {status1}"), KeyboardButton(text=f"2 {status2}")], [KeyboardButton(text=f"3 {status3}")], [KeyboardButton(text="《 BACK")]], resize_keyboard=True)
+    markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=f"1 {status1}"), KeyboardButton(text=f"2 {status2}")], [KeyboardButton(text=f"3 {status3}")], [KeyboardButton(text="❮❮ BACK")]], resize_keyboard=True)
     page_text = format_settings_page(f"{title}\n{body}\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}")
     edited = False
     if panel_chat_id and panel_message_id:
@@ -1669,7 +1713,7 @@ async def cancel_setting_input(message: Message, state: FSMContext):
     # Reply first; remove the user's command only after the cancellation UI exists.
     await tracked_answer(message, state,
         "Input cancelled. Use Back to return to settings.",
-        reply_markup=kb([[("《 BACK", f"settings:{back_action}")]]),
+        reply_markup=kb([[("❮❮ BACK", f"settings:{back_action}")]]),
     )
     try:
         await message.delete()
@@ -2022,7 +2066,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 ])
             if len(current) < 2:
                 rows.append([InlineKeyboardButton(text="✚", callback_data="settings:custom_button_add")])
-            rows.append([InlineKeyboardButton(text="《 BACK", callback_data="settings:home")])
+            rows.append([InlineKeyboardButton(text="❮❮ BACK", callback_data="settings:home")])
             await refresh_settings_panel(
                 message.bot, panel_chat, panel_message,
                 "Custom Button:\n\nYou can add a custom buttons to your files.",
@@ -2211,7 +2255,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             return
         await clear_state_preserving_prompts(state)
         await refresh_media_parent_panel(message.bot, data.get("panel_chat_id"), data.get("panel_message_id"), "start", db, settings)
-        await tracked_answer(message, state, "✨ Start media added successfully.")
+        await tracked_answer(message, state, "✨ Start Message media added successfully.")
         return
     if field == "poster":
         if message.animation:
@@ -2247,7 +2291,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     if field.startswith("start_button_") and field.endswith("_text"):
         index = field.split("_")[2]
         await state.update_data(button_text=value, field=f"start_button_{index}_link")
-        await tracked_answer(message, state, f"Now send the URL for Start Button {index}.")
+        await tracked_answer(message, state, f"Now send the URL for Start Message Button {index}.")
         return
     if field.startswith("start_button_") and field.endswith("_link"):
         normalized_url = normalize_http_url(value)
@@ -2260,7 +2304,10 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         await patch(db, "start_message", {f"button{index}_text": prev.get("button_text", ""), f"button{index}_url": value, f"button{index}_enabled": True}, {"enabled": True, "text": DEFAULT_START_TEXT})
         await refresh_button_panel(message.bot, prev.get("panel_chat_id"), prev.get("panel_message_id"), db, "start")
         await clear_state_preserving_prompts(state)
-        await state.update_data(button_panel_kind=prev.get("panel_kind"), button_panel_chat_id=prev.get("button_panel_chat_id"), button_panel_message_id=prev.get("button_panel_message_id"))
+        await message.answer(
+            f"<i>✨ Start Message Button {index} added successfully.</i>",
+            parse_mode="HTML",
+        )
         return
     if field.startswith("invalid_button_") and field.endswith("_text"):
         index = field.split("_")[2]
@@ -2282,8 +2329,26 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
     if field == "start_text":
         value = formatted_input_text(message, value)
         await patch(db, "start_message", {"text": value}, {"enabled": True})
-        await finish_input_panel(message, state, "CAPTION", "start_text")
+        await remove_input_prompt(message.bot, data)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        if data.get("panel_chat_id") and data.get("panel_message_id"):
+            await refresh_settings_panel(
+                message.bot, data["panel_chat_id"], data["panel_message_id"],
+                start_caption_page_text(),
+                kb([
+                    [("EDIT", "settings:start_text_edit"), ("SEE", "settings:start_text_see")],
+                    [("DEFAULT", "settings:start_text_default")],
+                    [("❮❮ BACK", "settings:start")],
+                ]),
+            )
         await clear_state_preserving_prompts(state)
+        await message.answer(
+            "<i>✨ Successfully Updated New Start Message Caption.</i>",
+            parse_mode="HTML",
+        )
         return
     elif field == "start_button_text":
         await patch(db, "start_message", {"button_text": value, "button_enabled": True}, {"enabled": True, "text": DEFAULT_START_TEXT, "button_url": "", "about_enabled": True})
@@ -2335,7 +2400,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 [("DISABLE" if enabled else "ENABLE", "settings:after_toggle")],
                 [("DELETE POST BUTTON: " + callback_status, "settings:after_callback_toggle")],
                 [("TEXT", "settings:after_text")],
-                [("《 BACK", "settings:auto")],
+                [("❮❮ BACK", "settings:auto")],
             ]),
         )
         await tracked_answer(message, state, "✨ After Delete callback button saved successfully.")
