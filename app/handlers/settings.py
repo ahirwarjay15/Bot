@@ -329,6 +329,14 @@ async def refresh_media_parent_panel(bot, chat_id, message_id, kind, db, setting
             media_rows[0].append(("REMOVE", "settings:start_poster_remove"))
         media_rows.append([("❮❮ BACK", "settings:start")])
         markup = kb(media_rows)
+    elif kind == "invalid_media":
+        cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
+        text = "MEDIA\n\n<i>Include an image or GIF with your Invalid Message.</i>"
+        media_rows = [[("✚ ADD", "settings:poster_add")]]
+        if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
+            media_rows[0].append(("REMOVE", "settings:poster_remove"))
+        media_rows.append([("❮❮ BACK", "settings:invalid")])
+        markup = kb(media_rows)
     else:
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
         caption = cfg.get("text")
@@ -491,9 +499,6 @@ async def render_forcejoin_message(query):
     ]))
 
 
-INVALID_VARIABLES = START_VARIABLES
-
-
 def invalid_caption_page_text():
     variables = "\\n".join(
         f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
@@ -531,6 +536,7 @@ START_VARIABLES = (
     ("{owner}", "Owner link"), ("{anime}", "Lexi Anime link"),
     ("{hindi_anime}", "Lexi Anime Hindi link"),
 )
+INVALID_VARIABLES = START_VARIABLES
 
 
 def start_caption_page_text():
@@ -595,11 +601,11 @@ async def refresh_button_panel(bot, chat_id, message_id, db, kind):
     status2 = "ON ✅" if cfg.get("button2_enabled", False) else "OFF ❌"
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     status4 = "ON ✅" if cfg.get("button4_enabled", False) else "OFF ❌"
-    title = "START BUTTONS" if is_start else "INVALID BUTTONS"
+    title = "START BUTTONS" if is_start else "INVALID MESSAGE BUTTONS"
     back = "settings:start" if is_start else "settings:invalid"
     prefix = "start" if is_start else "invalid"
     page_text = format_settings_page(
-        f"{title}\nCustomize buttons shown with {'your start message' if is_start else 'invalid items'}.\n\n"
+        f"{title}\n{'Customize buttons shown with your start message.' if is_start else 'Customize buttons shown with your Invalid Message.'}\n\n"
         f"Button 1: {status1}\nButton 2: {status2}\nButton 3: {status3}\nButton 4: {status4}"
     )
     keyboard = kb([
@@ -1318,7 +1324,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         )
         await show_input_prompt(
             query, state, "start_text",
-            "Send The New Caption text.\\n\\n<i>Available variables (tap any code to copy):</i>\\n" + start_variables,
+            "<i>Send The New Caption text.</i>\\n\\n<i>Available variables (tap any code to copy):</i>\\n" + start_variables,
             "start_text",
             panel_chat_id=query.message.chat.id if query.message else None,
             panel_message_id=query.message.message_id if query.message else None,
@@ -1540,7 +1546,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         )
         await show_input_prompt(
             query, state, "invalid_text",
-            "Send The New Caption text.\\n\\n<i>Available variables (tap any code to copy):</i>\\n" + invalid_variables,
+            "<i>Send The New Caption text.</i>\\n\\n<i>Available variables (tap any code to copy):</i>\\n" + invalid_variables,
             "invalid_text",
             panel_chat_id=query.message.chat.id if query.message else None,
             panel_message_id=query.message.message_id if query.message else None,
@@ -2344,8 +2350,14 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             await tracked_answer(message, state, "Only GIFs and images are supported. Send a photo or GIF.")
             return
         await clear_state_preserving_prompts(state)
-        await refresh_media_parent_panel(message.bot, data.get("panel_chat_id"), data.get("panel_message_id"), "invalid", db, settings)
-        await tracked_answer(message, state, "✨ Invalid media added successfully.")
+        await remove_temporary_prompts(message.bot, data)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        await state.clear()
+        await refresh_media_parent_panel(message.bot, data.get("panel_chat_id"), data.get("panel_message_id"), "invalid_media", db, settings)
+        await tracked_answer(message, state, "<i>✨ Invalid Message media added successfully.</i>", parse_mode="HTML")
         return
     if not value:
         await tracked_answer(message, state, "Please send a non-empty value.")
@@ -2433,7 +2445,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             pass
         await refresh_button_panel(message.bot, previous.get("panel_chat_id"), previous.get("panel_message_id"), db, "invalid")
         await state.clear()
-        await message.answer(f"<i>✨ Invalid Message Button {index} added successfully.</i>", parse_mode="HTML")
+        await tracked_answer(message, state, f"<i>✨ Invalid Message Button {index} added successfully.</i>", parse_mode="HTML")
         return
     if field == "start_text":
         value = formatted_input_text(message, value)
