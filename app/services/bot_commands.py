@@ -39,15 +39,17 @@ MODERATOR_COMMANDS = [
     BotCommand(command="setshortener", description="Set shortener configuration"),
 ]
 
-# Owners configured through Render environment variables get every available
-# operational command plus owner-only moderator management and database export.
-OWNER_COMMANDS = [
-    *MODERATOR_COMMANDS,
+# All available bot commands are visible to both owners and moderators.
+# Authorization remains enforced by each command handler.
+MODERATOR_COMMANDS.extend([
     BotCommand(command="addmod", description="Add a moderator (owner only)"),
     BotCommand(command="delmod", description="Remove a moderator (owner only)"),
     BotCommand(command="export", description="Export the complete database"),
     BotCommand(command="exportfiles", description="Export file records"),
-]
+])
+
+# Owners and moderators share the complete command menu.
+OWNER_COMMANDS = MODERATOR_COMMANDS
 
 
 async def set_user_commands(bot, user_id: int) -> None:
