@@ -500,14 +500,7 @@ async def render_forcejoin_message(query):
 
 
 def invalid_caption_page_text():
-    variables = "\n".join(
-        f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
-        for token, description in INVALID_VARIABLES
-    )
-    return (
-        "CAPTION\n\n<i>Customize your bot's Invalid Message Caption.</i>\n\n"
-        "<i>Available variables (tap any code to copy):</i>\n" + variables
-    )
+    return "<b>CAPTION</b>\n\n<i>Customize bot's Invalid Message Caption.</i>"
 
 
 async def render_invalid_text(query):
@@ -540,14 +533,7 @@ INVALID_VARIABLES = START_VARIABLES
 
 
 def start_caption_page_text():
-    variables = "\n".join(
-        f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
-        for token, description in START_VARIABLES
-    )
-    return (
-        "CAPTION\n\n<i>Customize your bot's start message Caption.</i>\n\n"
-        "<i>Available variables (tap any code to copy):</i>\n" + variables
-    )
+    return "<b>CAPTION</b>\n\n<i>Customize bot's start message Caption.</i>"
 
 
 async def render_start(query, db):
