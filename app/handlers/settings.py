@@ -344,9 +344,9 @@ async def refresh_media_parent_panel(bot, chat_id, message_id, kind, db, setting
         media_status = "Added ✅" if cfg.get("poster_file_id") or cfg.get("poster_photo_id") else "None ❌"
         about_status = "Enabled ✅" if cfg.get("about_enabled", False) else "Disabled ❌"
         text = (
-            "INVALID MESSAGE\\n\\n"
-            "<i>Customize your bot's Invalid Message using the following options.</i>\\n\\n"
-            f"<i>Caption: {caption_status}\\nMedia: {media_status}\\nAbout: {about_status}</i>"
+            "INVALID MESSAGE\n\n"
+            "<i>Customize your bot's Invalid Message using the following options.</i>\n\n"
+            f"<i>Caption: {caption_status}\nMedia: {media_status}\nAbout: {about_status}</i>"
         )
         markup = kb([
             [("CAPTION", "settings:invalid_text"), ("MEDIA", "settings:invalid_poster")],
@@ -500,13 +500,13 @@ async def render_forcejoin_message(query):
 
 
 def invalid_caption_page_text():
-    variables = "\\n".join(
+    variables = "\n".join(
         f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
         for token, description in INVALID_VARIABLES
     )
     return (
-        "CAPTION\\n\\n<i>Customize your bot's Invalid Message Caption.</i>\\n\\n"
-        "<i>Available variables (tap any code to copy):</i>\\n" + variables
+        "CAPTION\n\n<i>Customize your bot's Invalid Message Caption.</i>\n\n"
+        "<i>Available variables (tap any code to copy):</i>\n" + variables
     )
 
 
@@ -837,9 +837,9 @@ async def render_invalid(query, db):
     media_status = "Added ✅" if cfg.get("poster_file_id") or cfg.get("poster_photo_id") else "None ❌"
     about_status = "Enabled ✅" if cfg.get("about_enabled", False) else "Disabled ❌"
     text = (
-        "INVALID MESSAGE\\n\\n"
-        "<i>Customize your bot's Invalid Message using the following options.</i>\\n\\n"
-        f"<i>Caption: {caption_status}\\nMedia: {media_status}\\nAbout: {about_status}</i>"
+        "INVALID MESSAGE\n\n"
+        "<i>Customize your bot's Invalid Message using the following options.</i>\n\n"
+        f"<i>Caption: {caption_status}\nMedia: {media_status}\nAbout: {about_status}</i>"
     )
     await edit_page(query, text, kb([
         [("CAPTION", "settings:invalid_text"), ("MEDIA", "settings:invalid_poster")],
@@ -854,9 +854,9 @@ async def render_invalid_button(query, db):
         for i in range(1, 5)
     }
     text = (
-        "INVALID MESSAGE BUTTONS\\n\\n"
-        "<i>Customize buttons shown with your Invalid Message.</i>\\n\\n"
-        + "\\n".join(f"Button {i}: {statuses[str(i)]}" for i in range(1, 5))
+        "INVALID MESSAGE BUTTONS\n\n"
+        "<i>Customize buttons shown with your Invalid Message.</i>\n\n"
+        + "\n".join(f"Button {i}: {statuses[str(i)]}" for i in range(1, 5))
     )
     await edit_page(query, text, kb([
         [(f"1 {statuses['1']}", "settings:invalid_button_toggle:1"), (f"2 {statuses['2']}", "settings:invalid_button_toggle:2")],
@@ -871,7 +871,7 @@ async def render_poster(query, db):
     media_buttons = [("✚ ADD", "settings:poster_add")]
     if cfg.get("poster_file_id") or cfg.get("poster_photo_id"):
         media_buttons.append(("REMOVE", "settings:poster_remove"))
-    await edit_page(query, "MEDIA\\n\\n<i>Include an image or GIF with your Invalid Message.</i>", kb([
+    await edit_page(query, "MEDIA\n\n<i>Include an image or GIF with your Invalid Message.</i>", kb([
         media_buttons,
         [("❮❮ BACK", "settings:invalid")],
     ]))
@@ -1318,13 +1318,13 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start": await render_start(query, db)
     elif action == "start_text": await render_start_text(query)
     elif action == "start_text_edit":
-        start_variables = "\\n".join(
+        start_variables = "\n".join(
             f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
             for token, description in START_VARIABLES
         )
         await show_input_prompt(
             query, state, "start_text",
-            "<i>Send The New Caption text.</i>\\n\\n<i>Available variables (tap any code to copy):</i>\\n" + start_variables,
+            "<i>Send The New Caption text.</i>\n\n<i>Available variables (tap any code to copy):</i>\n" + start_variables,
             "start_text",
             panel_chat_id=query.message.chat.id if query.message else None,
             panel_message_id=query.message.message_id if query.message else None,
@@ -1540,13 +1540,13 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await render_invalid(query, db)
     elif action == "invalid_text": await render_invalid_text(query)
     elif action == "invalid_text_edit":
-        invalid_variables = "\\n".join(
+        invalid_variables = "\n".join(
             f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
             for token, description in INVALID_VARIABLES
         )
         await show_input_prompt(
             query, state, "invalid_text",
-            "<i>Send The New Caption text.</i>\\n\\n<i>Available variables (tap any code to copy):</i>\\n" + invalid_variables,
+            "<i>Send The New Caption text.</i>\n\n<i>Available variables (tap any code to copy):</i>\n" + invalid_variables,
             "invalid_text",
             panel_chat_id=query.message.chat.id if query.message else None,
             panel_message_id=query.message.message_id if query.message else None,
@@ -1628,7 +1628,8 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             {"$unset": {"poster_file_id": "", "poster_photo_id": ""}},
             upsert=True,
         )
-        await query.answer("✨ Successfully removed your bot Invalid Message poster.", show_alert=True)
+        if query.message:
+            await tracked_answer(query.message, state, "✨ Successfully removed your bot Invalid Message poster.")
         await render_poster(query, db)
     elif action == "invalid_about": await render_about(query, db)
     elif action == "invalid_about_toggle":
@@ -2339,7 +2340,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             pass
         await state.clear()
         await refresh_media_parent_panel(message.bot, data.get("panel_chat_id"), data.get("panel_message_id"), "start", db, settings)
-        await message.answer("<i>✨ Start Message media added successfully.</i>", parse_mode="HTML")
+        await tracked_answer(message, state, "<i>✨ Start Message media added successfully.</i>", parse_mode="HTML")
         return
     if field == "poster":
         if message.animation:
@@ -2407,7 +2408,8 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
             pass
         await refresh_button_panel(message.bot, prev.get("panel_chat_id"), prev.get("panel_message_id"), db, "start")
         await state.clear()
-        await message.answer(
+        await tracked_answer(
+            message, state,
             f"<i>✨ Start Message Button {index} added successfully.</i>",
             parse_mode="HTML",
         )
@@ -2466,7 +2468,8 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 ]),
             )
         await state.clear()
-        await message.answer(
+        await tracked_answer(
+            message, state,
             "<i>✨ Successfully Updated New Start Message Caption.</i>",
             parse_mode="HTML",
         )
@@ -2545,7 +2548,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
                 ]),
             )
         await state.clear()
-        await message.answer("<i>✨ Successfully Updated New Invalid Message Caption.</i>", parse_mode="HTML")
+        await tracked_answer(message, state, "<i>✨ Successfully Updated New Invalid Message Caption.</i>", parse_mode="HTML")
         return
     elif field == "invalid_button_text":
         await state.update_data(button_text=value, field="invalid_button_link")
