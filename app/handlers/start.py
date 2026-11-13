@@ -11,6 +11,7 @@ from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message,InlineKeyboardMarkup,InlineKeyboardButton,CallbackQuery
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
+from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
 from app.database.files import FileRepository
 from app.services.delivery import deliver_reference,deliver_batch,claim_delivery_request,finish_delivery_request
@@ -915,6 +916,22 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         else:
             await message.answer(text, reply_markup=markup, parse_mode="HTML")
     await delete_start_command_after(message, database.db)
+
+@router.message(F.text.startswith("/"))
+async def invalid_command_for_users(message: Message, settings: Settings, database):
+    """Send Invalid Message for user commands other than /start; keep admin commands working."""
+    user = message.from_user
+    if not user:
+        raise SkipHandler
+    command = (message.text or "").split(maxsplit=1)[0].split("@", 1)[0].lower()
+    if command == "/start":
+        raise SkipHandler
+    if await is_owner_or_moderator(database.db, user.id, settings):
+        raise SkipHandler
+    # Reuse the same response logic as ordinary non-command messages.
+    from app.handlers.misc import invalid_post
+    await invalid_post(message, settings, database)
+
 
 @router.callback_query(F.data == "afterdelete:remove")
 async def delete_after_delete_post(query: CallbackQuery):
