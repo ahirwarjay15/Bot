@@ -581,7 +581,7 @@ async def render_start_button(query, db):
     }
     text = (
         "START BUTTONS\n\nCustomize buttons shown with your start message.\n\n"
-        + "\n".join(f"Button {i}: {statuses[str(i)]}" for i in range(1, 5))
+        + "<i>" + "\n".join(f"Button {i}: {statuses[str(i)]}" for i in range(1, 5)) + "</i>"
     )
     await edit_page(query, text, kb([
         [(f"1 {statuses['1']}", "settings:start_button_toggle:1"), (f"2 {statuses['2']}", "settings:start_button_toggle:2")],
