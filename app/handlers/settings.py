@@ -1312,8 +1312,14 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
     elif action == "start": await render_start(query, db)
     elif action == "start_text": await render_start_text(query)
     elif action == "start_text_edit":
+        start_variables = "\\n".join(
+            f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
+            for token, description in START_VARIABLES
+        )
         await show_input_prompt(
-            query, state, "start_text", "Send The New Caption text.", "start_text",
+            query, state, "start_text",
+            "Send The New Caption text.\\n\\n<i>Available variables (tap any code to copy):</i>\\n" + start_variables,
+            "start_text",
             panel_chat_id=query.message.chat.id if query.message else None,
             panel_message_id=query.message.message_id if query.message else None,
         )
@@ -1528,28 +1534,40 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         await render_invalid(query, db)
     elif action == "invalid_text": await render_invalid_text(query)
     elif action == "invalid_text_edit":
-        await show_input_prompt(query, state, "invalid_text",
-            "Send the new Invalid Caption text. Telegram bold, italic, quotes and monospace formatting will be preserved.\n\n<code>{bot_mention}</code> — mention your bot\n<code>{mention}</code> — mention the user\n<code>{owner}</code> — owner link\n<code>{hindi_anime}</code> — Lexi Anime Hindi link",
-            "invalid")
+        invalid_variables = "\\n".join(
+            f"<code>{html.escape(token)}</code><i> — {html.escape(description)}</i>"
+            for token, description in INVALID_VARIABLES
+        )
+        await show_input_prompt(
+            query, state, "invalid_text",
+            "Send The New Caption text.\\n\\n<i>Available variables (tap any code to copy):</i>\\n" + invalid_variables,
+            "invalid_text",
+            panel_chat_id=query.message.chat.id if query.message else None,
+            panel_message_id=query.message.message_id if query.message else None,
+        )
     elif action == "invalid_text_see":
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
         me = await get_bot_identity(query.bot)
+        user = query.from_user
         preview = str(cfg.get("text") or DEFAULT_INVALID)
-        user_label = query.from_user.full_name if query.from_user else "User"
-        for token, replacement in {
+        values = {
             "{bot_mention}": me.full_name or me.username or "Bot",
-            "{mention}": user_label, "{user_mention}": user_label, "{user}": user_label,
-            "{owner}": "Lexi", "{hindi_anime}": "Lexi Anime Hindi",
-        }.items():
+            "{bot_name}": me.full_name or me.first_name or "Bot",
+            "{bot}": me.full_name or me.username or "Bot",
+            "{mention}": user.full_name if user else "User",
+            "{user_mention}": user.full_name if user else "User",
+            "{user}": user.full_name if user else "User",
+            "{first_name}": user.first_name if user else "User",
+            "{last_name}": user.last_name if user else "",
+            "{owner}": "Lexi", "{anime}": "Lexi Anime", "{hindi_anime}": "Lexi Anime Hindi",
+        }
+        for token, replacement in values.items():
             preview = preview.replace(token, replacement)
         await query.answer(plain_preview(preview)[:190], show_alert=True)
         return
     elif action == "invalid_text_default":
-        await patch(db, "invalid_post", {"text": DEFAULT_INVALID}, {"enabled": False, "about_enabled": False})
-        me = await get_bot_identity(query.bot)
-        preview = DEFAULT_INVALID.replace("{mention}", query.from_user.full_name if query.from_user else "User")
-        preview = preview.replace("{bot_mention}", me.full_name or me.username or "Bot")
-        await query.answer("✅ Invalid-message text restored to the recommended default.\n\n" + plain_preview(preview)[:130], show_alert=True)
+        await patch(db, "invalid_post", {"text": DEFAULT_INVALID}, {"enabled": True, "about_enabled": False})
+        await query.answer("✨ Successfully Restored to default.", show_alert=True)
         await render_invalid_text(query)
         return
     elif action == "invalid_button":
@@ -1562,16 +1580,26 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         cfg = await db.settings.find_one({"key": "invalid_post"}) or {}
         key = f"button{index}_enabled"
         enabled = cfg.get(key, bool(cfg.get("button_text") and cfg.get("button_url")) if index == "1" else False)
-        text_value = cfg.get(f"button{index}_text", cfg.get("button_text", "") if index == "1" else "")
-        url_value = cfg.get(f"button{index}_url", cfg.get("button_url", "") if index == "1" else "")
         if enabled:
-            await patch(db, "invalid_post", {key: False}, {"enabled": False})
+            unset_fields = {f"button{index}_text": "", f"button{index}_url": ""}
+            if index == "1":
+                unset_fields.update({"button_text": "", "button_url": ""})
+            await db.settings.update_one(
+                {"key": "invalid_post"},
+                {"$set": {key: False}, "$unset": {name: "" for name in unset_fields}},
+                upsert=True,
+            )
             await render_invalid_button(query, db)
         else:
             await state.set_state(SettingInput.waiting)
-            await state.update_data(field=f"invalid_button_{index}_text", button_index=index, panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="invalid")
+            await state.update_data(
+                field=f"invalid_button_{index}_text", button_index=index,
+                panel_chat_id=query.message.chat.id if query.message else None,
+                panel_message_id=query.message.message_id if query.message else None,
+                panel_kind="invalid",
+            )
             if query.message:
-                await tracked_answer(query.message, state, f"Send text for Invalid Button {index}.")
+                await tracked_answer(query.message, state, f"Send text for Invalid Message Button {index}.")
     elif action in ("invalid_button_1", "invalid_button_2", "invalid_button_3", "invalid_button_4"):
         index = action.rsplit("_", 1)[1]
         await state.set_state(SettingInput.waiting); await state.update_data(field=f"invalid_button_{index}_text", button_index=index, panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="invalid")
@@ -1581,11 +1609,20 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         if query.message: await tracked_answer(query.message, state, "Send text for Invalid Button 1." if action == "invalid_button_text" else "Now send the URL for Invalid Button 1.")
     elif action == "invalid_poster": await render_poster(query, db)
     elif action == "poster_add":
-        await state.set_state(SettingInput.waiting); await state.update_data(field="poster", panel_chat_id=query.message.chat.id if query.message else None, panel_message_id=query.message.message_id if query.message else None, panel_kind="invalid")
-        if query.message: await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new invalid itemer here.")
+        await state.set_state(SettingInput.waiting)
+        await state.update_data(
+            field="poster", panel_chat_id=query.message.chat.id if query.message else None,
+            panel_message_id=query.message.message_id if query.message else None, panel_kind="invalid_media",
+        )
+        if query.message:
+            await tracked_answer(query.message, state, "Only GIFs and images are supported. Send the new Invalid Message media here.")
     elif action == "poster_remove":
-        await db.settings.update_one({"key": "invalid_post"}, {"$unset": {"poster_file_id": "", "poster_photo_id": ""}}, upsert=True)
-        if query.message: await tracked_answer(query.message, state, "✨ Invalid itemer removed successfully.")
+        await db.settings.update_one(
+            {"key": "invalid_post"},
+            {"$unset": {"poster_file_id": "", "poster_photo_id": ""}},
+            upsert=True,
+        )
+        await query.answer("✨ Successfully removed your bot Invalid Message poster.", show_alert=True)
         await render_poster(query, db)
     elif action == "invalid_about": await render_about(query, db)
     elif action == "invalid_about_toggle":
@@ -2365,20 +2402,38 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         return
     if field.startswith("invalid_button_") and field.endswith("_text"):
         index = field.split("_")[2]
-        await state.update_data(button_text=value, field=f"invalid_button_{index}_link")
-        await tracked_answer(message, state, f"Now send the URL for Invalid Button {index}.")
+        previous = await state.get_data()
+        await remove_temporary_prompts(message.bot, previous)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        await state.update_data(
+            button_text=value, field=f"invalid_button_{index}_link",
+            temporary_prompt_ids=[],
+        )
+        await tracked_answer(message, state, f"Now send the URL for Invalid Message Button {index}.")
         return
     if field.startswith("invalid_button_") and field.endswith("_link"):
         parsed = urlparse(value)
         if parsed.scheme not in ("https", "http") or not parsed.netloc:
-            await tracked_answer(message, state, "Button link must be a valid http/https URL.")
+            await tracked_answer(message, state, "Please send a valid URL, e.g. https://example.com.")
             return
         index = field.split("_")[2]
-        prev = await state.get_data()
-        await patch(db, "invalid_post", {f"button{index}_text": prev.get("button_text", ""), f"button{index}_url": value, f"button{index}_enabled": True}, {"enabled": False})
-        await refresh_button_panel(message.bot, prev.get("panel_chat_id"), prev.get("panel_message_id"), db, "invalid")
-        await clear_state_preserving_prompts(state)
-        await state.update_data(button_panel_kind=prev.get("panel_kind"))
+        previous = await state.get_data()
+        await patch(
+            db, "invalid_post",
+            {f"button{index}_text": previous.get("button_text", ""), f"button{index}_url": value, f"button{index}_enabled": True},
+            {"enabled": True},
+        )
+        await remove_temporary_prompts(message.bot, previous)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        await refresh_button_panel(message.bot, previous.get("panel_chat_id"), previous.get("panel_message_id"), db, "invalid")
+        await state.clear()
+        await message.answer(f"<i>✨ Invalid Message Button {index} added successfully.</i>", parse_mode="HTML")
         return
     if field == "start_text":
         value = formatted_input_text(message, value)
@@ -2461,9 +2516,24 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         return
     elif field == "invalid_text":
         value = formatted_input_text(message, value)
-        await patch(db, "invalid_post", {"text": value}, {"enabled": False, "about_enabled": False})
-        await finish_input_panel(message, state, "INVALID TEXT", "invalid")
-        await clear_state_preserving_prompts(state)
+        await patch(db, "invalid_post", {"text": value}, {"enabled": True, "about_enabled": False})
+        await remove_temporary_prompts(message.bot, data)
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        if data.get("panel_chat_id") and data.get("panel_message_id"):
+            await refresh_settings_panel(
+                message.bot, data["panel_chat_id"], data["panel_message_id"],
+                invalid_caption_page_text(),
+                kb([
+                    [("EDIT", "settings:invalid_text_edit"), ("SEE", "settings:invalid_text_see")],
+                    [("DEFAULT", "settings:invalid_text_default")],
+                    [("❮❮ BACK", "settings:invalid")],
+                ]),
+            )
+        await state.clear()
+        await message.answer("<i>✨ Successfully Updated New Invalid Message Caption.</i>", parse_mode="HTML")
         return
     elif field == "invalid_button_text":
         await state.update_data(button_text=value, field="invalid_button_link")
