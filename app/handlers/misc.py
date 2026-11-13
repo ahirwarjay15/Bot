@@ -50,27 +50,19 @@ def _about_markup():
 
 def _invalid_markup(cfg):
     rows = []
-    button1_text = cfg.get("button1_text", cfg.get("button_text", ""))
-    button1_url = cfg.get("button1_url", cfg.get("button_url", ""))
-    configured_buttons = []
-    if cfg.get("button1_enabled", bool(button1_text and button1_url)) and button1_text and button1_url:
-        configured_buttons.append(InlineKeyboardButton(text=button1_text, url=button1_url))
-    button2_text = cfg.get("button2_text", "")
-    button2_url = cfg.get("button2_url", "")
-    if cfg.get("button2_enabled", False) and button2_text and button2_url:
-        configured_buttons.append(InlineKeyboardButton(text=button2_text, url=button2_url))
-    for index in (3, 4):
-        button_text = cfg.get(f"button{index}_text", "")
-        button_url = cfg.get(f"button{index}_url", "")
-        if cfg.get(f"button{index}_enabled", False) and button_text and button_url:
-            configured_buttons.append(InlineKeyboardButton(text=button_text, url=button_url))
-    rows.extend(configured_buttons[i:i+2] for i in range(0, len(configured_buttons), 2))
-    if cfg.get("about_enabled"):
-        rows.append([InlineKeyboardButton(
-            text=cfg.get("about_button_text", "ᴀʙᴏᴜᴛ"), callback_data="invalid:about"
-        )])
+    for first, second in ((1, 2), (3, 4)):
+        row = []
+        for index in (first, second):
+            text = cfg.get(f"button{index}_text", cfg.get("button_text", "") if index == 1 else "")
+            url = cfg.get(f"button{index}_url", cfg.get("button_url", "") if index == 1 else "")
+            enabled = cfg.get(f"button{index}_enabled", bool(text and url) if index == 1 else False)
+            if enabled and text and url:
+                row.append(InlineKeyboardButton(text=text, url=url))
+        if row:
+            rows.append(row)
+    if cfg.get("about_enabled", False):
+        rows.append([InlineKeyboardButton(text="ᴀʙᴏᴜᴛ", callback_data="invalid:about")])
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
-
 
 async def _edit_about_post(message, text, markup):
     """Update the existing invalid/About post in place, preserving its message ID."""
