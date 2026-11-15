@@ -7,7 +7,7 @@ from pymongo import ASCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 MAX_USERS_PER_DOCUMENT = 100_000
-BANNED_DOCUMENT_ID = "banned-users"
+BANNED_DOCUMENT_ID = ObjectId("000000000000000000000001")
 MIGRATION_ID = "users_chunked_storage_v1"
 
 _BANNED_USER_IDS: set[int] = set()
