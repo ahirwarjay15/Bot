@@ -95,6 +95,8 @@ async def invalid_post(message: Message, settings: Settings, database):
     if not user:
         log.debug("Invalid-post skipped: update has no sender")
         return
+    if message.text and message.text.startswith("/"):
+        return
     log.info(
         "Invalid-post received normal message: chat_type=%s content_type=%s",
         message.chat.type, message.content_type,
