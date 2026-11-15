@@ -64,7 +64,7 @@ def test_settings_buttons_use_small_caps_with_required_exceptions():
     from app.handlers.settings import unicode_buttons
 
     assert unicode_buttons("START TEXT") == "ꜱᴛᴀʀᴛ ᴛᴇxᴛ"
-    assert unicode_buttons("《 BACK") == "《 BACK"
+    assert unicode_buttons("《 BACK") == "《 ʙᴀᴄᴋ"
     assert unicode_buttons("📟 UPDATE CHANNEL") == "📟 UPDATE CHANNEL"
 
 
