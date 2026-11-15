@@ -149,7 +149,7 @@ async def test_join_status_batches_private_pending_requests_into_one_database_qu
     assert missing == ["-100456"]
     assert len(pending.queries) == 1
     assert pending.queries[0][0] == {
-        "_id": {"$in": [-100123, -100456]},
+        "_id": {"$in": [-100456, -100123]},
         "users.id": 42,
     }
 
@@ -219,5 +219,5 @@ async def test_removing_force_sub_chat_revokes_tracked_link_and_deletes_its_obje
         "chat_id": -100123, "invite_link": "https://t.me/+private"
     }]
     assert pending.deleted == {"_id": {"$in": [-100123]}}
-    assert links.deleted == {"channel": "-100123"}
+    assert links.deleted == [{"channel": "-100123"}]
     assert settings.deleted == {"key": "force_join_channel", "channel": "-100123"}
