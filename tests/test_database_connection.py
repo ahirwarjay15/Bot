@@ -6,4 +6,4 @@ def test_active_user_bucket_limit_is_one_lakh():
 
 
 def test_banned_user_storage_uses_one_stable_document():
-    assert BANNED_DOCUMENT_ID == "banned-users"
+    assert str(BANNED_DOCUMENT_ID) == "000000000000000000000001"
