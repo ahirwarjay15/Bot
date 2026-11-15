@@ -815,7 +815,7 @@ def test_optional_other_links_stay_outside_required_chat_verification():
     assert "force_join_capacity_reached" not in settings_source
     assert "force_join_capacity_reached" not in start_source
     # Only the configured verification-required channel list is passed to membership checks.
-    assert "join_status(bot, user.id, channels, database.db)" in start_source
+    assert "join_status(bot, user.id, channels, database.db, channel_configs=channel_configs)" in start_source
 
 
 def test_completed_one_time_migrations_are_removed_from_startup_code():
