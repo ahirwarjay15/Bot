@@ -381,7 +381,7 @@ async def cleanup_expired_pending_join_requests(db, now=None) -> int:
                     "$filter": {
                         "input": {"$ifNull": ["$users", []]},
                         "as": "entry",
-                        "cond": {"$gt": ["$entry.t", cutoff]},
+                        "cond": {"$gt": ["$$entry.t", cutoff]},
                     }
                 }
             }
@@ -1069,7 +1069,7 @@ async def remember_pending_join_request(event, database):
                             "$filter": {
                                 "input": {"$ifNull": ["$users", []]},
                                 "as": "entry",
-                                "cond": {"$ne": ["$entry.id", user_id]},
+                                "cond": {"$ne": ["$$entry.id", user_id]},
                             }
                         },
                         [{"id": user_id, "t": requested_at}],
