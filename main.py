@@ -14,7 +14,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from app.config import get_settings
 from app.database.connection import Database, cleanup_completed_transients
 from app.database.legacy_cleanup import cleanup_legacy_database
-from app.handlers.start import router as start_router, cleanup_expired_pending_join_requests, migrate_force_join_links
+from app.handlers.start import router as start_router, cleanup_expired_pending_join_requests
 from app.handlers.file import router as file_router
 from app.handlers.anime import router as anime_router
 from app.handlers.batch import router as batch_router
@@ -142,8 +142,6 @@ async def main():
         await connect_database_with_retry(database)
         if role in {"all", "polling"}:
             await configure_bot_commands(bot, settings, database.db)
-        if role in {"all", "worker"}:
-            await migrate_force_join_links(bot, database.db)
         if role == "worker":
             await cleanup_legacy_database(bot, database.client, settings.mongodb_db_name)
 
