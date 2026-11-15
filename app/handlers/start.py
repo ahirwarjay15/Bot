@@ -312,33 +312,6 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
     return True
 
 
-async def migrate_force_join_links(bot, db) -> dict:
-    """Migrate legacy Force Sub URLs once; new channels are handled during setup."""
-    migration_id = "force_sub_stable_links_v1"
-    if await db.system_migrations.find_one({"_id": migration_id, "completed": True}):
-        log.info("Force Sub migration already completed; startup scan skipped")
-        return {"migrated": 0, "skipped": 0, "already_completed": True}
-    migrated = 0
-    skipped = 0
-    cursor = db.settings.find({"key": "force_join_channel"})
-    async for channel_cfg in cursor:
-        channel = channel_cfg.get("channel")
-        if not channel:
-            continue
-        if await ensure_force_join_link(bot, db, str(channel), channel_cfg):
-            migrated += 1
-        else:
-            skipped += 1
-    if skipped == 0:
-        await db.system_migrations.update_one(
-            {"_id": migration_id},
-            {"$setOnInsert": {"completed": True, "completed_at": datetime.now(timezone.utc)}},
-            upsert=True,
-        )
-    log.info("Force Sub link migration finished: migrated=%d skipped=%d", migrated, skipped)
-    return {"migrated": migrated, "skipped": skipped}
-
-
 async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
     """Return a public URL or a persisted non-expiring private invite."""
     target = channel_cfg.get("button_url")
