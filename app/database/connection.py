@@ -86,7 +86,15 @@ async def migrate_delivery_storage(db) -> bool:
 async def migrate_pending_join_request_storage(db) -> int:
     """Convert legacy per-user documents into one compact document per chat."""
     migration_id = "pending_join_requests_by_chat_v1"
-    if await db.system_migrations.find_one({"_id": migration_id, "completed": True}):
+    legacy_filter = {
+        "chat_id": {"$exists": True},
+        "user_id": {"$exists": True},
+    }
+    legacy_count = await db.pending_join_requests.count_documents(legacy_filter)
+    if (
+        legacy_count == 0
+        and await db.system_migrations.find_one({"_id": migration_id, "completed": True})
+    ):
         return 0
 
     migrated = 0
