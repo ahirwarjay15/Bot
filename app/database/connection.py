@@ -83,6 +83,87 @@ async def migrate_delivery_storage(db) -> bool:
         raise
 
 
+async def migrate_pending_join_request_storage(db) -> int:
+    """Convert legacy per-user documents into one compact document per chat."""
+    migration_id = "pending_join_requests_by_chat_v1"
+    if await db.system_migrations.find_one({"_id": migration_id, "completed": True}):
+        return 0
+
+    migrated = 0
+    cursor = db.pending_join_requests.find({
+        "chat_id": {"$exists": True},
+        "user_id": {"$exists": True},
+        "requested_at": {"$type": "date"},
+    }).sort("requested_at", 1)
+    async for record in cursor:
+        chat_id = int(record["chat_id"])
+        user_id = int(record["user_id"])
+        requested_at = record["requested_at"]
+        # Replace this user's older entry, retaining a newer timestamp if a
+        # concurrent request has already refreshed it in the compact document.
+        pipeline = [{
+            "$set": {
+                "users": {
+                    "$let": {
+                        "vars": {
+                            "existing": {
+                                "$first": {
+                                    "$filter": {
+                                        "input": {"$ifNull": ["$users", []]},
+                                        "as": "entry",
+                                        "cond": {"$eq": ["$entry.id", user_id]},
+                                    }
+                                }
+                            }
+                        },
+                        "in": {
+                            "$concatArrays": [
+                                {
+                                    "$filter": {
+                                        "input": {"$ifNull": ["$users", []]},
+                                        "as": "entry",
+                                        "cond": {"$ne": ["$entry.id", user_id]},
+                                    }
+                                },
+                                [{
+                                    "id": user_id,
+                                    "t": {
+                                        "$cond": [
+                                            {"$gt": ["$existing.t", requested_at]},
+                                            "$existing.t",
+                                            requested_at,
+                                        ]
+                                    },
+                                }],
+                            ]
+                        },
+                    }
+                }
+            }
+        }]
+        await db.pending_join_requests.update_one(
+            {"_id": chat_id}, pipeline, upsert=True
+        )
+        migrated += 1
+
+    # Only after every legacy row has been copied successfully, remove the old format.
+    await db.pending_join_requests.delete_many({
+        "chat_id": {"$exists": True},
+        "user_id": {"$exists": True},
+    })
+    await db.system_migrations.update_one(
+        {"_id": migration_id},
+        {"$set": {
+            "completed": True,
+            "completed_at": datetime.now(timezone.utc),
+            "migrated_records": migrated,
+        }},
+        upsert=True,
+    )
+    logger.info("Pending join request storage migration complete; legacy records=%s", migrated)
+    return migrated
+
+
 async def cleanup_completed_transients(db) -> dict:
     """Remove completed temporary records left by older versions; keep active work intact."""
     result = {}
@@ -174,6 +255,7 @@ class Database:
                 ):
                     await self.db.settings.drop_index(index_name)
             await self.db.moderators.create_index([("user_id", ASCENDING)], unique=True)
+            await migrate_pending_join_request_storage(self.db)
             await self.db.tasks.create_index([("status", ASCENDING), ("deadline", ASCENDING)])
             await self.db.tasks.create_index([("request_key", ASCENDING)], unique=True, sparse=True)
             await self.db.delivery_requests.create_index([("request_key", ASCENDING)], unique=True)
