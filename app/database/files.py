@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from secrets import choice
 from string import ascii_letters, digits
 import logging
+from app.database.users import is_banned_cached, register_active_user
 
 log = logging.getLogger(__name__)
 
@@ -123,18 +124,15 @@ class FileRepository:
             {"items": {"$exists": True}},
         ]})
 
-    async def save_user(self, user) -> None:
+    async def save_user(self, user) -> bool:
+        """Save only active user IDs; return False for a cached banned user."""
         if user is None:
-            return
-        await self.db.users.update_one(
-            {"user_id": user.id},
-            {"$setOnInsert": {"user_id": user.id, "banned": False}},
-            upsert=True,
-        )
+            return False
+        return await register_active_user(self.db, user.id)
 
     async def is_banned(self, user_id: int) -> bool:
-        user = await self.db.users.find_one({"user_id": user_id}, {"banned": 1})
-        return bool(user and user.get("banned", False))
+        """Banned IDs are cached at startup; no per-callback MongoDB read is needed."""
+        return is_banned_cached(user_id)
 
     async def get_setting(self, key: str, default=None):
         item = await self.db.settings.find_one({"key": key, "channel": {"$exists": False}}, {"value": 1})
