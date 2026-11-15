@@ -201,6 +201,8 @@ async def migrate_user_storage(db) -> int:
             indexes = await db.users.index_information()
             if "user_id_1" in indexes:
                 await db.users.drop_index("user_id_1")
+            # Materialize the target collection before opening the transaction.
+            await db.banned_users.create_index([("_id", ASCENDING)])
 
             async with await db.client.start_session() as session:
                 async with session.start_transaction():
