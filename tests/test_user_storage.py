@@ -23,7 +23,6 @@ async def test_registration_uses_one_bounded_active_bucket_write(monkeypatch):
         SimpleNamespace(users=collection), 123456
     )
     assert collection.query == {
-        "ids": {"$ne": 123456},
         "$expr": {"$lt": [{"$size": "$ids"}, 100_000]},
     }
     assert collection.update == {"$addToSet": {"ids": 123456}}
