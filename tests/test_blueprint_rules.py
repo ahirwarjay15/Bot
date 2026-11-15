@@ -207,23 +207,41 @@ async def test_pending_join_request_only_verifies_join_request_mode():
     from types import SimpleNamespace
     from app.handlers.start import join_status
 
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        async def to_list(self, length=None):
+            return list(self.rows)
+
+        def __aiter__(self):
+            self.iterator = iter(self.rows)
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self.iterator)
+            except StopIteration:
+                raise StopAsyncIteration
+
     class Collection:
-        def __init__(self, doc=None):
-            self.doc = doc
+        def __init__(self, rows):
+            self.rows = rows
 
-        async def find_one(self, query):
-            return self.doc
-
-        async def delete_one(self, query):
-            self.doc = None
+        def find(self, query, projection=None):
+            if query.get("key") == "force_join_channel":
+                return Cursor(self.rows)
+            if query.get("users.id") == 42:
+                return Cursor(self.rows)
+            return Cursor([])
 
     class FakeDB:
         def __init__(self, mode):
             from datetime import datetime, timezone
-            self.settings = Collection({"mode": mode})
-            self.pending_join_requests = Collection({
-                "chat_id": -100123, "user_id": 42, "requested_at": datetime.now(timezone.utc)
-            })
+            self.settings = Collection([{"channel": "-100123", "mode": mode}])
+            self.pending_join_requests = Collection([{
+                "_id": -100123, "users": [{"id": 42, "t": datetime.now(timezone.utc)}]
+            }])
 
     class FakeBot:
         async def get_chat(self, chat_id):
@@ -683,8 +701,8 @@ def test_pending_join_request_expires_and_requires_timestamp():
     from app.handlers.start import _pending_request_is_recent
 
     now = datetime.now(timezone.utc)
-    assert _pending_request_is_recent({"requested_at": now - timedelta(minutes=5)}, now=now)
-    assert _pending_request_is_recent({"requested_at": now - timedelta(days=2)}, now=now)
+    assert _pending_request_is_recent({"t": now - timedelta(minutes=5)}, now=now)
+    assert _pending_request_is_recent({"t": now - timedelta(days=2)}, now=now)
     assert not _pending_request_is_recent({"user_id": 42}, now=now)
 
 
@@ -744,7 +762,7 @@ def test_invalid_post_ignores_commands_banned_users_owner_and_moderators():
     source = Path("app/handlers/misc.py").read_text()
     handler = source.split("async def invalid_post", 1)[1].split("@router.callback_query", 1)[0]
     assert 'message.text and message.text.startswith("/")' in handler
-    assert "if await is_banned(database.db, user.id):" in handler
+    assert "if not await FileRepository(database.db).save_user(user):" in handler
     assert "if await is_owner_or_moderator(database.db, user.id, settings):" in handler
     assert 'find_one({"key": "invalid_post"})' in handler
     assert 'if not cfg.get("enabled", False):' in handler
@@ -780,7 +798,7 @@ def test_stats_blocked_count_does_not_treat_any_delivery_error_as_blocked():
 
     source = Path("app/handlers/admin.py").read_text()
     stats_builder = source.split("async def build_stats_text", 1)[1].split('@router.message(Command("stats"))', 1)[0]
-    assert 'count_documents({"banned": True})' in stats_builder
+    assert "count_user_totals(db)" in stats_builder
     assert 'last_delivery_error' not in stats_builder
 
 
@@ -825,13 +843,17 @@ def test_optional_other_links_stay_outside_required_chat_verification():
     assert "join_status(bot, user.id, channels, database.db)" in start_source
 
 
-def test_legacy_external_force_join_setting_is_removed_once_at_startup():
+def test_completed_one_time_migrations_are_removed_from_startup_code():
     from pathlib import Path
 
-    source = Path("app/database/connection.py").read_text()
-    assert 'async def remove_legacy_external_force_join_links(db)' in source
-    assert '"$unset": {"other_links": ""}' in source
-    assert 'await remove_legacy_external_force_join_links(self.db)' in source
+    connection = Path("app/database/connection.py").read_text()
+    start = Path("app/handlers/start.py").read_text()
+    main = Path("main.py").read_text()
+    assert "remove_legacy_external_force_join_links" not in connection
+    assert "migrate_delivery_storage" not in connection
+    assert "migrate_pending_join_request_storage" not in connection
+    assert "migrate_force_join_links" not in start
+    assert "migrate_force_join_links" not in main
 
 
 def test_button_text_validation_enforces_telegram_limits():
