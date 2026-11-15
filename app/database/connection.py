@@ -111,7 +111,7 @@ async def migrate_pending_join_request_storage(db) -> int:
                                     "$filter": {
                                         "input": {"$ifNull": ["$users", []]},
                                         "as": "entry",
-                                        "cond": {"$eq": ["$entry.id", user_id]},
+                                        "cond": {"$eq": ["$$entry.id", user_id]},
                                     }
                                 }
                             }
@@ -122,15 +122,15 @@ async def migrate_pending_join_request_storage(db) -> int:
                                     "$filter": {
                                         "input": {"$ifNull": ["$users", []]},
                                         "as": "entry",
-                                        "cond": {"$ne": ["$entry.id", user_id]},
+                                        "cond": {"$ne": ["$$entry.id", user_id]},
                                     }
                                 },
                                 [{
                                     "id": user_id,
                                     "t": {
                                         "$cond": [
-                                            {"$gt": ["$existing.t", requested_at]},
-                                            "$existing.t",
+                                            {"$gt": ["$$existing.t", requested_at]},
+                                            "$$existing.t",
                                             requested_at,
                                         ]
                                     },
