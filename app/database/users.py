@@ -1,5 +1,6 @@
 """Compact active/banned Telegram user storage with bounded BSON documents."""
 import asyncio
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
@@ -168,6 +169,7 @@ async def migrate_user_storage(db) -> int:
             break
 
         now = datetime.now(timezone.utc)
+        lock_token = uuid.uuid4().hex
         stale_before = now - timedelta(minutes=2)
         try:
             claim = await db.system_migrations.find_one_and_update(
@@ -178,11 +180,16 @@ async def migrate_user_storage(db) -> int:
                         {"started_at": {"$lte": stale_before}},
                     ],
                 },
-                {"$set": {"status": "running", "started_at": now, "completed": False}},
+                {"$set": {
+                    "status": "running",
+                    "started_at": now,
+                    "lock_token": lock_token,
+                    "completed": False,
+                }},
                 upsert=True,
                 return_document=ReturnDocument.AFTER,
             )
-            owns_lock = bool(claim and claim.get("started_at") == now)
+            owns_lock = bool(claim and claim.get("lock_token") == lock_token)
         except DuplicateKeyError:
             owns_lock = False
 
@@ -261,14 +268,15 @@ async def migrate_user_storage(db) -> int:
                             "completed_at": datetime.now(timezone.utc),
                             "active_users": len(active_ids),
                             "banned_users": len(banned_ids),
-                        }},
+                        }, "$unset": {"lock_token": ""}},
                         session=session,
                     )
             break
         except Exception:
             await db.system_migrations.update_one(
                 {"_id": MIGRATION_ID},
-                {"$set": {"status": "failed", "failed_at": datetime.now(timezone.utc)}},
+                {"$set": {"status": "failed", "failed_at": datetime.now(timezone.utc)},
+                 "$unset": {"lock_token": ""}},
             )
             raise
 
