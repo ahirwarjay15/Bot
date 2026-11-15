@@ -76,37 +76,13 @@ def test_invalid_post_about_defaults_to_multiline_standard_about():
     assert "{bot_name}" in DEFAULT_ABOUT
 
 
-@pytest.mark.asyncio
-async def test_start_and_invalid_posts_share_one_saved_about_template():
-    from app.handlers.misc import DEFAULT_ABOUT, load_shared_about_text
+def test_start_and_invalid_posts_share_the_code_owned_about_template():
+    from app.handlers.about import DEFAULT_ABOUT
+    from app.handlers.misc import DEFAULT_ABOUT as invalid_about
 
-    class SettingsCollection:
-        def __init__(self, doc=None):
-            self.doc = doc
-            self.updates = []
-
-        async def find_one(self, query):
-            return self.doc if self.doc and self.doc.get("key") == query.get("key") else None
-
-        async def update_one(self, query, update, upsert=False):
-            self.updates.append((query, update, upsert))
-            if self.doc is None:
-                self.doc = dict(update["$set"])
-            else:
-                self.doc.update(update["$set"])
-
-    class FakeDB:
-        def __init__(self, doc=None):
-            self.settings = SettingsCollection(doc)
-
-    saved = "<b>Shared About</b>\\n{bot_name}"
-    db = FakeDB({"key": "invalid_post", "about_text": saved})
-    assert await load_shared_about_text(db) == saved
-    assert db.settings.updates == []
-
-    empty_db = FakeDB({"key": "invalid_post"})
-    assert await load_shared_about_text(empty_db) == DEFAULT_ABOUT
-    assert empty_db.settings.doc["about_text"] == DEFAULT_ABOUT
+    assert DEFAULT_ABOUT == invalid_about
+    assert "{bot_name}" in DEFAULT_ABOUT
+    assert "{bot_mention}" in DEFAULT_ABOUT
 
 
 def test_about_text_has_no_settings_text_editor():
@@ -625,14 +601,13 @@ def test_force_join_chat_add_returns_to_main_page_with_fallback():
     assert '"channels_override": True' in handler
 
 
-def test_force_join_disable_button_is_next_to_verify():
+def test_force_join_enable_state_is_derived_from_configured_channels():
     from pathlib import Path
 
     source = Path("app/handlers/settings.py").read_text()
     page = source.split("async def build_forcejoin_page", 1)[1].split("async def render_forcejoin", 1)[0]
     assert '[("VERIFY", "settings:forcejoin_verify_text")]' in page
-    assert '("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")' in page
-    assert 'rows.append([("DISABLE" if cfg.get("enabled", False) else "ENABLE", "settings:forcejoin_toggle")])' not in page
+    assert "settings:forcejoin_toggle" not in page
 
 
 def test_edit_page_replaces_uneditable_panel_and_deletes_old_panel():
