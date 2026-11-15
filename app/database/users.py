@@ -33,16 +33,22 @@ async def load_banned_user_cache(db) -> int:
 async def _add_active_user(db, user_id: int, *, session=None) -> bool:
     """Atomically append to a non-full bucket, or create the next bucket."""
     user_id = int(user_id)
-    result = await db.users.update_one(
-        {
-            "ids": {"$ne": user_id},
-            "$expr": {"$lt": [{"$size": "$ids"}, MAX_USERS_PER_DOCUMENT]},
-        },
-        {"$addToSet": {"ids": user_id}},
-        session=session,
-    )
-    if result.modified_count:
-        return True
+    try:
+        result = await db.users.update_one(
+            {
+                "ids": {"$ne": user_id},
+                "$expr": {"$lt": [{"$size": "$ids"}, MAX_USERS_PER_DOCUMENT]},
+            },
+            {"$addToSet": {"ids": user_id}},
+            session=session,
+        )
+        if result.modified_count:
+            return True
+    except DuplicateKeyError:
+        # The unique multikey index prevents the same ID entering two buckets.
+        if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
+            return False
+        raise
 
     if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
         return False
@@ -51,7 +57,6 @@ async def _add_active_user(db, user_id: int, *, session=None) -> bool:
         await db.users.insert_one({"_id": ObjectId(), "ids": [user_id]}, session=session)
         return True
     except DuplicateKeyError:
-        # A concurrent registration may have inserted this ID in another bucket.
         if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
             return False
         raise
@@ -256,6 +261,9 @@ async def migrate_user_storage(db) -> int:
             )
             raise
 
+    await db.users.create_index(
+        [("ids", ASCENDING)], unique=True, sparse=True, name="active_user_ids_unique"
+    )
     await db.banned_users.create_index(
         [("ids", ASCENDING)], unique=True, sparse=True, name="banned_user_ids_unique"
     )
