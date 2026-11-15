@@ -146,6 +146,47 @@ def normalize_animation_config(cfg: dict | None) -> dict:
     normalized.pop("frames_enabled", None)
     return normalized
 
+async def load_gate_settings(db) -> tuple[dict, dict, dict]:
+    """Fetch Force Sub, animation, and all channel settings in one MongoDB read."""
+    rows = await db.settings.find({
+        "key": {"$in": ["force_join", "animation", "force_join_channel"]}
+    }).to_list(length=None)
+    force_cfg = next((row for row in rows if row.get("key") == "force_join"), {})
+    raw_animation = next((row for row in rows if row.get("key") == "animation"), {})
+    channel_configs = {
+        str(row.get("channel")): row
+        for row in rows
+        if row.get("key") == "force_join_channel" and row.get("channel") is not None
+    }
+    animation_cfg = normalize_animation_config(raw_animation)
+    persisted_keys = ("frames", "speed", "mode", "enabled")
+    legacy_keys = ("prefix", "prefix_enabled", "frames_enabled")
+    if any(raw_animation.get(key) != animation_cfg.get(key) for key in persisted_keys) or any(
+        key in raw_animation for key in legacy_keys
+    ):
+        await db.settings.update_one(
+            {"key": "animation"},
+            {
+                "$set": {key: animation_cfg[key] for key in persisted_keys},
+                "$unset": {key: "" for key in legacy_keys},
+            },
+            upsert=True,
+        )
+    return force_cfg, animation_cfg, channel_configs
+
+
+async def load_force_join_invite_links(db, channels: list[str]) -> dict:
+    """Fetch all saved non-expiring invite links for a channel set in one query."""
+    if not channels:
+        return {}
+    rows = await db.force_join_links.find({
+        "channel": {"$in": list(dict.fromkeys(channels))},
+        "invite_link": {"$exists": True},
+        "expires_at": {"$exists": False},
+    }).to_list(length=None)
+    return {str(row.get("channel")): row for row in rows}
+
+
 async def load_animation_config(db) -> dict:
     """Load and persist migrated animation defaults once."""
     raw = await db.settings.find_one({"key": "animation"}) or {}
@@ -302,16 +343,19 @@ async def ensure_force_join_link(bot, db, channel: str, channel_cfg: dict) -> bo
     return True
 
 
-async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None) -> str | None:
+async def resolve_force_join_button_target(bot, db, channel: str, channel_cfg: dict, user_id: int | None = None, saved_links: dict | None = None) -> str | None:
     """Return a public URL or a persisted non-expiring private invite."""
     target = channel_cfg.get("button_url")
     if target and not target.startswith("https://t.me/+"):
         return target
-    saved = await db.force_join_links.find_one({
-        "channel": channel,
-        "invite_link": {"$exists": True},
-        "expires_at": {"$exists": False},
-    })
+    if saved_links is None:
+        saved = await db.force_join_links.find_one({
+            "channel": channel,
+            "invite_link": {"$exists": True},
+            "expires_at": {"$exists": False},
+        })
+    else:
+        saved = saved_links.get(channel)
     if saved and saved.get("invite_link"):
         if not target or target == saved["invite_link"]:
             return saved["invite_link"]
@@ -430,18 +474,20 @@ def _pending_request_is_recent(pending: dict | None, now=None, max_age_seconds: 
     return 0 <= age < max_age_seconds
 
 
-async def join_status(bot, user_id: int, channels: list[str], db=None) -> list[str]:
+async def join_status(bot, user_id: int, channels: list[str], db=None, channel_configs: dict | None = None) -> list[str]:
     """Check memberships concurrently and batch all pending-request reads into one query."""
     async def load_channel_configs() -> dict:
+        if channel_configs is not None:
+            return channel_configs
         if db is None or not channels:
             return {}
-        channel_configs = await db.settings.find({
+        rows = await db.settings.find({
             "key": "force_join_channel",
             "channel": {"$in": list(dict.fromkeys(
                 channel.strip() for channel in channels if channel.strip()
             ))},
         }).to_list(length=None)
-        return {str(config.get("channel")): config for config in channel_configs}
+        return {str(config.get("channel")): config for config in rows}
 
     configs_task = asyncio.create_task(load_channel_configs())
 
@@ -695,12 +741,11 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
     user=message.from_user
     if not user or user.id==settings.owner_id or await is_owner_or_moderator(database.db,user.id,settings):
         return False
-    cfg = await database.db.settings.find_one({"key": "force_join"}) or {}
-    channels = await effective_force_join_channels(database, settings)
+    cfg, animation_cfg, channel_configs = await load_gate_settings(database.db)
+    channels = await effective_force_join_channels(database, settings, cfg)
     if not channels:
         return False
 
-    animation_cfg = await load_animation_config(database.db)
     animation_enabled = bool(animation_cfg.get("enabled"))
     animation_mode = animation_cfg.get("mode", "poster")
     animation_post = None
@@ -738,7 +783,7 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
                 log.warning("Could not create Force Sub animation poster during deeplink check", exc_info=True)
                 animation_post = None
 
-    missing = await join_status(bot, user.id, channels, database.db)
+    missing = await join_status(bot, user.id, channels, database.db, channel_configs=channel_configs)
     # The stop helper below lets the current visible cycle finish.
     if not missing:
         await _cancel_gate_animation(bot, user.id, payload)
@@ -750,13 +795,12 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
         return False
 
     join_buttons = []
-    channel_cfgs = await asyncio.gather(*(
-        database.db.settings.find_one({"key": "force_join_channel", "channel": channel})
-        for channel in missing
-    ))
-    channel_cfgs = [item or {} for item in channel_cfgs]
+    channel_cfgs = [channel_configs.get(channel) or {} for channel in missing]
+    saved_links = await load_force_join_invite_links(database.db, missing)
     targets = await asyncio.gather(*(
-        resolve_force_join_button_target(bot, database.db, channel, channel_cfg, user.id)
+        resolve_force_join_button_target(
+            bot, database.db, channel, channel_cfg, user.id, saved_links=saved_links
+        )
         for channel, channel_cfg in zip(missing, channel_cfgs)
     ))
     for index, (channel, channel_cfg, target) in enumerate(zip(missing, channel_cfgs, targets)):
@@ -1150,12 +1194,8 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
     # Stop animation without waiting for its frame/request to finish.
     await _cancel_gate_animation(bot, user_id, payload, delete_separate=False)
     # Load independent settings concurrently so the Verify animation can start sooner.
-    force_cfg_result, animation_cfg = await asyncio.gather(
-        database.db.settings.find_one({"key": "force_join"}),
-        load_animation_config(database.db),
-    )
-    force_cfg = force_cfg_result or {}
-    channels = await effective_force_join_channels(database, settings)
+    force_cfg, animation_cfg, channel_configs = await load_gate_settings(database.db)
+    channels = await effective_force_join_channels(database, settings, force_cfg)
     force_sub_enabled = bool(channels)
     if force_cfg.get("enabled") != force_sub_enabled:
         await database.db.settings.update_one(
@@ -1202,18 +1242,17 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
                 animation_post = None
 
     missing = [] if await is_owner_or_moderator(database.db, user_id, settings) else await join_status(
-        bot, user_id, channels, database.db
+        bot, user_id, channels, database.db, channel_configs=channel_configs
     )
     if missing:
         join_buttons = []
-        channel_cfgs = await asyncio.gather(*(
-            database.db.settings.find_one({"key": "force_join_channel", "channel": channel})
-            for channel in missing
-        ))
-        channel_cfgs = [item or {} for item in channel_cfgs]
-        # Resolve the saved Force Sub URL without a background refresh cycle.
+        channel_cfgs = [channel_configs.get(channel) or {} for channel in missing]
+        # Resolve all saved private invite URLs with one collection query.
+        saved_links = await load_force_join_invite_links(database.db, missing)
         targets = await asyncio.gather(*(
-            resolve_force_join_button_target(bot, database.db, channel, channel_cfg, user_id)
+            resolve_force_join_button_target(
+                bot, database.db, channel, channel_cfg, user_id, saved_links=saved_links
+            )
             for channel, channel_cfg in zip(missing, channel_cfgs)
         ))
         for index, (channel, channel_cfg, target) in enumerate(zip(missing, channel_cfgs, targets)):
