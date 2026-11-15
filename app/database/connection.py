@@ -241,7 +241,10 @@ class Database:
             # Polling-only replicas use the existing schema. Only the worker role
             # performs index changes and one-time migrations, avoiding startup races.
             if not self.initialize_schema:
-                logger.info("MongoDB ready; schema initialization is owned by the worker service")
+                # The compact pending-request format is required by the polling
+                # handlers too, so safely finish this data-only migration here.
+                await migrate_pending_join_request_storage(self.db)
+                logger.info("MongoDB ready; remaining schema initialization is owned by the worker service")
                 return
 
             await self.db.users.create_index([("user_id", ASCENDING)], unique=True)
