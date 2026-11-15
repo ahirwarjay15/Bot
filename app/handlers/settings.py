@@ -10,7 +10,7 @@ from aiogram.types import Message, CallbackQuery, MessageEntity, InlineKeyboardM
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
-from app.services.permissions import is_owner, is_owner_or_moderator
+from app.services.permissions import is_owner, is_owner_or_moderator, is_banned
 from app.services.text_format import normalize_telegram_text
 from app.services.links import shorten_url
 from app.handlers.start import effective_force_join_channels, normalize_animation_config, ensure_force_join_link, cleanup_pending_join_requests_for_channel
@@ -2575,7 +2575,7 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         if is_owner(uid, settings):
             await tracked_answer(message, state, "Owner is not stored as a moderator.")
             return
-        if await db.users.find_one({"user_id": uid, "banned": True}):
+        if await is_banned(db, uid):
             await tracked_answer(message, state, "Unban this user before adding them as a moderator.")
             await clear_state_preserving_prompts(state); return
         if await db.moderators.find_one({"user_id": uid}):
@@ -2584,9 +2584,8 @@ async def receive_setting_input(message: Message, state: FSMContext, settings: S
         if await db.moderators.count_documents({}) >= 3:
             await tracked_answer(message, state, "Maximum 3 moderators allowed.")
             await clear_state_preserving_prompts(state); return
-        user = await db.users.find_one({"user_id": uid}) or {}
-        name = user.get("first_name") or f"User {uid}"
-        await db.moderators.insert_one({"user_id": uid, "first_name": name, "username": user.get("username")})
+        name = f"User {uid}"
+        await db.moderators.insert_one({"user_id": uid, "first_name": name})
         await tracked_answer(message, state, f"✨ Successfully added {name} as moderator.")
     else:
         await tracked_answer(message, state, "Unknown setting. Open /settings to try again.")
