@@ -42,11 +42,11 @@ async def test_idle_delivery_worker_uses_change_stream_and_bulk_startup_recovery
 
     class Tasks:
         def __init__(self):
-            self.updated = None
+            self.updates = []
             self.deleted = None
 
         async def update_many(self, query, update):
-            self.updated = (query, update)
+            self.updates.append((query, update))
             return SimpleNamespace(modified_count=0)
 
         async def delete_many(self, query):
@@ -69,6 +69,9 @@ async def test_idle_delivery_worker_uses_change_stream_and_bulk_startup_recovery
     with pytest.raises(asyncio.CancelledError):
         await delivery.run_task_worker(None, db)
 
-    assert tasks.updated[0]["status"] == "delivering"
-    assert tasks.updated[0]["message_ids"] == {"$exists": True, "$ne": []}
+    assert tasks.updates[0][0]["status"] == "delivering"
+    assert tasks.updates[0][0]["message_ids"] == {"$exists": True, "$ne": []}
+    assert tasks.updates[1][0]["status"] == "processing"
+    assert tasks.updates[1][1]["$set"]["status"] == "pending"
+    assert tasks.updates[1][1]["$set"]["deadline"] is not None
     assert tasks.deleted["$and"][0]["status"] == "delivering"
