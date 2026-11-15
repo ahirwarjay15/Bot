@@ -1,6 +1,5 @@
 """Start command, Force Sub gate, and single/batch deeplink delivery."""
 import logging
-import hashlib
 import html
 import asyncio
 import time
@@ -150,21 +149,6 @@ async def load_animation_config(db) -> dict:
     if any(raw.get(key) != normalized.get(key) for key in persisted_keys) or any(key in raw for key in legacy_keys):
         await db.settings.update_one({"key": "animation"}, {"$set": {key: normalized[key] for key in persisted_keys}, "$unset": {key: "" for key in legacy_keys}}, upsert=True)
     return normalized
-
-def _join_signature(channels: list[str]) -> str:
-    return hashlib.sha256(",".join(sorted(c.strip() for c in channels if c.strip())).encode()).hexdigest()
-
-async def _is_verified(db, user_id: int, channels: list[str]) -> bool:
-    if not channels:
-        return True
-    user = await db.users.find_one({"user_id": user_id}, {"force_join_signature": 1})
-    return bool(user and user.get("force_join_signature") == _join_signature(channels))
-
-async def _mark_verified(db, user_id: int, channels: list[str]):
-    await db.users.update_one(
-        {"user_id": user_id},
-        {"$set": {"force_join_signature": _join_signature(channels), "force_join_verified_at": datetime.now(timezone.utc)}},
-    )
 
 def force_join_button_label(channel_cfg: dict, position: int) -> str:
     """Use a saved custom label or number the visible missing-channel list."""
@@ -441,65 +425,67 @@ def _pending_request_is_recent(pending: dict | None, now=None, max_age_seconds: 
 
 
 async def join_status(bot, user_id: int, channels: list[str], db=None) -> list[str]:
-    """Check memberships concurrently and load all channel configs in one DB query."""
+    """Check memberships concurrently and batch all pending-request reads into one query."""
     async def load_channel_configs() -> dict:
         if db is None or not channels:
             return {}
-        # One $in query replaces one find_one round-trip per required channel.
         channel_configs = await db.settings.find({
             "key": "force_join_channel",
             "channel": {"$in": list(dict.fromkeys(
                 channel.strip() for channel in channels if channel.strip()
             ))},
         }).to_list(length=None)
-        return {
-            str(config.get("channel")): config for config in channel_configs
-        }
+        return {str(config.get("channel")): config for config in channel_configs}
 
-    # Start the single DB lookup before Telegram calls so both kinds of I/O overlap.
     configs_task = asyncio.create_task(load_channel_configs())
 
-    async def check_channel(raw: str) -> str | None:
+    async def check_channel(raw: str):
         channel = raw.strip()
         if not channel:
-            return None
+            return None, None
         try:
             chat_arg = int(channel) if channel.lstrip("-").isdigit() else channel
-            # Telegram membership checks remain parallel across channels and overlap
-            # with the shared MongoDB configuration lookup.
             member, configs_by_channel = await asyncio.gather(
                 bot.get_chat_member(chat_id=chat_arg, user_id=user_id),
                 configs_task,
             )
-            channel_cfg = configs_by_channel.get(channel)
             if _is_member_status(member):
-                return None
+                return None, None
 
+            channel_cfg = configs_by_channel.get(channel)
             mode = (channel_cfg or {}).get("mode", "join_request")
-            # Only resolve chat metadata when a non-member may have a pending
-            # private-channel join request. This preserves that fallback while
-            # removing getChat from the common already-member path.
             if mode == "join_request" and db is not None:
                 chat = await bot.get_chat(chat_arg)
                 if _is_private_chat(chat):
-                    pending = await db.pending_join_requests.find_one(
-                        {"_id": int(chat.id), "users.id": int(user_id)},
-                        {"users.$": 1},
-                    )
-                    entries = (pending or {}).get("users", [])
-                    pending_user = next(
-                        (entry for entry in entries if int(entry.get("id", 0)) == int(user_id)),
-                        None,
-                    )
-                    if _pending_request_is_recent(pending_user):
-                        return None
-            return channel
+                    return channel, int(chat.id)
+            return channel, None
         except TelegramAPIError:
-            # Fail closed: an API failure must not accidentally bypass Force Sub.
-            return channel
+            # Fail closed: Telegram API failures must not bypass Force Sub.
+            return channel, None
 
-    results = await asyncio.gather(*(check_channel(channel) for channel in channels))
-    return [channel for channel in results if channel is not None]
+    checked = await asyncio.gather(*(check_channel(channel) for channel in channels))
+    pending_chat_ids = sorted({
+        chat_id for channel, chat_id in checked if channel and chat_id is not None
+    })
+    accepted_pending_chat_ids = set()
+    if pending_chat_ids:
+        cursor = db.pending_join_requests.find(
+            {"_id": {"$in": pending_chat_ids}, "users.id": int(user_id)},
+            {"_id": 1, "users.$": 1},
+        )
+        async for record in cursor:
+            entries = record.get("users", [])
+            pending_user = next(
+                (entry for entry in entries if int(entry.get("id", 0)) == int(user_id)),
+                None,
+            )
+            if _pending_request_is_recent(pending_user):
+                accepted_pending_chat_ids.add(int(record["_id"]))
+
+    return [
+        channel for channel, chat_id in checked
+        if channel and (chat_id is None or chat_id not in accepted_pending_chat_ids)
+    ]
 
 
 # Active text-animation tasks are process-local; file/gate state itself remains in MongoDB.
@@ -755,7 +741,6 @@ async def gate_or_prompt(message:Message,payload:str,settings,database,bot, *, v
                 await animation_post.delete()
             except TelegramAPIError:
                 pass
-        await _mark_verified(database.db, user.id, channels)
         return False
 
     join_buttons = []
@@ -872,8 +857,8 @@ async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:d
 async def start_command(message:Message,command:CommandObject,settings:Settings,database,bot):
     user=message.from_user
     if not user:return
-    repo=FileRepository(database.db);await repo.save_user(user)
-    if await repo.is_banned(user.id):return
+    repo=FileRepository(database.db)
+    if not await repo.save_user(user):return
     payload=command.args or ""
     if payload:
         # Public start links contain only the 22-character token. The first seven
@@ -1320,7 +1305,6 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
     request_key = f"forcejoin:{user_id}:{request_anchor}:{payload}"
     if not await claim_delivery_request(database.db, request_key, user_id, payload):
         return
-    await _mark_verified(database.db, user_id, channels)
     # Delete the Force Sub post first. Await this API call before beginning delivery,
     # so the verification prompt cannot appear after the file in normal operation.
     if old_post:
