@@ -41,7 +41,7 @@ async def _add_active_user(db, user_id: int, *, session=None) -> bool:
         result = await db.users.update_one(query, update, session=session)
         if result.matched_count:
             # A no-op $addToSet means this ID already existed in the matched bucket.
-            return result.modified_count > 0 or True
+            return True
     except DuplicateKeyError:
         # The unique multikey index means this ID already exists in another bucket.
         if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
