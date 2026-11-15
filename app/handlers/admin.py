@@ -1,5 +1,4 @@
 """Owner/moderator administration, database export, ban controls, and stats popup."""
-import asyncio
 import json
 from datetime import datetime, timezone
 from bson import json_util
@@ -7,7 +6,8 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from app.config import Settings
-from app.services.permissions import is_owner, is_owner_or_moderator
+from app.services.permissions import is_owner, is_owner_or_moderator, is_banned
+from app.database.users import count_user_totals, set_user_banned
 from app.services.bot_commands import set_moderator_commands, set_user_commands
 
 router = Router(name="admin")
@@ -24,9 +24,9 @@ async def ban_user(message: Message, settings: Settings, database):
     if is_owner(uid, settings) or await database.db.moderators.find_one({"user_id": uid}):
         await message.answer("Owner/moderators cannot be banned.")
         return
-    await database.db.users.update_one(
-        {"user_id": uid}, {"$set": {"banned": True}, "$setOnInsert": {"user_id": uid}}, upsert=True
-    )
+    if not await set_user_banned(database.db, uid, True):
+        await message.answer(f"User {uid} is already banned.")
+        return
     await message.answer(f"User {uid} banned.")
 
 @router.message(Command("unban"))
@@ -38,8 +38,7 @@ async def unban_user(message: Message, settings: Settings, database):
         await message.answer("Usage: /unban TELEGRAM_USER_ID")
         return
     uid = int(parts[1])
-    result = await database.db.users.update_one({"user_id": uid, "banned": True}, {"$set": {"banned": False}})
-    if not result.modified_count:
+    if not await set_user_banned(database.db, uid, False):
         await message.answer("That user is not currently banned.")
         return
     await message.answer(f"User {uid} unbanned.")
@@ -56,8 +55,7 @@ async def add_mod(message: Message, settings: Settings, database):
     if is_owner(uid, settings):
         await message.answer("Owner is not stored as a moderator.")
         return
-    banned_user = await database.db.users.find_one({"user_id": uid, "banned": True})
-    if banned_user:
+    if await is_banned(database.db, uid):
         await message.answer("Unban this user before adding them as a moderator.")
         return
     existing = await database.db.moderators.find_one({"user_id": uid})
@@ -98,10 +96,7 @@ async def build_stats_text(bot, db):
 
     Telegram delivery failures are broadcast outcomes, not a user statistic.
     """
-    total, banned = await asyncio.gather(
-        db.users.count_documents({}),
-        db.users.count_documents({"banned": True}),
-    )
+    total, banned = await count_user_totals(db)
     return (
         f"⛦ Total Users: {total}\n"
         f"⛦ Banned Users: {banned}"
