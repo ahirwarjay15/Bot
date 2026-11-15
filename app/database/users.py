@@ -12,6 +12,7 @@ MIGRATION_ID = "users_chunked_storage_v1"
 
 _BANNED_USER_IDS: set[int] = set()
 _USER_LOCKS = tuple(asyncio.Lock() for _ in range(256))
+_NEW_BUCKET_LOCK = asyncio.Lock()
 
 
 def is_banned_cached(user_id: int) -> bool:
@@ -50,16 +51,35 @@ async def _add_active_user(db, user_id: int, *, session=None) -> bool:
             return False
         raise
 
-    if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
-        return False
+    async with _NEW_BUCKET_LOCK:
+        # Another concurrent registration may have created a fresh bucket while
+        # this request waited; retry the bounded append before creating a bucket.
+        try:
+            result = await db.users.update_one(
+                {
+                    "ids": {"$ne": user_id},
+                    "$expr": {"$lt": [{"$size": "$ids"}, MAX_USERS_PER_DOCUMENT]},
+                },
+                {"$addToSet": {"ids": user_id}},
+                session=session,
+            )
+            if result.modified_count:
+                return True
+        except DuplicateKeyError:
+            if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
+                return False
+            raise
 
-    try:
-        await db.users.insert_one({"_id": ObjectId(), "ids": [user_id]}, session=session)
-        return True
-    except DuplicateKeyError:
         if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
             return False
-        raise
+
+        try:
+            await db.users.insert_one({"_id": ObjectId(), "ids": [user_id]}, session=session)
+            return True
+        except DuplicateKeyError:
+            if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
+                return False
+            raise
 
 
 async def register_active_user(db, user_id: int) -> bool:
