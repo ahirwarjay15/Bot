@@ -31,7 +31,7 @@ def test_animation_page_shows_canonical_status_and_only_remaining_controls():
     assert "Prefix" not in text and "prefix" not in text.lower()
     assert len(markup.inline_keyboard) == 3
     labels = [button.text for row in markup.inline_keyboard for button in row]
-    assert labels == ["ꜰʀᴀᴍᴇꜱ", "ꜱᴘᴇᴇᴅ", "ᴍᴏᴅᴇ", "ʙʟɪɴᴋ", "《 BACK"]
+    assert labels == ["ꜰʀᴀᴍᴇꜱ", "ꜱᴘᴇᴇᴅ", "ᴍᴏᴅᴇ", "ʙʟɪɴᴋ", "❮❮ ʙᴀᴄᴋ"]
 def test_animation_page_shows_disabled_mode_and_minimum_speed():
     text, markup = build_animation_page({
         "prefix": "", "prefix_enabled": False, "frames": [".", "..", "..."],
