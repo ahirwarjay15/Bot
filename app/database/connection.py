@@ -1,175 +1,10 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from pymongo import ASCENDING, AsyncMongoClient
-from pymongo.errors import DuplicateKeyError
 from app.config import Settings
+from app.database.users import migrate_user_storage
 
 logger = logging.getLogger(__name__)
-
-
-async def unify_file_batch_records(db) -> int:
-    """Move legacy batch records into files and remove the obsolete kind discriminator."""
-    moved = 0
-    async for batch in db.batches.find({}):
-        code = batch.get("batch_id")
-        items = batch.get("items")
-        if not code or not isinstance(items, list):
-            continue
-        existing = await db.files.find_one({"key": code}, {"_id": 1, "items": 1})
-        if existing is None:
-            existing = await db.files.find_one({"file_key": code}, {"_id": 1, "items": 1})
-        if existing is None:
-            await db.files.insert_one({"key": code, "items": items})
-            moved += 1
-            await db.batches.delete_one({"_id": batch["_id"]})
-        elif isinstance(existing.get("items"), list):
-            await db.batches.delete_one({"_id": batch["_id"]})
-    await db.files.update_many({}, {"$unset": {"kind": "", "file_name": "", "created_at": "", "created_by": ""}})
-    return moved
-
-
-async def migrate_delivery_storage(db) -> bool:
-    """Run destructive legacy-collection cleanup once across multiple worker services."""
-    migration_id = "minimal_delivery_storage_v1"
-    now = datetime.now(timezone.utc)
-    existing = await db.system_migrations.find_one({"_id": migration_id})
-    if existing and existing.get("completed"):
-        return False
-    if existing:
-        started_at = existing.get("started_at")
-        if started_at and started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=timezone.utc)
-        if existing.get("status") == "running" and started_at and now - started_at < timedelta(minutes=10):
-            return False
-        claimed = await db.system_migrations.update_one(
-            {"_id": migration_id, "status": existing.get("status"), "started_at": existing.get("started_at")},
-            {"$set": {"status": "running", "started_at": now, "completed": False}},
-        )
-        if not claimed.modified_count:
-            return False
-    else:
-        try:
-            await db.system_migrations.insert_one({
-                "_id": migration_id, "status": "running", "started_at": now, "completed": False,
-            })
-        except DuplicateKeyError:
-            return False
-
-    try:
-        moved = await unify_file_batch_records(db)
-        logger.info("Unified file/batch records; legacy batches moved=%s", moved)
-        await db.batches.drop()
-        await db.batch_sessions.drop()
-        await db.batch_deliveries.drop()
-        await db.deeplink_codes.drop()
-        await db.tasks.update_many(
-            {},
-            {"$unset": {
-                "kind": "", "created_at": "", "notice": "", "notice_entities": "",
-                "button1_text": "", "button1_url": "", "button1_enabled": "",
-                "button2_text": "", "button2_url": "", "button2_enabled": "",
-            }},
-        )
-        await db.system_migrations.update_one(
-            {"_id": migration_id},
-            {"$set": {"status": "completed", "completed": True, "completed_at": datetime.now(timezone.utc)}},
-        )
-        return True
-    except Exception:
-        await db.system_migrations.update_one(
-            {"_id": migration_id},
-            {"$set": {"status": "failed", "failed_at": datetime.now(timezone.utc)}},
-        )
-        raise
-
-
-async def migrate_pending_join_request_storage(db) -> int:
-    """Convert legacy per-user documents into one compact document per chat."""
-    migration_id = "pending_join_requests_by_chat_v1"
-    legacy_filter = {
-        "chat_id": {"$exists": True},
-        "user_id": {"$exists": True},
-    }
-    legacy_count = await db.pending_join_requests.count_documents(legacy_filter)
-    if (
-        legacy_count == 0
-        and await db.system_migrations.find_one({"_id": migration_id, "completed": True})
-    ):
-        return 0
-
-    migrated = 0
-    cursor = db.pending_join_requests.find({
-        "chat_id": {"$exists": True},
-        "user_id": {"$exists": True},
-        "requested_at": {"$type": "date"},
-    }).sort("requested_at", 1)
-    async for record in cursor:
-        chat_id = int(record["chat_id"])
-        user_id = int(record["user_id"])
-        requested_at = record["requested_at"]
-        # Replace this user's older entry, retaining a newer timestamp if a
-        # concurrent request has already refreshed it in the compact document.
-        pipeline = [{
-            "$set": {
-                "users": {
-                    "$let": {
-                        "vars": {
-                            "existing": {
-                                "$first": {
-                                    "$filter": {
-                                        "input": {"$ifNull": ["$users", []]},
-                                        "as": "entry",
-                                        "cond": {"$eq": ["$$entry.id", user_id]},
-                                    }
-                                }
-                            }
-                        },
-                        "in": {
-                            "$concatArrays": [
-                                {
-                                    "$filter": {
-                                        "input": {"$ifNull": ["$users", []]},
-                                        "as": "entry",
-                                        "cond": {"$ne": ["$$entry.id", user_id]},
-                                    }
-                                },
-                                [{
-                                    "id": user_id,
-                                    "t": {
-                                        "$cond": [
-                                            {"$gt": ["$$existing.t", requested_at]},
-                                            "$$existing.t",
-                                            requested_at,
-                                        ]
-                                    },
-                                }],
-                            ]
-                        },
-                    }
-                }
-            }
-        }]
-        await db.pending_join_requests.update_one(
-            {"_id": chat_id}, pipeline, upsert=True
-        )
-        migrated += 1
-
-    # Only after every legacy row has been copied successfully, remove the old format.
-    await db.pending_join_requests.delete_many({
-        "chat_id": {"$exists": True},
-        "user_id": {"$exists": True},
-    })
-    await db.system_migrations.update_one(
-        {"_id": migration_id},
-        {"$set": {
-            "completed": True,
-            "completed_at": datetime.now(timezone.utc),
-            "migrated_records": migrated,
-        }},
-        upsert=True,
-    )
-    logger.info("Pending join request storage migration complete; legacy records=%s", migrated)
-    return migrated
 
 
 async def cleanup_completed_transients(db) -> dict:
@@ -194,23 +29,6 @@ async def cleanup_completed_transients(db) -> dict:
         result["broadcast_recipients"] = 0
         result["broadcast_jobs"] = 0
     return result
-
-
-async def remove_legacy_external_force_join_links(db) -> bool:
-    """Remove the retired external Force Join setting from legacy deployments."""
-    migration_id = "remove_external_force_join_links_v1"
-    if await db.system_migrations.find_one({"_id": migration_id}):
-        return False
-    await db.settings.update_one(
-        {"key": "force_join"},
-        {"$unset": {"other_links": ""}},
-    )
-    await db.system_migrations.update_one(
-        {"_id": migration_id},
-        {"$setOnInsert": {"completed": True}},
-        upsert=True,
-    )
-    return True
 
 
 class Database:
@@ -238,16 +56,13 @@ class Database:
         try:
             await self.client.admin.command("ping")
             self.db = self.client[self.settings.mongodb_db_name]
-            # Polling-only replicas use the existing schema. Only the worker role
-            # performs index changes and one-time migrations, avoiding startup races.
+            # Both services wait for the same idempotent user-storage migration.
+            # The polling process also loads the small banned-ID cache at startup.
+            await migrate_user_storage(self.db)
             if not self.initialize_schema:
-                # The compact pending-request format is required by the polling
-                # handlers too, so safely finish this data-only migration here.
-                await migrate_pending_join_request_storage(self.db)
                 logger.info("MongoDB ready; remaining schema initialization is owned by the worker service")
                 return
 
-            await self.db.users.create_index([("user_id", ASCENDING)], unique=True)
             file_indexes = await self.db.files.index_information()
             if "file_key_1" in file_indexes:
                 await self.db.files.drop_index("file_key_1")
@@ -266,12 +81,10 @@ class Database:
                 ):
                     await self.db.settings.drop_index(index_name)
             await self.db.moderators.create_index([("user_id", ASCENDING)], unique=True)
-            await migrate_pending_join_request_storage(self.db)
             await self.db.tasks.create_index([("status", ASCENDING), ("deadline", ASCENDING)])
             await self.db.tasks.create_index([("request_key", ASCENDING)], unique=True, sparse=True)
             await self.db.delivery_requests.create_index([("request_key", ASCENDING)], unique=True)
             await self.db.delivery_requests.create_index([("status", ASCENDING), ("updated_at", ASCENDING)])
-            await migrate_delivery_storage(self.db)
             # Stable Force Sub URLs are looked up by channel; no expiry polling/index is needed.
             force_join_indexes = await self.db.force_join_links.index_information()
             for obsolete_index in (
@@ -287,7 +100,6 @@ class Database:
             await self.db.force_join_links.create_index(
                 [("invite_link", ASCENDING)], unique=True, name="invite_link_unique"
             )
-            await remove_legacy_external_force_join_links(self.db)
             await self.db.broadcast_drafts.create_index([("admin_id", ASCENDING)], unique=True)
             await self.db.broadcast_jobs.create_index([("draft_id", ASCENDING)], unique=True)
             await self.db.broadcast_jobs.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
@@ -297,29 +109,6 @@ class Database:
                 [("job_id", ASCENDING), ("status", ASCENDING), ("retry_at", ASCENDING)],
                 name="job_status_retry_at",
             )
-            # Remove the retired delivery-status flag and profile metadata. Admin
-            # bans remain represented by users.banned; Telegram delivery failures
-            # are tracked per broadcast recipient, not as a second user status.
-            user_indexes = await self.db.users.index_information()
-            if "blocked_1" in user_indexes:
-                await self.db.users.drop_index("blocked_1")
-            # This full-collection cleanup is a one-time migration, not a startup task.
-            user_compaction_marker = "compact_user_profiles_v1"
-            if not await self.db.system_migrations.find_one({"_id": user_compaction_marker, "completed": True}):
-                user_cleanup = await self.db.users.update_many(
-                    {},
-                    {"$unset": {
-                        "first_name": "", "last_name": "", "username": "",
-                        "created_at": "", "last_seen": "",
-                        "last_delivery_error": "", "last_delivery_error_at": "",
-                    }},
-                )
-                await self.db.system_migrations.update_one(
-                    {"_id": user_compaction_marker},
-                    {"$setOnInsert": {"completed": True, "completed_at": datetime.now(timezone.utc)}},
-                    upsert=True,
-                )
-                logger.info("One-time user record compaction finished; records updated=%s", user_cleanup.modified_count)
             if self.recover_interrupted_jobs:
                 # Never reset jobs just because a second worker started. Only reclaim
                 # work whose claim/heartbeat has been stale long enough to indicate a crash.
