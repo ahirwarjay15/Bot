@@ -86,7 +86,7 @@ async def set_user_banned(db, user_id: int, banned: bool) -> bool:
     """Move an ID between active and banned storage atomically."""
     user_id = int(user_id)
     async with _user_lock(user_id):
-        async with await db.client.start_session() as session:
+        async with db.client.start_session() as session:
             async with session.start_transaction():
                 if banned:
                     if is_banned_cached(user_id):
@@ -204,7 +204,7 @@ async def migrate_user_storage(db) -> int:
             # Materialize the target collection before opening the transaction.
             await db.banned_users.create_index([("_id", ASCENDING)])
 
-            async with await db.client.start_session() as session:
+            async with db.client.start_session() as session:
                 async with session.start_transaction():
                     legacy_docs = await db.users.find(
                         {"user_id": {"$exists": True}}, session=session
