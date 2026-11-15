@@ -10,6 +10,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter as RetryAfter, TelegramForbiddenError
 from app.config import Settings
 from app.services.permissions import is_owner_or_moderator
+from app.database.users import count_active_users
 from app.services.bot_identity import get_bot_identity
 
 router = Router(name="broadcast")
@@ -90,7 +91,7 @@ async def broadcast(message: Message, settings: Settings, database):
     source = message.reply_to_message
     command_name = (message.text or "").split()[0].split("@")[0].lstrip("/").lower()
     pin_after_send = command_name == "pbroadcast"
-    recipients = await database.db.users.count_documents({"banned": {"$ne": True}})
+    recipients = await count_active_users(database.db)
     await database.db.broadcast_drafts.update_one(
         {"admin_id": admin_id},
         {"$set": {"admin_id": admin_id, "chat_id": source.chat.id, "message_id": source.message_id,
@@ -183,14 +184,6 @@ async def _watch_broadcast_changes(db, wake_event: asyncio.Event, ready_event: a
 async def _deliver_broadcast_recipient(bot, db, job: dict, recipient: dict):
     """Deliver one claimed recipient and persist its individual outcome."""
     uid = recipient["user_id"]
-    latest_user = await db.users.find_one({"user_id": uid}, {"banned": 1})
-    if not latest_user or latest_user.get("banned", False):
-        await db.broadcast_recipients.update_one(
-            {"_id": recipient["_id"]},
-            {"$set": {"status": "skipped_banned", "finished_at": now()}},
-        )
-        return
-
     try:
         markup_data = job.get("reply_markup")
         markup = InlineKeyboardMarkup.model_validate(markup_data) if markup_data else None
@@ -208,8 +201,6 @@ async def _deliver_broadcast_recipient(bot, db, job: dict, recipient: dict):
             {"_id": recipient["_id"]},
             {"$set": {"status": "sent", "finished_at": now()}},
         )
-        # Successful delivery means this user is reachable again.
-        await db.users.update_one({"user_id": uid}, {"$set": {"blocked": False}})
     except RetryAfter as exc:
         retry_at = now() + timedelta(seconds=max(0.0, float(exc.retry_after)) + 0.5)
         await db.broadcast_recipients.update_one(
@@ -221,8 +212,6 @@ async def _deliver_broadcast_recipient(bot, db, job: dict, recipient: dict):
             {"_id": recipient["_id"]},
             {"$set": {"status": "blocked", "finished_at": now()}},
         )
-        # This is Telegram delivery status, not an admin ban.
-        await db.users.update_one({"user_id": uid}, {"$set": {"blocked": True}})
     except TelegramAPIError as exc:
         await db.broadcast_recipients.update_one(
             {"_id": recipient["_id"]},
@@ -289,16 +278,35 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
                 continue
             job_id = job["_id"]
             if not job.get("recipients_loaded", False):
-                ids = []
-                async for user in db.users.find({"banned": {"$ne": True}}, {"user_id": 1}):
-                    ids.append({"job_id": job_id, "user_id": user["user_id"], "status": "pending"})
-                if ids:
+                loaded_count = 0
+                batch = []
+                async for bucket in db.users.find({}, {"ids": 1}):
+                    for user_id in bucket.get("ids", []):
+                        batch.append({
+                            "job_id": job_id,
+                            "user_id": int(user_id),
+                            "status": "pending",
+                        })
+                        loaded_count += 1
+                        if len(batch) >= 1000:
+                            try:
+                                await db.broadcast_recipients.insert_many(batch, ordered=False)
+                            except BulkWriteError:
+                                # A worker restart may replay a partially loaded batch.
+                                pass
+                            batch.clear()
+                if batch:
                     try:
-                        await db.broadcast_recipients.insert_many(ids, ordered=False)
+                        await db.broadcast_recipients.insert_many(batch, ordered=False)
                     except BulkWriteError:
                         pass
                 await db.broadcast_jobs.update_one(
-                    {"_id": job_id}, {"$set": {"recipients_loaded": True, "recipient_count": len(ids), "status": "processing"}}
+                    {"_id": job_id},
+                    {"$set": {
+                        "recipients_loaded": True,
+                        "recipient_count": loaded_count,
+                        "status": "processing",
+                    }},
                 )
             # Claim a small batch atomically, then deliver it concurrently.
             # This keeps progress durable while avoiding one-user-at-a-time latency.
