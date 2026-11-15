@@ -1,19 +1,66 @@
-"""Compact active/banned Telegram user storage with bounded BSON documents."""
+"""Compact comma-separated active/banned Telegram user storage."""
 import asyncio
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
-from pymongo import ASCENDING, ReturnDocument
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 MAX_USERS_PER_DOCUMENT = 100_000
 BANNED_DOCUMENT_ID = ObjectId("000000000000000000000001")
-MIGRATION_ID = "users_chunked_storage_v1"
+MIGRATION_ID = "users_comma_string_storage_v2"
 
 _BANNED_USER_IDS: set[int] = set()
 _USER_LOCKS = tuple(asyncio.Lock() for _ in range(256))
 _NEW_BUCKET_LOCK = asyncio.Lock()
+
+
+def _split_ids(value) -> list[str]:
+    """Parse the canonical comma-separated ID field, ignoring empty tokens."""
+    if isinstance(value, str):
+        return [part for part in value.split(",") if part]
+    if isinstance(value, (list, tuple, set)):
+        return [str(part) for part in value if str(part)]
+    return []
+
+
+def _id_pattern(user_id: int) -> str:
+    return rf"(?:^|,){re.escape(str(int(user_id))}(?:,|$)"
+
+
+def _join_without_id_expression(user_id: int) -> dict:
+    """Aggregation expression that removes exactly one comma-delimited ID."""
+    return {
+        "$reduce": {
+            "input": {
+                "$filter": {
+                    "input": {"$split": [{"$ifNull": ["$id", ""]}, ","]},
+                    "as": "uid",
+                    "cond": {"$and": [{"$ne": ["$$uid", ""]}, {"$ne": ["$$uid", str(int(user_id))]}]},
+                }
+            },
+            "initialValue": "",
+            "in": {
+                "$cond": [
+                    {"$eq": ["$$value", ""]},
+                    "$$this",
+                    {"$concat": ["$$value", ",", "$$this"]},
+                ]
+            },
+        }
+    }
+
+
+def _count_ids_expression() -> dict:
+    return {
+        "$cond": [
+            {"$eq": [{"$ifNull": ["$id", ""]}, ""]},
+            0,
+            {"$size": {"$split": ["$id", ","]}},
+        ]
+    }
 
 
 def is_banned_cached(user_id: int) -> bool:
@@ -25,55 +72,46 @@ def _user_lock(user_id: int) -> asyncio.Lock:
 
 
 async def load_banned_user_cache(db) -> int:
-    """Load the small banned-ID set once when each bot process starts."""
-    record = await db.banned_users.find_one({"_id": BANNED_DOCUMENT_ID}, {"ids": 1})
+    """Load the single comma-separated banned-ID string into process memory."""
+    record = await db.banned_users.find_one({"_id": BANNED_DOCUMENT_ID}, {"id": 1})
     _BANNED_USER_IDS.clear()
-    _BANNED_USER_IDS.update(int(value) for value in (record or {}).get("ids", []))
+    _BANNED_USER_IDS.update(int(value) for value in _split_ids((record or {}).get("id")))
     return len(_BANNED_USER_IDS)
 
 
 async def _add_active_user(db, user_id: int, *, session=None) -> bool:
-    """Atomically append to a non-full bucket, or create the next bucket."""
+    """Append one ID to a non-full string bucket, or create the next bucket."""
     user_id = int(user_id)
-    query = {"$expr": {"$lt": [{"$size": "$ids"}, MAX_USERS_PER_DOCUMENT]}}
-    update = {"$addToSet": {"ids": user_id}}
-
-    try:
-        result = await db.users.update_one(query, update, session=session)
-        if result.matched_count:
-            # A no-op $addToSet means this ID already existed in the matched bucket.
-            return True
-    except DuplicateKeyError:
-        # The unique multikey index means this ID already exists in another bucket.
-        if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
-            return False
-        raise
-
-    if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
+    token = str(user_id)
+    if await db.users.find_one({"id": {"$regex": _id_pattern(user_id)}}, {"_id": 1}, session=session):
         return False
 
+    capacity_filter = {
+        "$expr": {"$lt": [_count_ids_expression(), MAX_USERS_PER_DOCUMENT]}
+    }
     async with _NEW_BUCKET_LOCK:
-        # A concurrent request may have created a fresh bucket while we waited.
-        try:
-            result = await db.users.update_one(query, update, session=session)
-            if result.matched_count:
-                return True
-        except DuplicateKeyError:
-            if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
-                return False
-            raise
-
-        try:
-            await db.users.insert_one({"_id": ObjectId(), "ids": [user_id]}, session=session)
+        # The database rechecks capacity when applying the atomic update.
+        result = await db.users.update_one(
+            capacity_filter,
+            [{"$set": {
+                "id": {
+                    "$cond": [
+                        {"$eq": [{"$ifNull": ["$id", ""]}, ""]},
+                        token,
+                        {"$concat": ["$id", ",", token]},
+                    ]
+                }
+            }}],
+            session=session,
+        )
+        if result.matched_count:
             return True
-        except DuplicateKeyError:
-            if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
-                return False
-            raise
+        await db.users.insert_one({"_id": ObjectId(), "id": token}, session=session)
+        return True
 
 
 async def register_active_user(db, user_id: int) -> bool:
-    """Save an active user with one MongoDB write; banned checks use the local cache."""
+    """Save an active user; banned checks use the process-local cache."""
     user_id = int(user_id)
     async with _user_lock(user_id):
         if is_banned_cached(user_id):
@@ -83,8 +121,10 @@ async def register_active_user(db, user_id: int) -> bool:
 
 
 async def set_user_banned(db, user_id: int, banned: bool) -> bool:
-    """Move an ID between active and banned storage atomically."""
+    """Move an ID between active and banned comma-separated strings atomically."""
     user_id = int(user_id)
+    token = str(user_id)
+    pattern = _id_pattern(user_id)
     async with _user_lock(user_id):
         async with db.client.start_session() as session:
             async with await session.start_transaction():
@@ -92,14 +132,29 @@ async def set_user_banned(db, user_id: int, banned: bool) -> bool:
                     if is_banned_cached(user_id):
                         return False
                     await db.users.update_many(
-                        {"ids": user_id},
-                        {"$pull": {"ids": user_id}},
+                        {"id": {"$regex": pattern}},
+                        [{"$set": {"id": _join_without_id_expression(user_id)}}],
                         session=session,
                     )
-                    await db.users.delete_many({"ids": []}, session=session)
+                    await db.users.delete_many({"id": ""}, session=session)
                     await db.banned_users.update_one(
                         {"_id": BANNED_DOCUMENT_ID},
-                        {"$addToSet": {"ids": user_id}},
+                        [{"$set": {
+                            "id": {
+                                "$cond": [
+                                    {"$or": [
+                                        {"$eq": [{"$ifNull": ["$id", ""]}, ""]},
+                                        {"$not": [{"$in": [token, {"$split": ["$id", ","]}]}]},
+                                    ]},
+                                    {"$cond": [
+                                        {"$eq": [{"$ifNull": ["$id", ""]}, ""]},
+                                        token,
+                                        {"$concat": ["$id", ",", token]},
+                                    ]},
+                                    "$id",
+                                ]
+                            }
+                        }}],
                         upsert=True,
                         session=session,
                     )
@@ -113,8 +168,8 @@ async def set_user_banned(db, user_id: int, banned: bool) -> bool:
                     )
                 else:
                     result = await db.banned_users.update_one(
-                        {"_id": BANNED_DOCUMENT_ID, "ids": user_id},
-                        {"$pull": {"ids": user_id}},
+                        {"_id": BANNED_DOCUMENT_ID, "id": {"$regex": pattern}},
+                        [{"$set": {"id": _join_without_id_expression(user_id)}}],
                         session=session,
                     )
                     if not result.matched_count:
@@ -129,43 +184,58 @@ async def set_user_banned(db, user_id: int, banned: bool) -> bool:
 
 
 async def count_active_users(db) -> int:
-    """Count IDs across buckets, not the number of bucket documents."""
+    """Count comma-delimited IDs across active buckets."""
     rows = await db.users.aggregate([
-        {"$group": {"_id": None, "total": {"$sum": {"$size": "$ids"}}}},
+        {"$group": {"_id": None, "total": {"$sum": _count_ids_expression()}}},
     ]).to_list(length=1)
     return int(rows[0]["total"]) if rows else 0
 
 
 async def count_user_totals(db) -> tuple[int, int]:
-    """Return all registered users and banned users with one aggregate command."""
+    """Return total registered and banned counts with one aggregate command."""
     rows = await db.banned_users.aggregate([
         {"$match": {"_id": BANNED_DOCUMENT_ID}},
         {"$lookup": {
             "from": "users",
             "pipeline": [
-                {"$group": {"_id": None, "total": {"$sum": {"$size": "$ids"}}}},
+                {"$group": {"_id": None, "total": {"$sum": _count_ids_expression()}}},
             ],
             "as": "active",
         }},
         {"$project": {
             "_id": 0,
-            "total": {"$ifNull": [{"$arrayElemAt": ["$active.total", 0]}, 0]},
-            "banned": {"$size": {"$ifNull": ["$ids", []]}},
+            "total": {"$add": [
+                {"$ifNull": [{"$arrayElemAt": ["$active.total", 0]}, 0]},
+                {"$cond": [
+                    {"$eq": [{"$ifNull": ["$id", ""]}, ""]},
+                    0,
+                    {"$size": {"$split": ["$id", ","]}},
+                ]},
+            ]},
+            "banned": {"$cond": [
+                {"$eq": [{"$ifNull": ["$id", ""]}, ""]},
+                0,
+                {"$size": {"$split": ["$id", ","]}},
+            ]},
         }},
     ]).to_list(length=1)
     if not rows:
         return 0, 0
-    active = int(rows[0]["total"])
-    banned = int(rows[0]["banned"])
-    return active + banned, banned
+    return int(rows[0]["total"]), int(rows[0]["banned"])
 
 
 async def migrate_user_storage(db) -> int:
-    """Safely migrate legacy per-user records into 100k-ID buckets and one ban document."""
+    """Convert every legacy/array representation to comma strings, preserving IDs."""
     while True:
         marker = await db.system_migrations.find_one({"_id": MIGRATION_ID})
-        legacy_count = await db.users.count_documents({"user_id": {"$exists": True}})
-        if marker and marker.get("completed") and not legacy_count:
+        old_users = await db.users.count_documents({
+            "$or": [
+                {"ids": {"$exists": True}},
+                {"user_id": {"$exists": True}},
+            ]
+        })
+        old_bans = await db.banned_users.count_documents({"ids": {"$exists": True}})
+        if marker and marker.get("completed") and not old_users and not old_bans:
             break
 
         now = datetime.now(timezone.utc)
@@ -198,68 +268,55 @@ async def migrate_user_storage(db) -> int:
             continue
 
         try:
-            indexes = await db.users.index_information()
-            if "user_id_1" in indexes:
-                await db.users.drop_index("user_id_1")
-            # Materialize the target collection before opening the transaction.
-            await db.banned_users.create_index([("_id", ASCENDING)])
+            for collection, obsolete_indexes in (
+                (db.users, ("active_user_ids_unique", "ids_1")),
+                (db.banned_users, ("banned_user_ids_unique", "ids_1")),
+            ):
+                index_info = await collection.index_information()
+                for index_name in obsolete_indexes:
+                    if index_name in index_info:
+                        await collection.drop_index(index_name)
 
             async with db.client.start_session() as session:
                 async with await session.start_transaction():
-                    legacy_docs = await db.users.find(
-                        {"user_id": {"$exists": True}}, session=session
-                    ).to_list(length=None)
-                    existing_chunks = await db.users.find(
-                        {"ids": {"$exists": True}}, {"ids": 1}, session=session
-                    ).to_list(length=None)
-                    existing_bans = await db.banned_users.find_one(
-                        {"_id": BANNED_DOCUMENT_ID}, {"ids": 1}, session=session
-                    )
+                    user_docs = await db.users.find({}, session=session).to_list(length=None)
+                    ban_docs = await db.banned_users.find({}, session=session).to_list(length=None)
+                    active_ids: set[str] = set()
+                    banned_ids: set[str] = set()
 
-                    active_ids = {
-                        int(user_id)
-                        for chunk in existing_chunks
-                        for user_id in chunk.get("ids", [])
-                    }
-                    banned_ids = {
-                        int(user_id)
-                        for user_id in (existing_bans or {}).get("ids", [])
-                    }
-                    for record in legacy_docs:
-                        user_id = int(record["user_id"])
-                        if record.get("banned") is True:
-                            banned_ids.add(user_id)
-                            active_ids.discard(user_id)
-                        elif user_id not in banned_ids:
-                            active_ids.add(user_id)
+                    for record in user_docs:
+                        if "user_id" in record:
+                            values = [str(record["user_id"])]
+                            if record.get("banned") is True:
+                                banned_ids.update(values)
+                            else:
+                                active_ids.update(values)
+                        else:
+                            active_ids.update(_split_ids(record.get("id")))
+                            active_ids.update(_split_ids(record.get("ids")))
+
+                    for record in ban_docs:
+                        banned_ids.update(_split_ids(record.get("id")))
+                        banned_ids.update(_split_ids(record.get("ids")))
+
                     active_ids.difference_update(banned_ids)
-
                     await db.users.delete_many({}, session=session)
-                    active_list = sorted(active_ids)
-                    for offset in range(0, len(active_list), MAX_USERS_PER_DOCUMENT):
-                        await db.users.insert_one(
-                            {
-                                "_id": ObjectId(),
-                                "ids": active_list[offset:offset + MAX_USERS_PER_DOCUMENT],
-                            },
-                            session=session,
-                        )
-                    await db.banned_users.update_one(
-                        {"_id": BANNED_DOCUMENT_ID},
-                        {"$set": {"ids": sorted(banned_ids)}},
-                        upsert=True,
-                        session=session,
-                    )
-                    # These completed one-time migrations have been retired with
-                    # their code; remove only their historical markers.
+                    ordered_active = sorted(active_ids, key=int)
+                    for offset in range(0, len(ordered_active), MAX_USERS_PER_DOCUMENT):
+                        await db.users.insert_one({
+                            "_id": ObjectId(),
+                            "id": ",".join(ordered_active[offset:offset + MAX_USERS_PER_DOCUMENT]),
+                        }, session=session)
+
+                    await db.banned_users.delete_many({}, session=session)
+                    await db.banned_users.insert_one({
+                        "_id": BANNED_DOCUMENT_ID,
+                        "id": ",".join(sorted(banned_ids, key=int)),
+                    }, session=session)
+
+                    # All historical one-time migration markers are retired.
                     await db.system_migrations.delete_many(
-                        {"_id": {"$in": [
-                            "minimal_delivery_storage_v1",
-                            "remove_external_force_join_links_v1",
-                            "compact_user_profiles_v1",
-                            "force_sub_stable_links_v1",
-                            "pending_join_requests_by_chat_v1",
-                        ]}},
+                        {"_id": {"$ne": MIGRATION_ID}},
                         session=session,
                     )
                     await db.system_migrations.update_one(
@@ -282,16 +339,10 @@ async def migrate_user_storage(db) -> int:
             )
             raise
 
-    await db.users.create_index(
-        [("ids", ASCENDING)], unique=True, sparse=True, name="active_user_ids_unique"
-    )
-    await db.banned_users.create_index(
-        [("ids", ASCENDING)], unique=True, sparse=True, name="banned_user_ids_unique"
-    )
     await db.banned_users.update_one(
         {"_id": BANNED_DOCUMENT_ID},
-        {"$setOnInsert": {"ids": []}},
+        {"$setOnInsert": {"id": ""}},
         upsert=True,
     )
     await load_banned_user_cache(db)
-    return legacy_count
+    return old_users + old_bans
