@@ -1,5 +1,6 @@
 """Start command, Force Sub gate, and single/batch deeplink delivery."""
 import logging
+import hashlib
 import html
 import asyncio
 import time
@@ -79,6 +80,11 @@ def render_common_variables(raw_text, user, bot):
     for token, replacement in values.items():
         text = text.replace(token, replacement)
     return text
+
+
+def _join_signature(channels: list[str]) -> str:
+    """Create a stable signature for a configured Force Sub channel set."""
+    return hashlib.sha256(",".join(sorted(c.strip() for c in channels if c.strip())).encode()).hexdigest()
 
 
 async def effective_force_join_channels(database, settings, cfg: dict | None = None) -> list[str]:
