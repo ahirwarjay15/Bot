@@ -34,44 +34,33 @@ async def load_banned_user_cache(db) -> int:
 async def _add_active_user(db, user_id: int, *, session=None) -> bool:
     """Atomically append to a non-full bucket, or create the next bucket."""
     user_id = int(user_id)
+    query = {"$expr": {"$lt": [{"$size": "$ids"}, MAX_USERS_PER_DOCUMENT]}}
+    update = {"$addToSet": {"ids": user_id}}
+
     try:
-        result = await db.users.update_one(
-            {
-                "ids": {"$ne": user_id},
-                "$expr": {"$lt": [{"$size": "$ids"}, MAX_USERS_PER_DOCUMENT]},
-            },
-            {"$addToSet": {"ids": user_id}},
-            session=session,
-        )
-        if result.modified_count:
-            return True
+        result = await db.users.update_one(query, update, session=session)
+        if result.matched_count:
+            # A no-op $addToSet means this ID already existed in the matched bucket.
+            return result.modified_count > 0 or True
     except DuplicateKeyError:
-        # The unique multikey index prevents the same ID entering two buckets.
+        # The unique multikey index means this ID already exists in another bucket.
         if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
             return False
         raise
 
+    if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
+        return False
+
     async with _NEW_BUCKET_LOCK:
-        # Another concurrent registration may have created a fresh bucket while
-        # this request waited; retry the bounded append before creating a bucket.
+        # A concurrent request may have created a fresh bucket while we waited.
         try:
-            result = await db.users.update_one(
-                {
-                    "ids": {"$ne": user_id},
-                    "$expr": {"$lt": [{"$size": "$ids"}, MAX_USERS_PER_DOCUMENT]},
-                },
-                {"$addToSet": {"ids": user_id}},
-                session=session,
-            )
-            if result.modified_count:
+            result = await db.users.update_one(query, update, session=session)
+            if result.matched_count:
                 return True
         except DuplicateKeyError:
             if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
                 return False
             raise
-
-        if await db.users.find_one({"ids": user_id}, {"_id": 1}, session=session):
-            return False
 
         try:
             await db.users.insert_one({"_id": ObjectId(), "ids": [user_id]}, session=session)
