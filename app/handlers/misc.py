@@ -110,6 +110,9 @@ async def invalid_post(message: Message, settings: Settings, database):
             return
 
         cfg = await database.db.settings.find_one({"key": "invalid_post"}) or {}
+        if not cfg.get("enabled", False):
+            log.info("Invalid-post skipped: setting disabled or missing")
+            return
         me = await get_bot_identity(message.bot)
         text = _render_user_text(cfg.get("text") or DEFAULT_INVALID, user, me)
         markup = _invalid_markup(cfg)
