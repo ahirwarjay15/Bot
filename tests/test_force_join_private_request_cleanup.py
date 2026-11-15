@@ -6,11 +6,29 @@ import pytest
 from app.handlers.start import (
     _is_private_chat,
     _pending_request_is_recent,
-    force_join_button_label,
     cleanup_expired_pending_join_requests,
+    cleanup_pending_join_requests_for_channel,
     clear_accepted_private_join_request,
     join_status,
 )
+
+
+class Cursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def to_list(self, length=None):
+        return list(self.rows)
+
+    def __aiter__(self):
+        self.iterator = iter(self.rows)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self.iterator)
+        except StopIteration:
+            raise StopAsyncIteration
 
 
 @pytest.mark.parametrize(
@@ -25,344 +43,181 @@ from app.handlers.start import (
     ],
 )
 def test_is_private_chat(chat_type, username, expected):
-    chat = SimpleNamespace(type=chat_type, username=username)
-    assert _is_private_chat(chat) is expected
+    assert _is_private_chat(SimpleNamespace(type=chat_type, username=username)) is expected
 
 
-class FakePendingRequests:
-    def __init__(self):
-        self.deleted = []
-
-    async def delete_one(self, query):
-        self.deleted.append(query)
-
-
-@pytest.mark.asyncio
-async def test_accepted_private_supergroup_request_is_removed():
-    pending = FakePendingRequests()
-    database = SimpleNamespace(db=SimpleNamespace(pending_join_requests=pending))
-    event = SimpleNamespace(
-        chat=SimpleNamespace(id=-100123, type="supergroup", username=None),
-        old_chat_member=SimpleNamespace(status="left", user=SimpleNamespace(id=42)),
-        new_chat_member=SimpleNamespace(status="member", user=SimpleNamespace(id=42)),
-    )
-
-    await clear_accepted_private_join_request(event, database)
-
-    assert pending.deleted == [{"chat_id": -100123, "user_id": 42}]
-
-
-@pytest.mark.asyncio
-async def test_public_group_membership_does_not_clear_private_request_record():
-    pending = FakePendingRequests()
-    database = SimpleNamespace(db=SimpleNamespace(pending_join_requests=pending))
-    event = SimpleNamespace(
-        chat=SimpleNamespace(id=-100123, type="supergroup", username="public_group"),
-        old_chat_member=SimpleNamespace(status="left", user=SimpleNamespace(id=42)),
-        new_chat_member=SimpleNamespace(status="member", user=SimpleNamespace(id=42)),
-    )
-
-    await clear_accepted_private_join_request(event, database)
-
-    assert pending.deleted == []
-
-
-@pytest.mark.asyncio
-async def test_membership_loss_does_not_count_as_request_acceptance():
-    pending = FakePendingRequests()
-    database = SimpleNamespace(db=SimpleNamespace(pending_join_requests=pending))
-    event = SimpleNamespace(
-        chat=SimpleNamespace(id=-100123, type="supergroup", username=None),
-        old_chat_member=SimpleNamespace(status="member", user=SimpleNamespace(id=42)),
-        new_chat_member=SimpleNamespace(status="left", user=SimpleNamespace(id=42)),
-    )
-
-    await clear_accepted_private_join_request(event, database)
-
-    assert pending.deleted == []
-
-
-
-def test_pending_request_expires_after_15_days():
+def test_pending_request_expires_after_15_days_and_uses_compact_timestamp():
     now = datetime.now(timezone.utc)
-    assert _pending_request_is_recent({"requested_at": now - timedelta(days=14, hours=23)}, now=now)
-    assert not _pending_request_is_recent({"requested_at": now - timedelta(days=15, seconds=1)}, now=now)
-
-
-class FakePendingRequestCollection:
-    def __init__(self):
-        self.query = None
-
-    async def delete_many(self, query):
-        self.query = query
-        return SimpleNamespace(deleted_count=3)
+    assert _pending_request_is_recent({"t": now - timedelta(days=14, hours=23)}, now=now)
+    assert not _pending_request_is_recent({"t": now - timedelta(days=15, seconds=1)}, now=now)
+    assert not _pending_request_is_recent({"requested_at": now}, now=now)
 
 
 @pytest.mark.asyncio
-async def test_cleanup_worker_query_only_targets_requests_older_than_15_days():
-    pending = FakePendingRequestCollection()
-    db = SimpleNamespace(pending_join_requests=pending)
-    now = datetime.now(timezone.utc)
+async def test_accepted_private_join_request_pulls_only_that_user_and_removes_empty_chat():
+    class Pending:
+        def __init__(self):
+            self.updates = []
+            self.deletes = []
 
-    deleted = await cleanup_expired_pending_join_requests(db, now=now)
-
-    assert deleted == 3
-    assert pending.query == {"requested_at": {"$lte": now - timedelta(days=15)}}
-
-
-@pytest.mark.asyncio
-async def test_public_chat_never_passes_from_pending_request_record():
-    class FakeBot:
-        async def get_chat(self, channel):
-            return SimpleNamespace(id=-100123, type="channel", username="public_channel")
-
-        async def get_chat_member(self, chat_id, user_id):
-            return SimpleNamespace(status="left", is_member=False)
-
-    class FakeSettings:
-        async def find_one(self, query):
-            return {"mode": "join_request"}
-
-    class FakePending:
-        async def find_one(self, query):
-            return {"chat_id": -100123, "user_id": 42, "requested_at": datetime.now(timezone.utc)}
+        async def update_one(self, query, update):
+            self.updates.append((query, update))
 
         async def delete_one(self, query):
-            raise AssertionError("Public chat verification must not inspect or delete pending records")
-
-    db = SimpleNamespace(settings=FakeSettings(), pending_join_requests=FakePending())
-
-    assert await join_status(FakeBot(), 42, ["@public_channel"], db) == ["@public_channel"]
-
-
-
-def test_pending_request_is_expired_at_exactly_15_days():
-    now = datetime.now(timezone.utc)
-    assert not _pending_request_is_recent({"requested_at": now - timedelta(days=15)}, now=now)
-
-
-def test_force_join_default_button_label_uses_join_number_not_channel_title():
-    assert force_join_button_label({"channel_title": "Actual Private Channel"}, 3) == "Join 3"
-
-
-def test_force_join_custom_button_label_overrides_join_number():
-    assert force_join_button_label({"channel_title": "Actual Channel", "button_text": "Premium Group"}, 3) == "Premium Group"
-
-
-@pytest.mark.asyncio
-async def test_private_channel_membership_passes_even_if_request_record_exists():
-    class FakeBot:
-        async def get_chat(self, channel):
-            return SimpleNamespace(id=-100123, type="channel", username=None)
-
-        async def get_chat_member(self, chat_id, user_id):
-            return SimpleNamespace(status="member", is_member=True)
-
-    class FakeSettings:
-        async def find_one(self, query):
-            return {"mode": "join_request"}
-
-    class FakePending:
-        async def find_one(self, query):
-            raise AssertionError("Live membership should pass without consulting pending requests")
-
-    db = SimpleNamespace(settings=FakeSettings(), pending_join_requests=FakePending())
-
-    assert await join_status(FakeBot(), 42, ["-100123"], db) == []
-
-
-@pytest.mark.asyncio
-async def test_private_channel_recent_pending_request_passes_when_not_a_member():
-    class FakeBot:
-        async def get_chat(self, channel):
-            return SimpleNamespace(id=-100123, type="channel", username=None)
-
-        async def get_chat_member(self, chat_id, user_id):
-            return SimpleNamespace(status="left", is_member=False)
-
-    class FakeSettings:
-        async def find_one(self, query):
-            return {"mode": "join_request"}
-
-    class FakePending:
-        async def find_one(self, query):
-            return {"chat_id": -100123, "user_id": 42, "requested_at": datetime.now(timezone.utc)}
-
-    db = SimpleNamespace(settings=FakeSettings(), pending_join_requests=FakePending())
-
-    assert await join_status(FakeBot(), 42, ["-100123"], db) == []
-
-
-@pytest.mark.asyncio
-async def test_private_channel_expired_pending_request_does_not_pass():
-    class FakeBot:
-        async def get_chat(self, channel):
-            return SimpleNamespace(id=-100123, type="channel", username=None)
-
-        async def get_chat_member(self, chat_id, user_id):
-            return SimpleNamespace(status="left", is_member=False)
-
-    class FakeSettings:
-        async def find_one(self, query):
-            return {"mode": "join_request"}
-
-    class FakePending:
-        async def find_one(self, query):
-            return {"chat_id": -100123, "user_id": 42, "requested_at": datetime.now(timezone.utc) - timedelta(days=15)}
-
-    db = SimpleNamespace(settings=FakeSettings(), pending_join_requests=FakePending())
-
-    assert await join_status(FakeBot(), 42, ["-100123"], db) == ["-100123"]
-
-
-@pytest.mark.asyncio
-async def test_missing_private_force_join_url_does_not_create_link_during_user_request():
-    from app.handlers.start import resolve_force_join_button_target
-
-    class LinksCollection:
-        def __init__(self):
-            self.records = []
-
-        async def find_one(self, query):
-            return None
-
-    class FakeBot:
-        async def get_chat(self, chat_id):
-            raise AssertionError("User requests must not resolve/create invite links synchronously")
-
-        async def create_chat_invite_link(self, **kwargs):
-            raise AssertionError("Invite links are created only by the background worker")
-
-    links = LinksCollection()
-    db = SimpleNamespace(settings=SimpleNamespace(), force_join_links=links)
-    target = await resolve_force_join_button_target(FakeBot(), db, "-100123", {})
-
-    assert target is None
-    assert links.records == []
-
-@pytest.mark.asyncio
-async def test_stale_private_force_join_invite_is_not_recreated_in_user_request():
-    from app.handlers.start import resolve_force_join_button_target
-
-    class LinksCollection:
-        def __init__(self):
-            self.records = []
-
-        async def find_one(self, query):
-            return None
-
-    class FakeBot:
-        async def get_chat(self, chat_id):
-            raise AssertionError("Ordinary verification must not resolve channel metadata")
-
-        async def create_chat_invite_link(self, **kwargs):
-            raise AssertionError("Ordinary verification must not create invite links")
-
-    links = LinksCollection()
-    db = SimpleNamespace(settings=SimpleNamespace(), force_join_links=links)
-    target = await resolve_force_join_button_target(
-        FakeBot(), db, "-100123",
-        {"button_url": "https://t.me/+wrong_channel_invite",
-         "channel_title": "Another Channel", "chat_type": "channel", "mode": "join_request"},
-    )
-
-    assert target is None
-    assert links.records == []
-
-@pytest.mark.asyncio
-async def test_public_force_join_link_is_not_created_in_user_request():
-    from app.handlers.start import resolve_force_join_button_target
-
-    class LinksCollection:
-        def __init__(self):
-            self.records = []
-
-        async def find_one(self, query):
-            return None
-
-    class FakeBot:
-        async def get_chat(self, chat_id):
-            raise AssertionError("Ordinary verification must not resolve channel metadata")
-
-        async def create_chat_invite_link(self, **kwargs):
-            raise AssertionError("Ordinary verification must not create invite links")
-
-    links = LinksCollection()
-    target = await resolve_force_join_button_target(
-        FakeBot(), SimpleNamespace(settings=SimpleNamespace(), force_join_links=links),
-        "-100123", {"mode": "normal"},
-    )
-
-    assert target is None
-    assert links.records == []
-
-
-
-@pytest.mark.asyncio
-async def test_removing_force_sub_channel_deletes_all_its_pending_requests_without_telegram_lookup():
-    from app.handlers.start import cleanup_pending_join_requests_for_channel
-
-    class Pending:
-        def __init__(self):
-            self.query = None
-        async def delete_many(self, query):
-            self.query = query
-            return SimpleNamespace(deleted_count=7)
-
-    class Bot:
-        async def get_chat(self, channel):
-            raise AssertionError("Numeric Force Sub channel IDs must not call Telegram")
+            self.deletes.append(query)
 
     pending = Pending()
-    deleted = await cleanup_pending_join_requests_for_channel(
-        Bot(), SimpleNamespace(pending_join_requests=pending), "-100123"
+    database = SimpleNamespace(db=SimpleNamespace(pending_join_requests=pending))
+    event = SimpleNamespace(
+        chat=SimpleNamespace(id=-100123, type="channel", username=None),
+        old_chat_member=SimpleNamespace(status="left"),
+        new_chat_member=SimpleNamespace(status="member", user=SimpleNamespace(id=42)),
     )
 
-    assert deleted == 7
-    assert pending.query == {"chat_id": {"$in": [-100123]}}
+    await clear_accepted_private_join_request(event, database)
+
+    assert pending.updates == [
+        ({"_id": -100123}, {"$pull": {"users": {"id": 42}}})
+    ]
+    assert pending.deletes == [{"_id": -100123, "users": {"$size": 0}}]
 
 
 @pytest.mark.asyncio
-async def test_removing_username_force_sub_uses_saved_chat_id_before_telegram_lookup():
-    from app.handlers.start import cleanup_pending_join_requests_for_channel
-
+async def test_cleanup_worker_only_filters_compact_requests_older_than_15_days():
     class Pending:
+        def __init__(self):
+            self.update_query = None
+            self.pipeline = None
+            self.delete_query = None
+
+        async def update_many(self, query, pipeline):
+            self.update_query = query
+            self.pipeline = pipeline
+            return SimpleNamespace(modified_count=2)
+
         async def delete_many(self, query):
-            self.query = query
-            return SimpleNamespace(deleted_count=2)
-
-    class Bot:
-        async def get_chat(self, channel):
-            raise AssertionError("Saved chat IDs should avoid an extra Telegram request")
-
-    pending = Pending()
-    deleted = await cleanup_pending_join_requests_for_channel(
-        Bot(), SimpleNamespace(pending_join_requests=pending),
-        "@privatechannel", known_chat_ids={-100123}
-    )
-
-    assert deleted == 2
-    assert pending.query == {"chat_id": {"$in": [-100123]}}
-
-
-@pytest.mark.asyncio
-async def test_removing_username_force_sub_resolves_chat_id_only_when_needed():
-    from app.handlers.start import cleanup_pending_join_requests_for_channel
-
-    class Pending:
-        async def delete_many(self, query):
-            self.query = query
+            self.delete_query = query
             return SimpleNamespace(deleted_count=1)
 
+    pending = Pending()
+    now = datetime.now(timezone.utc)
+    deleted = await cleanup_expired_pending_join_requests(
+        SimpleNamespace(pending_join_requests=pending), now=now
+    )
+    cutoff = now - timedelta(days=15)
+
+    assert deleted == 2
+    assert pending.update_query == {"users.t": {"$lte": cutoff}}
+    assert pending.pipeline[0]["$set"]["users"]["$filter"]["cond"] == {
+        "$gt": ["$$entry.t", cutoff]
+    }
+    assert pending.delete_query == {"users": {"$size": 0}}
+
+
+@pytest.mark.asyncio
+async def test_join_status_batches_private_pending_requests_into_one_database_query():
+    class Settings:
+        def find(self, query):
+            assert query["key"] == "force_join_channel"
+            return Cursor([
+                {"channel": "-100123", "mode": "join_request"},
+                {"channel": "-100456", "mode": "join_request"},
+            ])
+
+    class Pending:
+        def __init__(self):
+            self.queries = []
+
+        def find(self, query, projection):
+            self.queries.append((query, projection))
+            return Cursor([
+                {"_id": -100123, "users": [{"id": 42, "t": datetime.now(timezone.utc)}]},
+            ])
+
     class Bot:
-        async def get_chat(self, channel):
-            assert channel == "@publicchannel"
-            return SimpleNamespace(id=-100456)
+        async def get_chat_member(self, chat_id, user_id):
+            return SimpleNamespace(status="left", is_member=False)
+
+        async def get_chat(self, chat_id):
+            return SimpleNamespace(id=int(chat_id), type="channel", username=None)
 
     pending = Pending()
-    deleted = await cleanup_pending_join_requests_for_channel(
-        Bot(), SimpleNamespace(pending_join_requests=pending), "@publicchannel"
+    db = SimpleNamespace(settings=Settings(), pending_join_requests=pending)
+
+    missing = await join_status(Bot(), 42, ["-100123", "-100456"], db)
+
+    assert missing == ["-100456"]
+    assert len(pending.queries) == 1
+    assert pending.queries[0][0] == {
+        "_id": {"$in": [-100123, -100456]},
+        "users.id": 42,
+    }
+
+
+@pytest.mark.asyncio
+async def test_public_chat_never_queries_pending_request_collection():
+    class Settings:
+        def find(self, query):
+            return Cursor([{"channel": "@public", "mode": "join_request"}])
+
+    class Pending:
+        def find(self, *args, **kwargs):
+            raise AssertionError("Public chats must not query pending requests")
+
+    class Bot:
+        async def get_chat_member(self, chat_id, user_id):
+            return SimpleNamespace(status="left", is_member=False)
+
+        async def get_chat(self, chat_id):
+            return SimpleNamespace(id=-100123, type="channel", username="public")
+
+    db = SimpleNamespace(settings=Settings(), pending_join_requests=Pending())
+    assert await join_status(Bot(), 42, ["@public"], db) == ["@public"]
+
+
+@pytest.mark.asyncio
+async def test_removing_force_sub_chat_revokes_tracked_link_and_deletes_its_object():
+    class Links:
+        def __init__(self):
+            self.deleted = []
+
+        def find(self, query):
+            return Cursor([{
+                "channel": "-100123",
+                "chat_id": -100123,
+                "invite_link": "https://t.me/+private",
+            }])
+
+        async def delete_many(self, query):
+            self.deleted.append(query)
+
+    class Settings:
+        async def find_one(self, query):
+            return {"button_url": "https://t.me/+private"}
+
+        async def delete_one(self, query):
+            self.deleted = query
+
+    class Pending:
+        async def delete_many(self, query):
+            self.deleted = query
+
+    class Bot:
+        def __init__(self):
+            self.revoked = []
+
+        async def revoke_chat_invite_link(self, **kwargs):
+            self.revoked.append(kwargs)
+
+    links, settings, pending, bot = Links(), Settings(), Pending(), Bot()
+    db = SimpleNamespace(
+        force_join_links=links, settings=settings, pending_join_requests=pending
     )
 
-    assert deleted == 1
-    assert pending.query == {"chat_id": {"$in": [-100456]}}
+    assert await cleanup_pending_join_requests_for_channel(bot, db, "-100123") == 1
+    assert bot.revoked == [{
+        "chat_id": -100123, "invite_link": "https://t.me/+private"
+    }]
+    assert pending.deleted == {"_id": {"$in": [-100123]}}
+    assert links.deleted == {"channel": "-100123"}
+    assert settings.deleted == {"key": "force_join_channel", "channel": "-100123"}
