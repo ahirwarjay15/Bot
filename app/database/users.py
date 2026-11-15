@@ -147,7 +147,7 @@ async def count_active_users(db) -> int:
 
 
 async def count_user_totals(db) -> tuple[int, int]:
-    """Return active and banned totals with one aggregate command."""
+    """Return all registered users and banned users with one aggregate command."""
     rows = await db.banned_users.aggregate([
         {"$match": {"_id": BANNED_DOCUMENT_ID}},
         {"$lookup": {
