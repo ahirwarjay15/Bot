@@ -370,52 +370,100 @@ def _is_member_status(member) -> bool:
 
 
 async def cleanup_expired_pending_join_requests(db, now=None) -> int:
-    """Remove private-channel join requests older than the 15-day validity window."""
+    """Remove expired user entries; called exclusively by the 04:00 cleanup worker."""
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(days=15)
-    result = await db.pending_join_requests.delete_many({
-        "requested_at": {"$lte": cutoff}
-    })
-    return int(getattr(result, "deleted_count", 0))
+    result = await db.pending_join_requests.update_many(
+        {"users.t": {"$lte": cutoff}},
+        [{
+            "$set": {
+                "users": {
+                    "$filter": {
+                        "input": {"$ifNull": ["$users", []]},
+                        "as": "entry",
+                        "cond": {"$gt": ["$entry.t", cutoff]},
+                    }
+                }
+            }
+        }],
+    )
+    await db.pending_join_requests.delete_many({"users": {"$size": 0}})
+    return int(getattr(result, "modified_count", 0))
 
 
 async def cleanup_pending_join_requests_for_channel(
     bot, db, channel: str, known_chat_ids: set[int] | None = None
 ) -> int:
-    """Delete all saved join requests for a Force Sub chat that is being removed."""
-    chat_ids = {int(value) for value in (known_chat_ids or set()) if value is not None}
+    """Revoke this chat's tracked invite, then remove its pending-request object."""
     channel_key = str(channel).strip()
+    links = await db.force_join_links.find({"channel": channel_key}).to_list(length=None)
+    channel_cfg = await db.settings.find_one({
+        "key": "force_join_channel", "channel": channel_key
+    }) or {}
+    chat_ids = {int(value) for value in (known_chat_ids or set()) if value is not None}
     if channel_key.lstrip("-").isdigit():
         chat_ids.add(int(channel_key))
+    chat_ids.update(
+        int(link["chat_id"]) for link in links if link.get("chat_id") is not None
+    )
     if not chat_ids:
-        chat_arg = channel_key
-        if chat_arg.startswith("@"):
-            chat_arg = chat_arg
         try:
-            chat = await bot.get_chat(chat_arg)
+            chat = await bot.get_chat(channel_key)
+            chat_ids.add(int(chat.id))
         except (ValueError, TelegramAPIError):
-            log.warning(
-                "Could not resolve removed Force Sub channel %r; pending join requests will expire by retention policy",
-                channel_key,
+            log.warning("Could not resolve removed Force Sub chat %r", channel_key)
+    
+    invite_pairs = {
+        (int(link["chat_id"]), str(link["invite_link"]))
+        for link in links
+        if link.get("chat_id") is not None and link.get("invite_link")
+    }
+    configured_url = str(channel_cfg.get("button_url") or "")
+    if chat_ids and configured_url.startswith("https://t.me/+"):
+        invite_pairs.add((next(iter(chat_ids)), configured_url))
+
+    revoke_failed = False
+    for chat_id, invite_link in invite_pairs:
+        try:
+            await bot.revoke_chat_invite_link(
+                chat_id=chat_id, invite_link=invite_link
             )
-            return 0
-        chat_ids.add(int(chat.id))
-    result = await db.pending_join_requests.delete_many({
-        "chat_id": {"$in": sorted(chat_ids)}
+        except TelegramAPIError as exc:
+            message = str(exc).lower()
+            already_unusable = any(term in message for term in (
+                "invite link is invalid", "invite link has expired",
+                "invite link was revoked", "invite link is revoked",
+                "already revoked", "already expired",
+            ))
+            if not already_unusable:
+                revoke_failed = True
+                log.warning(
+                    "Could not revoke removed Force Sub invite for chat %s; keeping its link record for retry",
+                    chat_id, exc_info=True,
+                )
+
+    # Keep failed revocation records so a later operator retry still has the URL.
+    if not revoke_failed:
+        await db.force_join_links.delete_many({"channel": channel_key})
+    if chat_ids:
+        await db.pending_join_requests.delete_one({"_id": {"$in": sorted(chat_ids)}})
+    else:
+        log.warning("No Telegram chat ID resolved for removed Force Sub chat %r; pending object could not be identified", channel_key)
+    await db.settings.delete_one({
+        "key": "force_join_channel", "channel": channel_key
     })
-    return int(getattr(result, "deleted_count", 0))
+    return len(chat_ids)
 
 
 def _pending_request_is_recent(pending: dict | None, now=None, max_age_seconds: int = 15 * 24 * 60 * 60) -> bool:
-    """Only honor a private join request for up to 15 days; legacy records are invalid."""
-    requested_at = (pending or {}).get("requested_at")
+    """Only honor a compact-format request entry for up to 15 days."""
+    requested_at = (pending or {}).get("t")
     if not isinstance(requested_at, datetime):
         return False
     now = now or datetime.now(timezone.utc)
     if requested_at.tzinfo is None:
         requested_at = requested_at.replace(tzinfo=timezone.utc)
     age = (now - requested_at.astimezone(timezone.utc)).total_seconds()
-    # At exactly 15 days the request is expired, matching the cleanup worker's cutoff.
     return 0 <= age < max_age_seconds
 
 
@@ -462,9 +510,15 @@ async def join_status(bot, user_id: int, channels: list[str], db=None) -> list[s
                 chat = await bot.get_chat(chat_arg)
                 if _is_private_chat(chat):
                     pending = await db.pending_join_requests.find_one(
-                        {"chat_id": chat.id, "user_id": user_id}
+                        {"_id": int(chat.id), "users.id": int(user_id)},
+                        {"users.$": 1},
                     )
-                    if _pending_request_is_recent(pending):
+                    entries = (pending or {}).get("users", [])
+                    pending_user = next(
+                        (entry for entry in entries if int(entry.get("id", 0)) == int(user_id)),
+                        None,
+                    )
+                    if _pending_request_is_recent(pending_user):
                         return None
             return channel
         except TelegramAPIError:
@@ -1001,24 +1055,45 @@ async def start_about_back(query: CallbackQuery, settings: Settings, database):
 
 @router.chat_join_request()
 async def remember_pending_join_request(event, database):
-    bot = getattr(event, "bot", None)
-    # Telegram emits this only when the bot has the appropriate channel admin rights.
+    # One compact document per chat; refresh an existing user's timestamp atomically.
+    chat_id = int(event.chat.id)
+    user_id = int(event.from_user.id)
+    requested_at = datetime.now(timezone.utc)
     await database.db.pending_join_requests.update_one(
-        {"chat_id": event.chat.id, "user_id": event.from_user.id},
-        {"$set": {"chat_id": event.chat.id, "user_id": event.from_user.id,
-                  "requested_at": datetime.now(timezone.utc)}},
+        {"_id": chat_id},
+        [{
+            "$set": {
+                "users": {
+                    "$concatArrays": [
+                        {
+                            "$filter": {
+                                "input": {"$ifNull": ["$users", []]},
+                                "as": "entry",
+                                "cond": {"$ne": ["$entry.id", user_id]},
+                            }
+                        },
+                        [{"id": user_id, "t": requested_at}],
+                    ]
+                }
+            }
+        }],
         upsert=True,
     )
 
 @router.chat_member()
 async def clear_accepted_private_join_request(event, database):
-    """Drop a saved request only when a private-channel request becomes membership."""
+    """Remove a user's entry only when a private-chat request becomes membership."""
     if not _is_private_chat(event.chat):
         return
     if _is_member_status(event.old_chat_member) or not _is_member_status(event.new_chat_member):
         return
+    chat_id = int(event.chat.id)
+    await database.db.pending_join_requests.update_one(
+        {"_id": chat_id},
+        {"$pull": {"users": {"id": int(event.new_chat_member.user.id)}}},
+    )
     await database.db.pending_join_requests.delete_one(
-        {"chat_id": event.chat.id, "user_id": event.new_chat_member.user.id}
+        {"_id": chat_id, "users": {"$size": 0}}
     )
 
 
