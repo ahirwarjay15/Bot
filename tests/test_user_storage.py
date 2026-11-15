@@ -27,7 +27,7 @@ async def test_registration_appends_to_comma_separated_active_bucket(monkeypatch
         SimpleNamespace(users=collection), 123456
     )
     assert collection.query["$expr"]["$lt"][1] == 100_000
-    assert collection.update[0]["$set"]["id"]["$concat"] == ["$id", ",", "123456"]
+    assert collection.update[0]["$set"]["id"]["$cond"][2]["$concat"] == ["$id", ",", "123456"]
 
 
 @pytest.mark.asyncio
