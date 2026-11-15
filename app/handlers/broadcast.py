@@ -280,8 +280,10 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
             if not job.get("recipients_loaded", False):
                 loaded_count = 0
                 batch = []
-                async for bucket in db.users.find({}, {"ids": 1}):
-                    for user_id in bucket.get("ids", []):
+                async for bucket in db.users.find({}, {"id": 1}):
+                    for user_id in str(bucket.get("id") or "").split(","):
+                        if not user_id:
+                            continue
                         batch.append({
                             "job_id": job_id,
                             "user_id": int(user_id),
