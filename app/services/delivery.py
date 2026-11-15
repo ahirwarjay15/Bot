@@ -397,6 +397,13 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
     await db.tasks.delete_many({"$and": [stale_delivering, {"$or": [
         {"message_ids": {"$exists": False}}, {"message_ids": None}, {"message_ids": []},
     ]}]})
+    # A worker may stop after claiming a due task. Re-queue those claims once
+    # at startup; overdue deadlines are then handled immediately by the scheduler.
+    await db.tasks.update_many(
+        {"status": "processing"},
+        {"$set": {"status": "pending", "deadline": now, "updated_at": now},
+         "$unset": {"claimed_at": ""}},
+    )
 
     wake_event = asyncio.Event()
     ready_event = asyncio.Event()
@@ -491,11 +498,10 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
                                 await bot.edit_message_text(chat_id=task["user_id"], message_id=notice_id, text=text, reply_markup=markup, parse_mode="HTML")
                             else:
                                 await bot.send_message(task["user_id"], text, reply_markup=markup, parse_mode="HTML")
-                        except (TelegramForbiddenError, TelegramBadRequest):
-                            await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"after_delete_attempted": True}})
-                            log.warning("After-delete replacement cannot be edited for user %s", task["user_id"])
                         except TelegramAPIError:
-                            log.exception("Transient After-delete replacement failure; expiry task will retry")
+                            # Retry every Telegram failure uniformly; even permanent
+                            # errors get the requested three scheduled retries.
+                            log.exception("After-delete replacement failed; expiry task will retry")
                             raise
                         else:
                             await db.tasks.update_one({"_id": task["_id"]}, {"$set": {"after_delete_attempted": True}})
@@ -514,16 +520,29 @@ async def run_task_worker(bot: Bot, db, poll_seconds: int = 60):
                         await db.delivery_requests.delete_one({"request_key": delivery_key, "status": "done"})
                     await db.tasks.delete_one({"_id": task["_id"], "status": "done"})
                 except Exception:
-                    log.exception("Expiry task failed")
-                    retry_at = _now() + timedelta(seconds=60)
-                    await db.tasks.update_one(
-                        {"_id": task["_id"]},
-                        {"$set": {
-                            "status": "pending",
-                            "deadline": retry_at,
-                            "last_error_at": _now(),
-                        }},
-                    )
+                    retry_count = int(task.get("retry_count", 0) or 0)
+                    if retry_count < 3:
+                        retry_count += 1
+                        retry_at = _now() + timedelta(minutes=1)
+                        log.exception(
+                            "Expiry task failed; scheduling retry %s/3 in 1 minute",
+                            retry_count,
+                        )
+                        await db.tasks.update_one(
+                            {"_id": task["_id"]},
+                            {"$set": {
+                                "status": "pending",
+                                "retry_count": retry_count,
+                                "deadline": retry_at,
+                                "last_error_at": _now(),
+                            }, "$unset": {"claimed_at": ""}},
+                        )
+                    else:
+                        log.exception(
+                            "Expiry task exhausted 3 retries; skipping task %s",
+                            task.get("request_key") or task.get("_id"),
+                        )
+                        await db.tasks.delete_one({"_id": task["_id"]})
             # Loop immediately to find the next scheduled deadline; idle waits above.
     
     finally:
