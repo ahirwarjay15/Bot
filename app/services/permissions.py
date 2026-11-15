@@ -1,4 +1,5 @@
 from app.config import Settings
+from app.database.users import is_banned_cached
 
 
 def is_owner(user_id: int, settings: Settings) -> bool:
@@ -13,5 +14,5 @@ async def is_owner_or_moderator(db, user_id: int, settings: Settings) -> bool:
 
 
 async def is_banned(db, user_id: int) -> bool:
-    doc = await db.users.find_one({"user_id": user_id}, {"banned": 1})
-    return bool(doc and doc.get("banned"))
+    """Read the process-local banned-ID cache, never query MongoDB per message."""
+    return is_banned_cached(user_id)
