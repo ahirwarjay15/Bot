@@ -244,9 +244,6 @@ async def migrate_user_storage(db) -> int:
             )
             raise
 
-    await db.users.create_index(
-        [("ids", ASCENDING)], unique=True, sparse=True, name="active_user_ids_unique"
-    )
     await db.banned_users.create_index(
         [("ids", ASCENDING)], unique=True, sparse=True, name="banned_user_ids_unique"
     )
