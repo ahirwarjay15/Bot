@@ -15,7 +15,7 @@ async def test_registration_uses_one_bounded_active_bucket_write(monkeypatch):
         async def update_one(self, query, update, session=None):
             self.query = query
             self.update = update
-            return SimpleNamespace(modified_count=1)
+            return SimpleNamespace(matched_count=1, modified_count=1)
 
     collection = Users()
     monkeypatch.setattr(user_storage, "_BANNED_USER_IDS", set())
