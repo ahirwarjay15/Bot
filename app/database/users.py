@@ -316,7 +316,7 @@ async def migrate_user_storage(db) -> int:
 
                     # All historical one-time migration markers are retired.
                     await db.system_migrations.delete_many(
-                        {"_id": {"$ne": MIGRATION_ID}},
+                        {"_id": {"$ne": MIGRATION_ID}, "completed": True},
                         session=session,
                     )
                     await db.system_migrations.update_one(
