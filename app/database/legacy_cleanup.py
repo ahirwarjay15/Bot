@@ -11,7 +11,7 @@ BOT_COLLECTIONS = (
     "deeplink_codes", "files", "moderators", "tasks", "broadcast_jobs",
     "batch_deliveries", "delivery_requests", "broadcast_drafts",
     "system_migrations", "settings", "broadcast_recipients", "service_locks",
-    "batch_sessions", "users", "pending_join_requests", "batches",
+    "batch_sessions", "users", "banned_users", "pending_join_requests", "batches",
     "force_join_links",
 )
 
