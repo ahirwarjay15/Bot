@@ -100,8 +100,7 @@ async def invalid_post(message: Message, settings: Settings, database):
         message.chat.type, message.content_type,
     )
     try:
-        await FileRepository(database.db).save_user(user)
-        if await is_banned(database.db, user.id):
+        if not await FileRepository(database.db).save_user(user):
             log.info("Invalid-post skipped: sender is banned")
             return
         if await is_owner_or_moderator(database.db, user.id, settings):
