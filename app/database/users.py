@@ -225,6 +225,18 @@ async def migrate_user_storage(db) -> int:
                         upsert=True,
                         session=session,
                     )
+                    # These completed one-time migrations have been retired with
+                    # their code; remove only their historical markers.
+                    await db.system_migrations.delete_many(
+                        {"_id": {"$in": [
+                            "minimal_delivery_storage_v1",
+                            "remove_external_force_join_links_v1",
+                            "compact_user_profiles_v1",
+                            "force_sub_stable_links_v1",
+                            "pending_join_requests_by_chat_v1",
+                        ]}},
+                        session=session,
+                    )
                     await db.system_migrations.update_one(
                         {"_id": MIGRATION_ID},
                         {"$set": {
