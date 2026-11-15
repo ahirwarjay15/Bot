@@ -27,7 +27,7 @@ def _split_ids(value) -> list[str]:
 
 
 def _id_pattern(user_id: int) -> str:
-    return rf"(?:^|,){re.escape(str(int(user_id))}(?:,|$)"
+    return rf"(?:^|,){re.escape(str(int(user_id)))}(?:,|$)"
 
 
 def _join_without_id_expression(user_id: int) -> dict:
