@@ -446,7 +446,7 @@ async def cleanup_pending_join_requests_for_channel(
     if not revoke_failed:
         await db.force_join_links.delete_many({"channel": channel_key})
     if chat_ids:
-        await db.pending_join_requests.delete_one({"_id": {"$in": sorted(chat_ids)}})
+        await db.pending_join_requests.delete_many({"_id": {"$in": sorted(chat_ids)}})
     else:
         log.warning("No Telegram chat ID resolved for removed Force Sub chat %r; pending object could not be identified", channel_key)
     await db.settings.delete_one({
