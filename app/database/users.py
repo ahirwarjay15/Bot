@@ -165,7 +165,9 @@ async def count_user_totals(db) -> tuple[int, int]:
     ]).to_list(length=1)
     if not rows:
         return 0, 0
-    return int(rows[0]["total"]), int(rows[0]["banned"])
+    active = int(rows[0]["total"])
+    banned = int(rows[0]["banned"])
+    return active + banned, banned
 
 
 async def migrate_user_storage(db) -> int:
