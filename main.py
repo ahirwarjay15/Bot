@@ -16,7 +16,7 @@ from app.database.connection import Database, cleanup_completed_transients
 from app.database.legacy_cleanup import cleanup_legacy_database
 from app.handlers.start import router as start_router, cleanup_expired_pending_join_requests
 from app.handlers.file import router as file_router
-from app.handlers.anime import router as anime_router
+from app.handlers.anime import router as anime_router, ANIME_CHAT_ID
 from app.handlers.batch import router as batch_router
 from app.handlers.admin import router as admin_router
 from app.handlers.settings import router as settings_router
@@ -28,6 +28,16 @@ from app.services.polling_lease import run_polling_with_lease
 from app.services.bot_commands import configure_bot_commands
 
 SERVICE_READY = False
+
+
+async def _ignore_non_anime_handlers_in_anime_chat(handler, event, data):
+    """Keep every non-/anime bot handler silent in the dedicated anime chat."""
+    chat = getattr(event, "chat", None)
+    if chat is None:
+        chat = getattr(getattr(event, "message", None), "chat", None)
+    if chat is not None and int(chat.id) == ANIME_CHAT_ID:
+        return None
+    return await handler(event, data)
 
 log = logging.getLogger(__name__)
 VALID_SERVICE_ROLES = {"all", "polling", "worker"}
@@ -149,8 +159,14 @@ async def main():
             dp = Dispatcher(storage=MemoryStorage())
             dp["settings"] = settings
             dp["database"] = database
+            dp["anime_fsm_storage"] = dp.storage
+            # Reserve the anime chat exclusively for the /anime workflow.
+            for r in (start_router, file_router, batch_router, admin_router, settings_router, broadcast_router, shortener_router, misc_router):
+                r.message.outer_middleware(_ignore_non_anime_handlers_in_anime_chat)
+                r.callback_query.outer_middleware(_ignore_non_anime_handlers_in_anime_chat)
             # Keep the catch-all invalid-post handler last so other handlers run first.
-            for r in (start_router, file_router, anime_router, batch_router, admin_router, settings_router, broadcast_router, shortener_router, misc_router):dp.include_router(r)
+            for r in (start_router, file_router, anime_router, batch_router, admin_router, settings_router, broadcast_router, shortener_router, misc_router):
+                dp.include_router(r)
         else:
             dp = None
 
