@@ -376,7 +376,7 @@ async def _run_anime_generation(callback, state, settings, database):
                 ]
                 # One Telegram sendMessage call per file: link first, one blank
                 # line, then its caption. Shift caption entities by the prefix.
-                prefix = f"{link}\\n\\n"
+                prefix = f"{link}\n\n"
                 shifted_entities = [
                     entity.model_copy(update={"offset": entity.offset + len(prefix)})
                     for entity in caption_entities
