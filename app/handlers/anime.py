@@ -155,9 +155,12 @@ async def _show_panel(message: Message, state: FSMContext):
             if old_chat_id and old_message_id:
                 await _delete(message.bot, old_chat_id, old_message_id)
 
-            panel = await message.bot.send_message(
-                chat_id=dm_chat_id, text=panel_text,
-                reply_markup=_panel_keyboard(), parse_mode="HTML"
+            panel = await _retry_step(
+                lambda: message.bot.send_message(
+                    chat_id=dm_chat_id, text=panel_text,
+                    reply_markup=_panel_keyboard(), parse_mode="HTML"
+                ),
+                label="send DM collection panel",
             )
             await state.update_data(
                 panel_message_id=panel.message_id,
@@ -194,10 +197,13 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
         return
 
     old_data = await state.get_data()
-    prompt = await message.bot.send_message(
-        chat_id=message.chat.id,
-        text="<i>Send me the anime episode <b>message/file</b> you want to add.</i>",
-        parse_mode="HTML",
+    prompt = await _retry_step(
+        lambda: message.bot.send_message(
+            chat_id=message.chat.id,
+            text="<i>Send me the anime episode <b>message/file</b> you want to add.</i>",
+            parse_mode="HTML",
+        ),
+        label="send DM anime prompt",
     )
     await state.clear()
     await state.set_state(AnimeStates.waiting_for_message)
@@ -397,18 +403,21 @@ async def _pause_anime_generation(bot, state, dm_chat_id, item_index, error):
     details = f"{type(error).__name__}: {error}"
     if len(details) > 3000:
         details = details[:3000] + "..."
-    prompt = await bot.send_message(
-        chat_id=dm_chat_id,
-        text=(
-            "Anime link generation failed\n"
-            f"Item: {item_index + 1}\n"
-            f"Exact error: {details}\n\n"
-            "Press Retry to continue from the exact step where processing stopped."
+    prompt = await _retry_step(
+        lambda: bot.send_message(
+            chat_id=dm_chat_id,
+            text=(
+                "Anime link generation failed\n"
+                f"Item: {item_index + 1}\n"
+                f"Exact error: {details}\n\n"
+                "Press Retry to continue from the exact step where processing stopped."
+            ),
+            parse_mode=None,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="RETRY", callback_data="anime:retry")
+            ]]),
         ),
-        parse_mode=None,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="RETRY", callback_data="anime:retry")
-        ]]),
+        label="send DM retry prompt",
     )
     await state.update_data(retry_prompt_id=prompt.message_id)
 
@@ -469,13 +478,19 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
         )
     except TelegramAPIError as exc:
         log.exception("Could not collect anime message")
-        await message.bot.send_message(
-            chat_id=int(data.get("session_chat_id", message.from_user.id)),
-            text=f"Couldn't add this message. Exact error: {type(exc).__name__}: {exc}",
+        await _retry_step(
+            lambda: message.bot.send_message(
+                chat_id=int(data.get("session_chat_id", message.from_user.id)),
+                text=f"Couldn't add this message. Exact error: {type(exc).__name__}: {exc}",
+            ),
+            label="send DM collection error",
         )
     except Exception as exc:
         log.exception("Unexpected error while collecting anime message")
-        await message.bot.send_message(
-            chat_id=int(data.get("session_chat_id", message.from_user.id)),
-            text="Something went wrong while processing this message. Your collection is still open; try again or use /cancel."
+        await _retry_step(
+            lambda: message.bot.send_message(
+                chat_id=int(data.get("session_chat_id", message.from_user.id)),
+                text="Something went wrong while processing this message. Your collection is still open; try again or use /cancel."
+            ),
+            label="send DM processing error",
         )
