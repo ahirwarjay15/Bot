@@ -23,6 +23,7 @@ router = Router(name="anime")
 ANIME_CHAT_ID = -1003953020663
 log = logging.getLogger(__name__)
 _panel_tasks = {}
+_receive_locks = {}
 
 PANEL_TEXT = (
     "<i>Send more anime episode files/messages. When you're done, generate "
@@ -364,12 +365,14 @@ async def receive_anime_message(message: Message, anime_fsm_storage: BaseStorage
     if message.chat.type != "private" and int(message.chat.id) != ANIME_CHAT_ID:
         return
     state = _user_state(anime_fsm_storage, message.bot, message.from_user.id)
-    current = await state.get_state()
-    if current not in (AnimeStates.waiting_for_message.state, AnimeStates.collecting.state):
-        return
-    await _skip_command(message, state)
-    await state.set_state(AnimeStates.collecting)
-    await _receive_anime_item(message, state, settings)
+    lock = _receive_locks.setdefault(message.from_user.id, asyncio.Lock())
+    async with lock:
+        current = await state.get_state()
+        if current not in (AnimeStates.waiting_for_message.state, AnimeStates.collecting.state):
+            return
+        await _skip_command(message, state)
+        await state.set_state(AnimeStates.collecting)
+        await _receive_anime_item(message, state, settings)
 
 
 async def _receive_anime_item(message: Message, state: FSMContext, settings: Settings):
@@ -394,9 +397,7 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
             "file_name": file_name,
         }
         collected.append(item)
-        # Telegram message IDs increase in the order messages were sent in this chat.
-        # Sort before saving so concurrent handler completion cannot reorder uploads.
-        collected.sort(key=lambda entry: int(entry.get("original_message_id", 0)))
+        # The per-user receive lock preserves arrival order across both accepted chats.
         await state.update_data(collected=collected)
         await _show_panel(message, state)
         await _delete(
