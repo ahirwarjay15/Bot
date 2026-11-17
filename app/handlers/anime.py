@@ -20,7 +20,8 @@ from app.services.bot_identity import get_bot_identity
 from app.services.permissions import is_owner_or_moderator
 
 router = Router(name="anime")
-ANIME_CHAT_ID = -1003953020663
+ANIME_INPUT_CHAT_ID = -1003903950735
+ANIME_LINKS_CHAT_ID = -1003953020663
 log = logging.getLogger(__name__)
 _panel_tasks = {}
 _receive_locks = {}
@@ -90,9 +91,9 @@ def _link_keyboard(link: str):
     ]])
 
 
-def _user_state(storage: BaseStorage, bot, user_id: int) -> FSMContext:
-    """Share one anime session across the owner's DM and the anime output chat."""
-    return FSMContext(storage=storage, key=StorageKey(bot_id=bot.id, chat_id=0, user_id=user_id))
+def _user_state(storage: BaseStorage, bot, user_id: int, chat_id: int) -> FSMContext:
+    """Keep each anime session isolated to the chat where /anime was started."""
+    return FSMContext(storage=storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id))
 
 
 async def _delete(bot, chat_id, message_id):
@@ -113,7 +114,7 @@ async def _clear_collection_ui(bot, state: FSMContext, fallback_chat_id):
 
 async def _show_panel(message: Message, state: FSMContext):
     """Send a fresh panel after one full second without another collected message."""
-    key = (message.from_user.id if message.from_user else 0,)
+    key = (message.chat.id, message.from_user.id if message.from_user else 0)
     previous_task = _panel_tasks.get(key)
     if previous_task and not previous_task.done():
         previous_task.cancel()
@@ -137,7 +138,7 @@ async def _show_panel(message: Message, state: FSMContext):
                 await _delete(message.bot, old_chat_id, old_message_id)
 
             panel = await message.bot.send_message(
-                chat_id=ANIME_CHAT_ID, text=panel_text,
+                chat_id=message.chat.id, text=panel_text,
                 reply_markup=_panel_keyboard(), parse_mode="HTML"
             )
             await state.update_data(
@@ -161,13 +162,13 @@ async def _skip_command(message: Message):
 
 @router.message(Command("anime"))
 async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settings: Settings, database):
-    state = _user_state(anime_fsm_storage, message.bot, message.from_user.id) if message.from_user else None
+    state = _user_state(anime_fsm_storage, message.bot, message.from_user.id, message.chat.id) if message.from_user else None
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
-    if message.chat.type != "private" and int(message.chat.id) != ANIME_CHAT_ID:
+    if message.chat.type != "private" and int(message.chat.id) != ANIME_INPUT_CHAT_ID:
         return
     if not settings.source_channel_id:
-        await message.bot.send_message(chat_id=ANIME_CHAT_ID, text="Storage isn't configured. Set SOURCE_CHANNEL_ID to your private storage channel.")
+        await message.bot.send_message(chat_id=message.chat.id, text="Storage isn't configured. Set SOURCE_CHANNEL_ID to your private storage channel.")
         try:
             await message.delete()
         except TelegramAPIError:
@@ -176,7 +177,7 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
 
     old_data = await state.get_data()
     prompt = await message.bot.send_message(
-        chat_id=ANIME_CHAT_ID,
+        chat_id=message.chat.id,
         text="<i>Send me the anime episode <b>message/file</b> you want to add.</i>",
         parse_mode="HTML",
     )
@@ -186,9 +187,10 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
         prompt_message_id=prompt.message_id,
         prompt_chat_id=prompt.chat.id,
         collected=[],
+        output_chat_id=(message.chat.id if message.chat.type == "private" else ANIME_LINKS_CHAT_ID),
     )
-    await _delete(message.bot, old_data.get("prompt_chat_id", ANIME_CHAT_ID), old_data.get("prompt_message_id"))
-    await _delete(message.bot, old_data.get("panel_chat_id", ANIME_CHAT_ID), old_data.get("panel_message_id"))
+    await _delete(message.bot, old_data.get("prompt_chat_id", message.chat.id), old_data.get("prompt_message_id"))
+    await _delete(message.bot, old_data.get("panel_chat_id", message.chat.id), old_data.get("panel_message_id"))
     try:
         await message.delete()
     except TelegramAPIError:
@@ -199,15 +201,15 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
 async def cancel_anime(message: Message, anime_fsm_storage: BaseStorage):
     if not message.from_user:
         return
-    if message.chat.type != "private" and int(message.chat.id) != ANIME_CHAT_ID:
+    if message.chat.type != "private" and int(message.chat.id) != ANIME_INPUT_CHAT_ID:
         return
-    state = _user_state(anime_fsm_storage, message.bot, message.from_user.id)
+    state = _user_state(anime_fsm_storage, message.bot, message.from_user.id, message.chat.id)
     if await state.get_state() not in (
         AnimeStates.waiting_for_message.state, AnimeStates.collecting.state
     ):
         raise SkipHandler
     await _clear_collection_ui(message.bot, state, message.chat.id)
-    await message.bot.send_message(chat_id=ANIME_CHAT_ID, text="Anime link creation cancelled.")
+    await message.bot.send_message(chat_id=message.chat.id, text="Anime link creation cancelled.")
     try:
         await message.delete()
     except TelegramAPIError:
@@ -216,8 +218,8 @@ async def cancel_anime(message: Message, anime_fsm_storage: BaseStorage):
 
 @router.callback_query(F.data == "anime:back")
 async def anime_back(callback: CallbackQuery, anime_fsm_storage: BaseStorage):
-    state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id)
-    await _clear_collection_ui(callback.bot, state, ANIME_CHAT_ID)
+    state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id, callback.message.chat.id)
+    await _clear_collection_ui(callback.bot, state, callback.message.chat.id)
     await callback.answer("Collection cancelled")
 
 
@@ -225,7 +227,7 @@ async def anime_back(callback: CallbackQuery, anime_fsm_storage: BaseStorage):
 async def generate_anime_links(
     callback: CallbackQuery, anime_fsm_storage: BaseStorage, settings: Settings, database
 ):
-    state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id)
+    state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id, callback.message.chat.id)
     data = await state.get_data()
     collected = data.get("collected", [])
     if not collected:
@@ -237,6 +239,7 @@ async def generate_anime_links(
         await callback.answer("This collection has already ended. Start again with /anime.", show_alert=True)
         return
 
+    output_chat_id = int(data.get("output_chat_id", callback.message.chat.id))
     await callback.answer()
     progress = callback.message
     await progress.edit_text("<i>Generating individual links in upload order...</i>", parse_mode="HTML")
@@ -249,7 +252,7 @@ async def generate_anime_links(
         log.exception("Could not resolve bot identity for anime links")
         await progress.edit_text("Could not generate anime links right now. Please try again.")
         await _delete(
-            callback.bot, data.get("prompt_chat_id", ANIME_CHAT_ID),
+            callback.bot, data.get("prompt_chat_id", callback.message.chat.id),
             data.get("prompt_message_id"),
         )
         return
@@ -284,13 +287,15 @@ async def generate_anime_links(
             token = build_deeplink_token(record["key"])
             link = f"https://t.me/{me.username}?start={token}"
 
-            if first_link_message is None:
+            if first_link_message is None and output_chat_id == progress.chat.id:
                 await progress.edit_text(link, reply_markup=_link_keyboard(link), parse_mode=None)
                 link_message = progress
                 first_link_message = progress
             else:
+                if first_link_message is None:
+                    await _delete(callback.bot, progress.chat.id, progress.message_id)
                 link_message = await callback.bot.send_message(
-                    chat_id=ANIME_CHAT_ID, text=link,
+                    chat_id=output_chat_id, text=link,
                     reply_markup=_link_keyboard(link), parse_mode=None
                 )
             link_sent = True
@@ -302,7 +307,7 @@ async def generate_anime_links(
             raw_entities = item.get("reply_entities") or []
             entities = [MessageEntity.model_validate(entity) for entity in raw_entities]
             await callback.bot.send_message(
-                chat_id=ANIME_CHAT_ID,
+                chat_id=output_chat_id,
                 text=reply_text,
                 entities=entities or None,
                 parse_mode=None,
@@ -347,17 +352,17 @@ async def generate_anime_links(
     summary = f"Individual links published: {published}/{len(collected)}; captions replied: {successes}/{len(collected)}."
     if failures:
         summary += " Failed item numbers: " + ", ".join(map(str, failures)) + "."
-    await callback.bot.send_message(chat_id=ANIME_CHAT_ID, text=summary)
+    await callback.bot.send_message(chat_id=output_chat_id, text=summary)
 
 
 @router.message()
 async def receive_anime_message(message: Message, anime_fsm_storage: BaseStorage, settings: Settings):
     if not message.from_user:
         return
-    if message.chat.type != "private" and int(message.chat.id) != ANIME_CHAT_ID:
+    if message.chat.type != "private" and int(message.chat.id) != ANIME_INPUT_CHAT_ID:
         return
-    state = _user_state(anime_fsm_storage, message.bot, message.from_user.id)
-    lock = _receive_locks.setdefault(message.from_user.id, asyncio.Lock())
+    state = _user_state(anime_fsm_storage, message.bot, message.from_user.id, message.chat.id)
+    lock = _receive_locks.setdefault((message.chat.id, message.from_user.id), asyncio.Lock())
     async with lock:
         current = await state.get_state()
         if current not in (AnimeStates.waiting_for_message.state, AnimeStates.collecting.state):
@@ -399,10 +404,10 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
         )
     except TelegramAPIError:
         log.exception("Could not collect anime message")
-        await message.bot.send_message(chat_id=ANIME_CHAT_ID, text="Couldn't add this message to the collection. Please try again.")
+        await message.bot.send_message(chat_id=message.chat.id, text="Couldn't add this message to the collection. Please try again.")
     except Exception:
         log.exception("Unexpected error while collecting anime message")
         await message.bot.send_message(
-            chat_id=ANIME_CHAT_ID,
+            chat_id=message.chat.id,
             text="Something went wrong while processing this message. Your collection is still open; try again or use /cancel."
         )
