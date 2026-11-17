@@ -1,6 +1,7 @@
 """Create one individual deeplink per anime message, in upload order."""
 import asyncio
 import logging
+import time
 
 from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
@@ -24,6 +25,8 @@ ANIME_LINKS_CHAT_ID = -1003953020663
 log = logging.getLogger(__name__)
 _panel_tasks = {}
 _receive_locks = {}
+_send_locks = {}
+_last_send_at = {}
 
 PANEL_TEXT = (
     "<i>Send more anime episode files/messages. When you're done, generate "
@@ -94,6 +97,20 @@ def _link_keyboard(link: str):
 def _user_state(storage: BaseStorage, bot, user_id: int) -> FSMContext:
     """Keep the complete anime session in the user's private bot chat."""
     return FSMContext(storage=storage, key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
+
+
+async def _send_message(bot, *, chat_id, **kwargs):
+    """Serialize anime messages and keep each chat below Telegram's 1 msg/sec limit."""
+    chat_key = int(chat_id)
+    lock = _send_locks.setdefault(chat_key, asyncio.Lock())
+    async with lock:
+        elapsed = time.monotonic() - _last_send_at.get(chat_key, 0.0)
+        if elapsed < 1.05:
+            await asyncio.sleep(1.05 - elapsed)
+        try:
+            return await _send_message(bot, chat_id=chat_id, **kwargs)
+        finally:
+            _last_send_at[chat_key] = time.monotonic()
 
 
 async def _retry_step(operation, *, label: str):
@@ -169,7 +186,7 @@ async def _show_panel(message: Message, state: FSMContext):
                 await _delete(message.bot, old_chat_id, old_message_id)
 
             panel = await _retry_step(
-                lambda: message.bot.send_message(
+                lambda: _send_message(message.bot, 
                     chat_id=dm_chat_id, text=panel_text,
                     reply_markup=_panel_keyboard(), parse_mode="HTML"
                 ),
@@ -350,7 +367,7 @@ async def _run_anime_generation(callback, state, settings, database):
 
             if not item.get("link_message_id"):
                 sent_link = await _retry_step(
-                    lambda: callback.bot.send_message(
+                    lambda: _send_message(callback.bot, 
                         chat_id=target_chat_id, text=link,
                         reply_markup=_link_keyboard(link), parse_mode=None,
                     ),
@@ -376,7 +393,7 @@ async def _run_anime_generation(callback, state, settings, database):
 
             index += 1
             await state.update_data(generation_index=index)
-            if progress_id:
+            if progress_id and (index % 10 == 0 or index == len(collected)):
                 try:
                     await callback.bot.edit_message_text(
                         chat_id=dm_chat_id, message_id=progress_id,
