@@ -108,7 +108,7 @@ async def _send_message(bot, *, chat_id, **kwargs):
         if elapsed < 1.05:
             await asyncio.sleep(1.05 - elapsed)
         try:
-            return await _send_message(bot, chat_id=chat_id, **kwargs)
+            return await bot.send_message(chat_id=chat_id, **kwargs)
         finally:
             _last_send_at[chat_key] = time.monotonic()
 
