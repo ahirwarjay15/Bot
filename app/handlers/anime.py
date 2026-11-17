@@ -174,7 +174,7 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
     if message.chat.type != "private" and int(message.chat.id) != ANIME_CHAT_ID:
         return
     if not settings.source_channel_id:
-        await message.answer("Storage isn't configured. Set SOURCE_CHANNEL_ID to your private storage channel.")
+        await message.bot.send_message(chat_id=ANIME_CHAT_ID, text="Storage isn't configured. Set SOURCE_CHANNEL_ID to your private storage channel.")
         try:
             await message.delete()
         except TelegramAPIError:
@@ -206,13 +206,15 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
 async def cancel_anime(message: Message, anime_fsm_storage: BaseStorage):
     if not message.from_user:
         return
+    if message.chat.type != "private" and int(message.chat.id) != ANIME_CHAT_ID:
+        return
     state = _user_state(anime_fsm_storage, message.bot, message.from_user.id)
     if await state.get_state() not in (
         AnimeStates.waiting_for_message.state, AnimeStates.collecting.state
     ):
         raise SkipHandler
     await _clear_collection_ui(message.bot, state, message.chat.id)
-    await message.answer("Anime link creation cancelled.")
+    await message.bot.send_message(chat_id=ANIME_CHAT_ID, text="Anime link creation cancelled.")
     try:
         await message.delete()
     except TelegramAPIError:
@@ -254,7 +256,7 @@ async def generate_anime_links(
         log.exception("Could not resolve bot identity for anime links")
         await progress.edit_text("Could not generate anime links right now. Please try again.")
         await _delete(
-            callback.bot, data.get("prompt_chat_id", callback.message.chat.id),
+            callback.bot, data.get("prompt_chat_id", ANIME_CHAT_ID),
             data.get("prompt_message_id"),
         )
         return
@@ -290,12 +292,9 @@ async def generate_anime_links(
             link = f"https://t.me/{me.username}?start={token}"
 
             if first_link_message is None:
-                link_message = await callback.bot.send_message(
-                    chat_id=ANIME_CHAT_ID, text=link,
-                    reply_markup=_link_keyboard(link), parse_mode=None
-                )
-                await _delete(callback.bot, progress.chat.id, progress.message_id)
-                first_link_message = link_message
+                await progress.edit_text(link, reply_markup=_link_keyboard(link), parse_mode=None)
+                link_message = progress
+                first_link_message = progress
             else:
                 link_message = await callback.bot.send_message(
                     chat_id=ANIME_CHAT_ID, text=link,
@@ -362,6 +361,8 @@ async def generate_anime_links(
 async def receive_anime_message(message: Message, anime_fsm_storage: BaseStorage, settings: Settings):
     if not message.from_user:
         return
+    if message.chat.type != "private" and int(message.chat.id) != ANIME_CHAT_ID:
+        return
     state = _user_state(anime_fsm_storage, message.bot, message.from_user.id)
     current = await state.get_state()
     if current not in (AnimeStates.waiting_for_message.state, AnimeStates.collecting.state):
@@ -404,10 +405,10 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
         )
     except TelegramAPIError:
         log.exception("Could not collect anime message")
-        await message.answer("Couldn't add this message to the collection. Please try again.")
+        await message.bot.send_message(chat_id=ANIME_CHAT_ID, text="Couldn't add this message to the collection. Please try again.")
     except Exception:
         log.exception("Unexpected error while collecting anime message")
-        await message.answer(
-            "Something went wrong while processing this message. Your collection is still open; "
-            "try again or use /cancel."
+        await message.bot.send_message(
+            chat_id=ANIME_CHAT_ID,
+            text="Something went wrong while processing this message. Your collection is still open; try again or use /cancel."
         )
