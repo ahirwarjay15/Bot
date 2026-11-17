@@ -36,6 +36,7 @@ PANEL_TEXT = (
 class AnimeStates(StatesGroup):
     waiting_for_message = State()
     collecting = State()
+    generating = State()
 
 
 def _panel_keyboard():
@@ -256,6 +257,7 @@ async def generate_anime_links(
         await callback.answer("Link generation is already running.")
         return
     await callback.answer()
+    await state.set_state(AnimeStates.generating)
     await _run_anime_generation(callback, state, settings, database)
 
 
@@ -278,6 +280,7 @@ async def _run_anime_generation(callback, state, settings, database):
     collected = list(data.get("collected", []))
     dm_chat_id = int(data.get("session_chat_id", callback.from_user.id))
     index = int(data.get("generation_index", 0))
+    await state.set_state(AnimeStates.generating)
     await state.update_data(generation_running=True, generation_pending=False, retry_prompt_id=None)
 
     progress_id = data.get("panel_message_id")
@@ -397,11 +400,12 @@ async def _pause_anime_generation(bot, state, dm_chat_id, item_index, error):
     prompt = await bot.send_message(
         chat_id=dm_chat_id,
         text=(
-            f"<b>Anime link generation failed</b>\nItem: {item_index + 1}\n"
-            f"Exact error: <code>{details}</code>\n\n"
+            "Anime link generation failed\n"
+            f"Item: {item_index + 1}\n"
+            f"Exact error: {details}\n\n"
             "Press Retry to continue from the exact step where processing stopped."
         ),
-        parse_mode="HTML",
+        parse_mode=None,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="RETRY", callback_data="anime:retry")
         ]]),
