@@ -4,7 +4,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import BaseStorage, StorageKey
@@ -97,16 +97,30 @@ def _user_state(storage: BaseStorage, bot, user_id: int) -> FSMContext:
 
 
 async def _retry_step(operation, *, label: str):
-    """Retry a failed step three times, waiting 20 seconds between attempts."""
-    for attempt in range(4):
+    """Retry Telegram flood-control responses for as long as Telegram requires."""
+    attempt = 0
+    while True:
         try:
             return await operation()
         except asyncio.CancelledError:
             raise
+        except TelegramRetryAfter as exc:
+            # Telegram tells us exactly how long this chat must wait. Do not
+            # stop a large /anime run just because the destination is throttled.
+            wait_seconds = max(1.0, float(exc.retry_after)) + 1.0
+            log.warning(
+                "Anime %s hit Telegram flood control; retrying after %.1f seconds",
+                label, wait_seconds,
+            )
+            await asyncio.sleep(wait_seconds)
         except Exception:
-            if attempt == 3:
+            if attempt >= 3:
                 raise
-            log.warning("Anime %s failed (attempt %s/4); retrying in 20 seconds", label, attempt + 1, exc_info=True)
+            attempt += 1
+            log.warning(
+                "Anime %s failed (attempt %s/4); retrying in 20 seconds",
+                label, attempt, exc_info=True,
+            )
             await asyncio.sleep(20)
 
 
