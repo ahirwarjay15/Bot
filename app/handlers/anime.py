@@ -298,6 +298,7 @@ async def generate_anime_links(
                     chat_id=output_chat_id, text=link,
                     reply_markup=_link_keyboard(link), parse_mode=None
                 )
+            first_link_message = link_message
             link_sent = True
             published += 1
 
