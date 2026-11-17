@@ -100,13 +100,16 @@ def _user_state(storage: BaseStorage, bot, user_id: int) -> FSMContext:
 
 
 async def _send_message(bot, *, chat_id, **kwargs):
-    """Serialize anime messages and keep each chat below Telegram's 1 msg/sec limit."""
+    """Serialize /anime output and pace channel posts to avoid Telegram flood control."""
     chat_key = int(chat_id)
     lock = _send_locks.setdefault(chat_key, asyncio.Lock())
     async with lock:
+        # Telegram supergroups/channels have stricter sustained send limits
+        # than private chats. Keep /anime channel posts below 20/minute.
+        min_interval = 3.1 if chat_key == ANIME_LINKS_CHAT_ID else 1.05
         elapsed = time.monotonic() - _last_send_at.get(chat_key, 0.0)
-        if elapsed < 1.05:
-            await asyncio.sleep(1.05 - elapsed)
+        if elapsed < min_interval:
+            await asyncio.sleep(min_interval - elapsed)
         try:
             return await bot.send_message(chat_id=chat_id, **kwargs)
         finally:
@@ -366,27 +369,30 @@ async def _run_anime_generation(callback, state, settings, database):
             link = f"https://t.me/{me.username}?start={token}"
 
             if not item.get("link_message_id"):
-                sent_link = await _retry_step(
-                    lambda: _send_message(callback.bot, 
-                        chat_id=target_chat_id, text=link,
-                        reply_markup=_link_keyboard(link), parse_mode=None,
+                caption = item.get("reply_text") or item.get("file_name") or "File"
+                caption_entities = [
+                    MessageEntity.model_validate(entity)
+                    for entity in (item.get("reply_entities") or [])
+                ]
+                # One Telegram sendMessage call per file: link first, one blank
+                # line, then its caption. Shift caption entities by the prefix.
+                prefix = f"{link}\\n\\n"
+                shifted_entities = [
+                    entity.model_copy(update={"offset": entity.offset + len(prefix)})
+                    for entity in caption_entities
+                ]
+                sent_post = await _retry_step(
+                    lambda: _send_message(
+                        callback.bot,
+                        chat_id=target_chat_id,
+                        text=prefix + caption,
+                        entities=shifted_entities or None,
+                        reply_markup=_link_keyboard(link),
+                        parse_mode=None,
                     ),
-                    label=f"send item {index + 1} link",
+                    label=f"send item {index + 1} link and caption",
                 )
-                item["link_message_id"] = int(sent_link.message_id)
-                collected[index] = item
-                await state.update_data(collected=collected)
-
-            if not item.get("caption_sent"):
-                reply_text = item.get("reply_text") or item.get("file_name") or "File"
-                entities = [MessageEntity.model_validate(x) for x in (item.get("reply_entities") or [])]
-                await _retry_step(
-                    lambda: _send_message(callback.bot, 
-                        chat_id=target_chat_id, text=reply_text, entities=entities or None,
-                        parse_mode=None, reply_to_message_id=int(item["link_message_id"]),
-                    ),
-                    label=f"send item {index + 1} caption",
-                )
+                item["link_message_id"] = int(sent_post.message_id)
                 item["caption_sent"] = True
                 collected[index] = item
                 await state.update_data(collected=collected)
