@@ -219,7 +219,7 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
     if message.chat.type != "private":
         return
     if not settings.source_channel_id:
-        await message.bot.send_message(chat_id=message.chat.id, text="Storage isn't configured. Set SOURCE_CHANNEL_ID to your private storage channel.")
+        await _send_message(message.bot, chat_id=message.chat.id, text="Storage isn't configured. Set SOURCE_CHANNEL_ID to your private storage channel.")
         try:
             await message.delete()
         except TelegramAPIError:
@@ -228,7 +228,7 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
 
     old_data = await state.get_data()
     prompt = await _retry_step(
-        lambda: message.bot.send_message(
+        lambda: _send_message(message.bot, 
             chat_id=message.chat.id,
             text="<i>Send me the anime episode <b>message/file</b> you want to add.</i>",
             parse_mode="HTML",
@@ -263,7 +263,7 @@ async def cancel_anime(message: Message, anime_fsm_storage: BaseStorage):
     ):
         raise SkipHandler
     await _clear_collection_ui(message.bot, state, message.chat.id)
-    await message.bot.send_message(chat_id=message.chat.id, text="Anime link creation cancelled.")
+    await _send_message(message.bot, chat_id=message.chat.id, text="Anime link creation cancelled.")
     try:
         await message.delete()
     except TelegramAPIError:
@@ -381,7 +381,7 @@ async def _run_anime_generation(callback, state, settings, database):
                 reply_text = item.get("reply_text") or item.get("file_name") or "File"
                 entities = [MessageEntity.model_validate(x) for x in (item.get("reply_entities") or [])]
                 await _retry_step(
-                    lambda: callback.bot.send_message(
+                    lambda: _send_message(callback.bot, 
                         chat_id=target_chat_id, text=reply_text, entities=entities or None,
                         parse_mode=None, reply_to_message_id=int(item["link_message_id"]),
                     ),
@@ -431,7 +431,7 @@ async def _pause_anime_generation(bot, state, dm_chat_id, item_index, error):
     if len(details) > 3000:
         details = details[:3000] + "..."
     prompt = await _retry_step(
-        lambda: bot.send_message(
+        lambda: _send_message(bot, 
             chat_id=dm_chat_id,
             text=(
                 "Anime link generation failed\n"
@@ -503,7 +503,7 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
     except TelegramAPIError as exc:
         log.exception("Could not collect anime message")
         await _retry_step(
-            lambda: message.bot.send_message(
+            lambda: _send_message(message.bot, 
                 chat_id=int(data.get("session_chat_id", message.from_user.id)),
                 text=f"Couldn't add this message. Exact error: {type(exc).__name__}: {exc}",
             ),
@@ -512,7 +512,7 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
     except Exception as exc:
         log.exception("Unexpected error while collecting anime message")
         await _retry_step(
-            lambda: message.bot.send_message(
+            lambda: _send_message(message.bot, 
                 chat_id=int(data.get("session_chat_id", message.from_user.id)),
                 text="Something went wrong while processing this message. Your collection is still open; try again or use /cancel."
             ),
