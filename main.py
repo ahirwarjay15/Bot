@@ -16,7 +16,7 @@ from app.database.connection import Database, cleanup_completed_transients
 from app.database.legacy_cleanup import cleanup_legacy_database
 from app.handlers.start import router as start_router, cleanup_expired_pending_join_requests
 from app.handlers.file import router as file_router
-from app.handlers.anime import router as anime_router, ANIME_INPUT_CHAT_ID, ANIME_LINKS_CHAT_ID
+from app.handlers.anime import router as anime_router, ANIME_LINKS_CHAT_ID
 from app.handlers.batch import router as batch_router
 from app.handlers.admin import router as admin_router
 from app.handlers.settings import router as settings_router
@@ -35,7 +35,7 @@ async def _ignore_non_anime_handlers_in_anime_chat(handler, event, data):
     chat = getattr(event, "chat", None)
     if chat is None:
         chat = getattr(getattr(event, "message", None), "chat", None)
-    if chat is not None and int(chat.id) in {ANIME_INPUT_CHAT_ID, ANIME_LINKS_CHAT_ID}:
+    if chat is not None and int(chat.id) == ANIME_LINKS_CHAT_ID:
         return None
     return await handler(event, data)
 
