@@ -20,7 +20,6 @@ from app.services.bot_identity import get_bot_identity
 from app.services.permissions import is_owner_or_moderator
 
 router = Router(name="anime")
-ANIME_INPUT_CHAT_ID = -1003903950735
 ANIME_LINKS_CHAT_ID = -1003953020663
 log = logging.getLogger(__name__)
 _panel_tasks = {}
@@ -92,7 +91,7 @@ def _link_keyboard(link: str):
     ]])
 
 
-def _user_state(storage: BaseStorage, bot, user_id: int, chat_id: int | None = None) -> FSMContext:
+def _user_state(storage: BaseStorage, bot, user_id: int) -> FSMContext:
     """Keep the complete anime session in the user's private bot chat."""
     return FSMContext(storage=storage, key=StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id))
 
@@ -183,7 +182,7 @@ async def _skip_command(message: Message):
 
 @router.message(Command("anime"))
 async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settings: Settings, database):
-    state = _user_state(anime_fsm_storage, message.bot, message.from_user.id, message.chat.id) if message.from_user else None
+    state = _user_state(anime_fsm_storage, message.bot, message.from_user.id) if message.from_user else None
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     if message.chat.type != "private":
@@ -308,10 +307,7 @@ async def _run_anime_generation(callback, state, settings, database):
 
     while index < len(collected):
         item = collected[index]
-        target_chat_id = int(item.get(
-            "output_chat_id",
-            dm_chat_id if int(item["original_chat_id"]) == dm_chat_id else ANIME_LINKS_CHAT_ID,
-        ))
+        target_chat_id = ANIME_LINKS_CHAT_ID
         try:
             if not item.get("source_message_id"):
                 copied = await _retry_step(
@@ -426,10 +422,11 @@ async def _pause_anime_generation(bot, state, dm_chat_id, item_index, error):
 async def receive_anime_message(message: Message, anime_fsm_storage: BaseStorage, settings: Settings):
     if not message.from_user:
         return
-    if message.chat.type != "private" and int(message.chat.id) != ANIME_INPUT_CHAT_ID:
+    # Anime collection accepts messages only in the user's private bot DM.
+    if message.chat.type != "private":
         return
     state = _user_state(anime_fsm_storage, message.bot, message.from_user.id)
-    lock = _receive_locks.setdefault((message.chat.id, message.from_user.id), asyncio.Lock())
+    lock = _receive_locks.setdefault((message.from_user.id, message.from_user.id), asyncio.Lock())
     async with lock:
         current = await state.get_state()
         if current not in (AnimeStates.waiting_for_message.state, AnimeStates.collecting.state):
@@ -463,13 +460,9 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
                 entity.model_dump(exclude_none=True) for entity in (entities or [])
             ],
             "file_name": file_name,
-            "output_chat_id": (
-                int(data.get("session_chat_id", message.from_user.id))
-                if message.chat.type == "private" else ANIME_LINKS_CHAT_ID
-            ),
         }
         collected.append(item)
-        # The per-user receive lock preserves arrival order across both accepted chats.
+        # The per-user receive lock preserves arrival order for DM messages.
         await state.update_data(collected=collected)
         await _show_panel(message, state)
         await _delete(
