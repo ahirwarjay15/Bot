@@ -20,7 +20,6 @@ from app.services.permissions import is_owner_or_moderator
 
 router = Router(name="anime")
 log = logging.getLogger(__name__)
-MAX_ANIME_FILES = 100
 _panel_tasks = {}
 
 PANEL_TEXT = (
@@ -120,13 +119,7 @@ async def _show_panel(message: Message, state: FSMContext):
                 return
 
             count = len(data.get("collected", []))
-            if count < MAX_ANIME_FILES:
-                panel_text = PANEL_TEXT + f"\n\n<i>Files added: {count}/{MAX_ANIME_FILES}</i>"
-            else:
-                panel_text = (
-                    f"<i>LIMIT REACHED — maximum {MAX_ANIME_FILES} files. Generate your links below.</i>"
-                    f"\n\n<i>Files added: {MAX_ANIME_FILES}/{MAX_ANIME_FILES}</i>"
-                )
+            panel_text = PANEL_TEXT + f"\n\n<i>Files added: {count}</i>"
 
             old_chat_id = data.get("panel_chat_id")
             old_message_id = data.get("panel_message_id")
@@ -364,9 +357,6 @@ async def receive_more_anime(message: Message, state: FSMContext, settings: Sett
 async def _receive_anime_item(message: Message, state: FSMContext, settings: Settings):
     data = await state.get_data()
     collected = list(data.get("collected", []))
-    if len(collected) >= MAX_ANIME_FILES:
-        await message.answer(f"LIMIT REACHED — maximum {MAX_ANIME_FILES} files. Tap GENERATE LINKS.")
-        return
 
     try:
         source_id = _source_channel_message_id(message, settings.source_channel_id)
