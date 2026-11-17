@@ -154,17 +154,9 @@ async def _show_panel(message: Message, state: FSMContext):
 
     _panel_tasks[key] = asyncio.create_task(send_after_quiet_period())
 
-async def _skip_command(message: Message, state: FSMContext):
-    if not message.text or not message.text.startswith("/"):
-        return
-    command = message.text.split(maxsplit=1)[0].split("@", 1)[0].lower()
-    if command == "/cancel":
-        return
-    if await state.get_state() in (
-        AnimeStates.waiting_for_message.state, AnimeStates.collecting.state
-    ):
-        await _clear_collection_ui(message.bot, state, ANIME_CHAT_ID)
-        raise SkipHandler
+async def _skip_command(message: Message):
+    """Ignore bot commands as collection input; only /anime and /cancel are handled."""
+    return bool(message.text and message.text.startswith("/"))
 
 
 @router.message(Command("anime"))
@@ -370,7 +362,8 @@ async def receive_anime_message(message: Message, anime_fsm_storage: BaseStorage
         current = await state.get_state()
         if current not in (AnimeStates.waiting_for_message.state, AnimeStates.collecting.state):
             return
-        await _skip_command(message, state)
+        if await _skip_command(message):
+            return
         await state.set_state(AnimeStates.collecting)
         await _receive_anime_item(message, state, settings)
 
