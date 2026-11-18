@@ -93,6 +93,10 @@ def _link_keyboard(link: str):
         InlineKeyboardButton(text="ᴄᴏᴘʏ", copy_text=CopyTextButton(text=link))
     ]])
 
+def _ordered_collected_items(items):
+    """Return anime inputs in the order their Telegram DM messages were sent."""
+    return sorted(items, key=lambda item: int(item.get("original_message_id") or 0))
+
 
 def _user_state(storage: BaseStorage, bot, user_id: int) -> FSMContext:
     """Keep the complete anime session in the user's private bot chat."""
@@ -316,7 +320,10 @@ async def retry_anime_generation(
 
 async def _run_anime_generation(callback, state, settings, database):
     data = await state.get_data()
-    collected = list(data.get("collected", []))
+    # Update handlers may finish concurrently; Telegram message IDs preserve
+    # the exact order in which the user sent the anime inputs.
+    collected = _ordered_collected_items(list(data.get("collected", [])))
+    await state.update_data(collected=collected)
     dm_chat_id = int(data.get("session_chat_id", callback.from_user.id))
     index = int(data.get("generation_index", 0))
     await state.set_state(AnimeStates.generating)
