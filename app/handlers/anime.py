@@ -457,22 +457,25 @@ async def _pause_anime_generation(bot, state, dm_chat_id, item_index, error):
 
 @router.message()
 async def receive_anime_message(message: Message, anime_fsm_storage: BaseStorage, settings: Settings):
+    # This router is mounted before admin/settings/batch. Pass unrelated updates
+    # onward instead of consuming them, or later command handlers never run.
     if not message.from_user:
-        return
+        raise SkipHandler
     # Anime collection accepts messages only in the user's private bot DM.
     if message.chat.type != "private":
-        return
+        raise SkipHandler
     state = _user_state(anime_fsm_storage, message.bot, message.from_user.id)
     lock = _receive_locks.setdefault((message.from_user.id, message.from_user.id), asyncio.Lock())
     async with lock:
         current = await state.get_state()
         if current not in (AnimeStates.waiting_for_message.state, AnimeStates.collecting.state):
-            return
+            raise SkipHandler
+        # Commands are not anime input. Let their own router handlers process them.
         if await _skip_command(message):
-            return
+            raise SkipHandler
         data = await state.get_data()
         if not data.get("session_chat_id"):
-            return
+            raise SkipHandler
         await state.set_state(AnimeStates.collecting)
         await _receive_anime_item(message, state, settings)
 
