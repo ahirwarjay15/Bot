@@ -1259,6 +1259,8 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
             button = build_force_join_channel_button(channel_cfg, index + 1, target, channel)
             if button:
                 join_buttons.append(button)
+        # Keep optional Other Links visible while any required Force Sub chat is pending.
+        join_buttons.extend(build_force_join_other_link_buttons(force_cfg.get("other_links"), len(missing)))
         rows = [join_buttons[i:i+2] for i in range(0, len(join_buttons), 2)]
         rows.append([InlineKeyboardButton(text=force_cfg.get("verify_text") or "♻️ 𝐕ᴇʀɪғʏ 𝐀ɢᴀɪɴ", callback_data=f"forcejoin:check:{payload}")])
         me = await get_bot_identity(bot)
