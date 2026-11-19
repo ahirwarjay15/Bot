@@ -1063,11 +1063,11 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             # Telegram requires a message to display a request-chat keyboard;
             # keep that carrier visually empty instead of adding another prompt.
             carrier = await tracked_answer(query.message, state,
-                "\u2063",
+                "<i>Select A Option Below 👇</i>",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[
-                        [KeyboardButton(text="Group", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True)),
-                         KeyboardButton(text="Channel", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True))],
+                        [KeyboardButton(text="Channel", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True)),
+                         KeyboardButton(text="Group", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
                         [KeyboardButton(text="Other Links")],
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
