@@ -404,6 +404,9 @@ async def _run_anime_generation(callback, state, settings, database):
                 collected[index] = item
                 await state.update_data(collected=collected)
 
+            # Clean up the original DM input once its link has been delivered.
+            await _delete(callback.bot, item.get("original_chat_id"), item.get("original_message_id"))
+
             index += 1
             await state.update_data(generation_index=index)
             if progress_id and (index % 10 == 0 or index == len(collected)):
