@@ -241,12 +241,12 @@ async def _export_database_collections(message: Message, settings: Settings, dat
                 ),
             )
         await message.answer(
-            "Database export completed.\n"
-            f"Collections: {len(collection_names)} | Documents: {document_count} | Files: {total_parts}"
+            "<i>Database export completed.\n"
+            f"Collections: {len(collection_names)} | Documents: {document_count} | Files: {total_parts}</i>"
         )
     except Exception:
         # Do not expose database errors or credentials in chat.
-        await message.answer("Database export failed. Please check the bot logs and try again.")
+        await message.answer("<i>Database export failed. Please check the bot logs and try again.</i>")
 
 
 @router.message(Command("export"))
