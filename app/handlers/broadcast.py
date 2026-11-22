@@ -47,12 +47,12 @@ def format_broadcast_report(counts: dict[str, int]) -> str:
     normalized = {status: max(0, int(counts.get(status, 0))) for status in statuses}
     total = sum(normalized.values())
     return (
-        f"BROADCAST REPORT\nRecipients processed: {total}\n"
+        f"<i>BROADCAST REPORT\nRecipients processed: {total}\n"
         f"Sent successfully: {normalized['sent']}\n"
         f"Failed: {normalized['failed']}\n"
         f"Blocked/unreachable in this broadcast: {normalized['blocked']}\n"
         f"Delivery unknown: {normalized['unknown']}\n"
-        f"Skipped (banned during broadcast): {normalized['skipped_banned']}"
+        f"Skipped (banned during broadcast): {normalized['skipped_banned']}</i>"
     )
 
 
@@ -108,7 +108,7 @@ async def broadcast(message: Message, settings: Settings, database):
     draft_key = draft["draft_key"]
     keyboard = confirmation_keyboard(draft_key)
     action = "broadcast and pin" if pin_after_send else "broadcast"
-    await message.answer(f"BROADCAST CONFIRMATION\nReview the message before sending it to users.\nAction: {action}\nRecipients: {recipients}", reply_markup=keyboard)
+    await message.answer(f"<i>BROADCAST CONFIRMATION\nReview the message before sending it to users.\nAction: {action}\nRecipients: {recipients}</i>", reply_markup=keyboard)
 
 @router.callback_query(F.data.startswith("broadcast:"))
 async def confirm(query: CallbackQuery, settings: Settings, database):
