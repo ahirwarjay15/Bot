@@ -145,7 +145,7 @@ async def file_command(message: Message, state: FSMContext, settings: Settings, 
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     if not settings.source_channel_id:
-        await message.answer("Storage isn't configured. Set SOURCE_CHANNEL_ID to your private storage channel.")
+        await message.answer("<i>Storage is not configured. Set SOURCE_CHANNEL_ID to your private storage channel.</i>")
         try:
             await message.delete()
         except TelegramAPIError:
@@ -179,7 +179,7 @@ async def cancel_file(message: Message, state: FSMContext):
     ):
         raise SkipHandler
     await _clear_collection_ui(message.bot, state, message.chat.id)
-    await message.answer("File link creation cancelled.")
+    await message.answer("<i>File link creation cancelled.</i>")
     try:
         await message.delete()
     except TelegramAPIError:
@@ -194,7 +194,7 @@ async def file_limit(callback: CallbackQuery):
 @router.callback_query(F.data == "file:back")
 async def file_back(callback: CallbackQuery, state: FSMContext):
     await _clear_collection_ui(callback.bot, state, callback.message.chat.id)
-    await callback.answer("Collection cancelled")
+    await callback.answer("<i>Collection cancelled</i>")
 
 
 @router.callback_query(F.data == "file:generate")
@@ -204,12 +204,12 @@ async def generate_file_link(
     data = await state.get_data()
     collected = data.get("collected", [])
     if not collected:
-        await callback.answer("Send at least one file first.", show_alert=True)
+        await callback.answer("<i>Send at least one file first.</i>", show_alert=True)
         return
     if await state.get_state() not in (
         FileStates.waiting_for_message.state, FileStates.collecting.state
     ):
-        await callback.answer("This collection has already ended. Start again with /file.", show_alert=True)
+        await callback.answer("<i>This collection has already ended. Start again with /file.</i>", show_alert=True)
         return
 
     await callback.answer()
@@ -389,7 +389,7 @@ async def _receive_collected(message: Message, state: FSMContext, settings: Sett
         )
     except TelegramAPIError:
         log.exception("Could not collect file")
-        await message.answer("Couldn't add this file to the collection. Please try again.")
+        await message.answer("<i>Could not add this file to the collection. Please try again.</i>")
     except Exception:
         log.exception("Unexpected error while collecting file")
         await message.answer(
