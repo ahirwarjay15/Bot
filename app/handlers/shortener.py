@@ -42,7 +42,7 @@ async def _shorten_and_reply(message: Message, settings: Settings, database, tar
         return
     cfg = await database.db.settings.find_one({"key": "shortener", "enabled": True})
     if not cfg:
-        await message.answer("Shortener isn't configured. Open /settings → Link Shortener → ADD.")
+        await message.answer("<i>The link shortener is not configured. Open /settings → Link Shortener → ADD.</i>")
         try:
             await message.delete()
         except TelegramAPIError:
@@ -61,7 +61,7 @@ async def _shorten_and_reply(message: Message, settings: Settings, database, tar
             detail = f"Provider returned HTTP {exc.status}."
         else:
             detail = f"Provider request failed ({type(exc).__name__}). Check the provider URL/API token in /settings → Link Shortener."
-        await message.answer(f"Couldn't shorten this URL. {detail}")
+        await message.answer(f"<i>Could not shorten this URL. <code>{detail}</code></i>")
 
 
 @router.message(Command("shortener"))
@@ -72,7 +72,7 @@ async def shortener_command(
         return
     cfg = await database.db.settings.find_one({"key": "shortener", "enabled": True})
     if not cfg:
-        await message.answer("Shortener isn't configured. Open /settings → Link Shortener → ADD.")
+        await message.answer("<i>The link shortener is not configured. Open /settings → Link Shortener → ADD.</i>")
         return
     source = (command.args or "").strip()
     if not source and message.reply_to_message:
@@ -87,7 +87,7 @@ async def shortener_command(
             pass
         return
     await state.set_state(ShortenerState.waiting_for_url)
-    await message.answer("Send the URL you want to shorten, or use /cancel to stop.")
+    await message.answer("<i>Send the URL you want to shorten, or use /cancel to stop.</i>")
     try:
         await message.delete()
     except TelegramAPIError:
@@ -97,7 +97,7 @@ async def shortener_command(
 @router.message(ShortenerState.waiting_for_url, Command("cancel"))
 async def cancel_shortener(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("URL shortening cancelled.")
+    await message.answer("<i>URL shortening cancelled.</i>")
     try:
         await message.delete()
     except TelegramAPIError:
@@ -119,7 +119,7 @@ async def receive_shortener_url(message: Message, state: FSMContext, settings: S
     source = message.text or message.caption or ""
     target = extract_target(source)
     if not target:
-        await message.answer("Please send a valid URL such as https://example.com, or use /cancel.")
+        await message.answer("<i>Please send a valid URL, such as https://example.com, or use /cancel.</i>")
         return
     await state.clear()
     await _shorten_and_reply(message, settings, database, target)
