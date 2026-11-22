@@ -916,7 +916,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         # opaque without adding visible file/batch/deepcode prefixes.
         record = await repo.get_file(payload[:7]) if len(payload) == 22 and payload.isalnum() else None
         if not record:
-            await message.answer("This link is invalid or expired.")
+            await message.answer("<i>This link is invalid or has expired.</i>")
             await delete_start_command_after(message, database.db)
             return
         if await gate_or_prompt(message,payload,settings,database,bot):
@@ -934,17 +934,17 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
             is_batch = isinstance(record.get("items"), list) or (isinstance(record.get("id"), list) and len(record.get("id")) > 1) or isinstance(record.get("id"), dict) or isinstance(record.get("source_message_id"), list) or (isinstance(record.get("id"), str) and "," in record.get("id"))
             if is_batch and result[0]==0:
-                await message.answer("None of the batch files could be delivered. The source messages may be unavailable.")
+                await message.answer("<i><i>None of the batch files could be delivered.</i> The source messages may be unavailable.</i>")
             elif is_batch and result[1]:
                 log.warning("Batch delivery partial: %s delivered, %s failed",*result)
             elif not is_batch and result[0] == 0:
-                await message.answer("This file is currently unavailable. The source message may have been deleted or become inaccessible.")
+                await message.answer("<i>This file is currently unavailable. The source message may have been deleted or become inaccessible.</i>")
             success = result[0] > 0
         except TelegramAPIError:
             log.exception("Delivery failed for %s",payload);await message.answer("This file is currently unavailable. Please contact the bot owner.")
         except Exception:
             log.exception("Unexpected delivery failure for %s", payload)
-            await message.answer("Delivery failed due to a temporary error. Please try the link again.")
+            await message.answer("<i><i>Delivery failed due to a temporary error.</i> Please try the link again.</i>")
         finally:
             # The blink has already appeared before delivery.
             await delete_start_command_after(message, database.db, delay=False)
@@ -1346,7 +1346,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         if old_post:
             try: await old_post.delete()
             except TelegramAPIError: pass
-        await bot.send_message(user_id,"This link is invalid or expired.")
+        await bot.send_message(user_id,"<i>This link is invalid or has expired.</i>")
         return
     request_anchor = old_post.message_id if old_post else query.id
     request_key = f"forcejoin:{user_id}:{request_anchor}:{payload}"
@@ -1371,16 +1371,16 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         result=await deliver_payload(bot,database,settings,user_id,payload,record,request_key=request_key)
         is_batch = isinstance(record.get("items"), list)
         if is_batch and result[0]==0:
-            await bot.send_message(user_id,"None of the batch files could be delivered.")
+            await bot.send_message(user_id,"<i>None of the batch files could be delivered.</i>")
         elif not is_batch and result[0] == 0:
-            await bot.send_message(user_id,"This file is currently unavailable. The source message may have been deleted or become inaccessible.")
+            await bot.send_message(user_id,"<i>This file is currently unavailable. The source message may have been deleted or become inaccessible.</i>")
         success = result[0] > 0
     except TelegramAPIError:
         log.exception("Delivery after Force Sub failed")
-        await bot.send_message(user_id,"File delivery failed. Contact the owner.")
+        await bot.send_message(user_id,"<i>File delivery failed. Contact the owner.</i>")
     except Exception:
         log.exception("Unexpected delivery failure after Force Sub")
-        await bot.send_message(user_id,"Delivery failed due to a temporary error.")
+        await bot.send_message(user_id,"<i>Delivery failed due to a temporary error.</i>")
     finally:
         try: await finish_delivery_request(database.db, request_key, success)
         except Exception: log.exception("Could not update Force Sub delivery request status")
