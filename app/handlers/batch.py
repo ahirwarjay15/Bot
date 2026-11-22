@@ -59,7 +59,7 @@ async def _touch_batch_session(message: Message, state: FSMContext) -> bool:
         last_activity = 0
     if not session_token or time.time() - last_activity >= BATCH_SESSION_TIMEOUT:
         await state.clear()
-        await message.answer("Batch session timed out after 10 minutes. Start again with /batch.")
+        await message.answer("<i>Batch session timed out after 10 minutes. Start again with /batch.</i>")
         return False
     await state.update_data(last_activity_at=time.time())
     asyncio.create_task(_expire_batch_session(state, session_token))
@@ -192,7 +192,7 @@ async def batch_start(message: Message, state: FSMContext, settings: Settings, d
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     if not settings.source_channel_id:
-        await message.answer("Configure SOURCE_CHANNEL_ID first.")
+        await message.answer("<i>Configure SOURCE_CHANNEL_ID first.</i>")
         try:
             await message.delete()
         except TelegramAPIError:
@@ -245,7 +245,7 @@ async def cancel_batch(message: Message, state: FSMContext):
     if current not in (BatchState.waiting_first.state, BatchState.waiting_last.state):
         raise SkipHandler
     await state.clear()
-    await message.answer("Batch creation cancelled.")
+    await message.answer("<i>Batch creation cancelled.</i>")
     try:
         await message.delete()
     except TelegramAPIError:
@@ -315,11 +315,11 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
         )
         return
     if last_id < first_id:
-        await message.answer("Last message must be after the first message in the selected source channel. Please send the last post again.")
+        await message.answer("<i>The last message must be after the first message in the selected source channel. Please send the last post again.</i>")
         return
     count = last_id - first_id + 1
     if count < 2:
-        await message.answer("Please choose at least two messages. Send the last post again.")
+        await message.answer("<i>Please choose at least two messages. Send the last post again.</i>")
         return
     if count > MAX_BATCH_MESSAGES:
         await message.answer(
@@ -408,4 +408,4 @@ async def receive_last(message: Message, state: FSMContext, settings: Settings, 
             except Exception:
                 log.warning("Could not clean up an unlinked batch record", exc_info=True)
         log.exception("Range batch generation failed")
-        await message.answer("Batch link generation failed. Check that the message links are valid and the bot is a member of the source channel.")
+        await message.answer("<i>Batch link generation failed. Check that the message links are valid and that the bot is a member of the source channel.</i>")
