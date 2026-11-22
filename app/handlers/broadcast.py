@@ -81,12 +81,12 @@ async def broadcast(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     if not message.reply_to_message:
-        await message.answer("Reply to the message you want to broadcast, then send /broadcast.")
+        await message.answer("<i>Reply to the message you want to broadcast, then send /broadcast.</i>")
         return
     admin_id = message.from_user.id
     active = await database.db.broadcast_drafts.find_one({"admin_id": admin_id, "status": {"$in": ["draft", "queued", "running"]}})
     if active:
-        await message.answer("You already have a pending broadcast draft or active broadcast. Finish it before starting another.")
+        await message.answer("<i>You already have a pending broadcast draft or an active broadcast. Finish it before starting another.</i>")
         return
     source = message.reply_to_message
     command_name = (message.text or "").split()[0].split("@")[0].lstrip("/").lower()
@@ -103,7 +103,7 @@ async def broadcast(message: Message, settings: Settings, database):
     )
     draft = await database.db.broadcast_drafts.find_one({"admin_id": admin_id, "status": "draft"})
     if not draft:
-        await message.answer("Could not create the broadcast draft. Please try again.")
+        await message.answer("<i>Could not create the broadcast draft. Please try again.</i>")
         return
     draft_key = draft["draft_key"]
     keyboard = confirmation_keyboard(draft_key)
@@ -124,9 +124,9 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         if not deleted.deleted_count:
             await query.answer("This broadcast draft is no longer active.", show_alert=True)
             return
-        await query.answer("Broadcast cancelled.")
+        await query.answer("<i>Broadcast cancelled.</i>")
         if query.message:
-            await query.message.edit_text("Broadcast cancelled." if action == "no" else "Back. Draft cancelled.")
+            await query.message.edit_text("<i>Broadcast cancelled.</i>" if action == "no" else "<i>Back. Draft cancelled.</i>")
         return
     draft = await database.db.broadcast_drafts.find_one_and_update(
         {"admin_id": admin_id, "status": "draft", "draft_key": draft_key},
@@ -152,9 +152,9 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         }},
         upsert=True,
     )
-    await query.answer("Broadcast queued.")
+    await query.answer("<i>Broadcast queued.</i>")
     if query.message:
-        await query.message.edit_text("Broadcast queued. You will receive the delivery report when it finishes.")
+        await query.message.edit_text("<i>Broadcast queued.</i> You will receive the delivery report when it finishes.")
 
 async def _watch_broadcast_changes(db, wake_event: asyncio.Event, ready_event: asyncio.Event):
     """Wake the worker for job creation and recipient progress; never poll for completion."""
