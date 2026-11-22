@@ -12,7 +12,7 @@ from app.services.bot_identity import get_bot_identity
 
 router = Router(name="misc")
 log = logging.getLogger(__name__)
-DEFAULT_INVALID = "Hi {mention}, this bot is used to deliver files. Please use a valid file link."
+DEFAULT_INVALID = "<i>Hello <code>{mention}</code>, this bot is used to deliver files. Please use a valid file link.</i>"
 from app.handlers.about import DEFAULT_ABOUT
 
 def _mention(user):
