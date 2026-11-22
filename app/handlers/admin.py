@@ -18,16 +18,16 @@ async def ban_user(message: Message, settings: Settings, database):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) <= 0:
-        await message.answer("Usage: /ban TELEGRAM_USER_ID")
+        await message.answer("<i>Usage: /ban <code>TELEGRAM_USER_ID</code></i>")
         return
     uid = int(parts[1])
     if is_owner(uid, settings) or await database.db.moderators.find_one({"user_id": uid}):
-        await message.answer("Owner/moderators cannot be banned.")
+        await message.answer("<i>Owners and moderators cannot be banned.</i>")
         return
     if not await set_user_banned(database.db, uid, True):
-        await message.answer(f"User {uid} is already banned.")
+        await message.answer(f"<i>User <code>{uid}</code> is already banned.</i>")
         return
-    await message.answer(f"User {uid} banned.")
+    await message.answer(f"<i>User <code>{uid}</code> has been banned.</i>")
 
 @router.message(Command("unban"))
 async def unban_user(message: Message, settings: Settings, database):
@@ -35,13 +35,13 @@ async def unban_user(message: Message, settings: Settings, database):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) <= 0:
-        await message.answer("Usage: /unban TELEGRAM_USER_ID")
+        await message.answer("<i>Usage: /unban <code>TELEGRAM_USER_ID</code></i>")
         return
     uid = int(parts[1])
     if not await set_user_banned(database.db, uid, False):
-        await message.answer("That user is not currently banned.")
+        await message.answer("<i>That user is not currently banned.</i>")
         return
-    await message.answer(f"User {uid} unbanned.")
+    await message.answer(f"<i>User <code>{uid}</code> has been unbanned.</i>")
 
 @router.message(Command("addmod"))
 async def add_mod(message: Message, settings: Settings, database):
@@ -49,21 +49,21 @@ async def add_mod(message: Message, settings: Settings, database):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) <= 0:
-        await message.answer("Usage: /addmod TELEGRAM_USER_ID")
+        await message.answer("<i>Usage: /addmod <code>TELEGRAM_USER_ID</code></i>")
         return
     uid = int(parts[1])
     if is_owner(uid, settings):
-        await message.answer("Owner is not stored as a moderator.")
+        await message.answer("<i>The owner is not stored as a moderator.</i>")
         return
     if await is_banned(database.db, uid):
-        await message.answer("Unban this user before adding them as a moderator.")
+        await message.answer("<i>Unban this user before adding them as a moderator.</i>")
         return
     existing = await database.db.moderators.find_one({"user_id": uid})
     if existing:
-        await message.answer("This user is already a moderator.")
+        await message.answer("<i>This user is already a moderator.</i>")
         return
     if await database.db.moderators.count_documents({}) >= 3:
-        await message.answer("Maximum 3 moderators allowed.")
+        await message.answer("<i>A maximum of 3 moderators is allowed.</i>")
         return
     await database.db.moderators.insert_one({"user_id": uid, "first_name": f"User {uid}"})
     try:
@@ -71,7 +71,7 @@ async def add_mod(message: Message, settings: Settings, database):
     except Exception:
         # The database role remains authoritative; startup will retry menu registration.
         pass
-    await message.answer(f"Successfully added User {uid} as moderator.")
+    await message.answer(f"<i>User <code>{uid}</code> was successfully added as a moderator.</i>")
 
 @router.message(Command("delmod"))
 async def del_mod(message: Message, settings: Settings, database):
@@ -79,7 +79,7 @@ async def del_mod(message: Message, settings: Settings, database):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
-        await message.answer("Usage: /delmod TELEGRAM_USER_ID")
+        await message.answer("<i>Usage: /delmod <code>TELEGRAM_USER_ID</code></i>")
         return
     uid = int(parts[1])
     result = await database.db.moderators.delete_one({"user_id": uid})
@@ -89,7 +89,7 @@ async def del_mod(message: Message, settings: Settings, database):
             await set_user_commands(message.bot, uid)
         except Exception:
             pass
-    await message.answer("Moderator removed." if result.deleted_count else "That user is not a moderator.")
+    await message.answer("<i>Moderator removed.</i>" if result.deleted_count else "<i>That user is not a moderator.</i>")
 
 async def build_stats_text(bot, db):
     """Build the same stats content for /stats and Settings > Stats.
