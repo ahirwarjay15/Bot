@@ -525,6 +525,7 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
             lambda: _send_message(message.bot, 
                 chat_id=int(data.get("session_chat_id", message.from_user.id)),
                 text=f"<i>Could not add this message. Exact error: <code>{type(exc).__name__}</code>: <code>{exc}</code></i>",
+                parse_mode="HTML",
             ),
             label="send DM collection error",
         )
@@ -533,7 +534,8 @@ async def _receive_anime_item(message: Message, state: FSMContext, settings: Set
         await _retry_step(
             lambda: _send_message(message.bot, 
                 chat_id=int(data.get("session_chat_id", message.from_user.id)),
-                text="<i>Something went wrong while processing this message. Your collection is still open. Try again or use /cancel.</i>"
+                text="<i>Something went wrong while processing this message. Your collection is still open. Try again or use /cancel.</i>",
+                parse_mode="HTML"
             ),
             label="send DM processing error",
         )
