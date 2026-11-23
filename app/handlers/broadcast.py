@@ -371,9 +371,9 @@ async def run_broadcast_worker(bot, db, poll_seconds: int = 5):
                 report = format_broadcast_report(counts)
                 try:
                     if job.get("report_message_id"):
-                        await bot.edit_message_text(report, chat_id=job["report_chat_id"], message_id=job["report_message_id"])
+                        await bot.edit_message_text(report, chat_id=job["report_chat_id"], message_id=job["report_message_id"], parse_mode="HTML")
                     else:
-                        await bot.send_message(job["report_chat_id"], report)
+                        await bot.send_message(job["report_chat_id"], report, parse_mode="HTML")
                 except TelegramAPIError:
                     log.exception("Could not send broadcast report for job %s", job_id)
                 # Keep counts based on the durable per-recipient outcomes until the report is built.
