@@ -281,7 +281,7 @@ async def cancel_anime(message: Message, anime_fsm_storage: BaseStorage):
 async def anime_back(callback: CallbackQuery, anime_fsm_storage: BaseStorage):
     state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id)
     await _clear_collection_ui(callback.bot, state, callback.message.chat.id)
-    await callback.answer("<i>Collection cancelled</i>")
+    await callback.answer("<i>Collection cancelled</i>".replace(/<\/?i>/g, "")))
 
 
 @router.callback_query(F.data == "anime:generate")
@@ -291,13 +291,13 @@ async def generate_anime_links(
     state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id)
     data = await state.get_data()
     if not data.get("collected"):
-        await callback.answer("<i>Send at least one file first.</i>", show_alert=True)
+        await callback.answer("<i>Send at least one file first.</i>".replace(/<\/?i>/g, "")), show_alert=True)
         return
     if await state.get_state() not in (AnimeStates.waiting_for_message.state, AnimeStates.collecting.state):
-        await callback.answer("<i>This collection has already ended. Start again with /anime.</i>", show_alert=True)
+        await callback.answer("<i>This collection has already ended. Start again with /anime.</i>".replace(/<\/?i>/g, "")), show_alert=True)
         return
     if data.get("generation_running"):
-        await callback.answer("<i>Link generation is already running.</i>")
+        await callback.answer("<i>Link generation is already running.</i>".replace(/<\/?i>/g, "")))
         return
     await callback.answer()
     await state.set_state(AnimeStates.generating)
@@ -311,9 +311,9 @@ async def retry_anime_generation(
     state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id)
     data = await state.get_data()
     if not data.get("generation_pending"):
-        await callback.answer("<i>There is no pending anime step.</i>", show_alert=True)
+        await callback.answer("<i>There is no pending anime step.</i>".replace(/<\/?i>/g, "")), show_alert=True)
         return
-    await callback.answer("<i>Resuming from the failed step...</i>")
+    await callback.answer("<i>Resuming from the failed step...</i>".replace(/<\/?i>/g, "")))
     await _delete(callback.bot, callback.message.chat.id, callback.message.message_id)
     await _run_anime_generation(callback, state, settings, database)
 
