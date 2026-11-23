@@ -124,9 +124,9 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         if not deleted.deleted_count:
             await query.answer("This broadcast draft is no longer active.", show_alert=True)
             return
-        await query.answer("<i>Broadcast cancelled.</i>")
+        await query.answer("<i>Broadcast cancelled.</i>".replace(/<\/?i>/g, "")))
         if query.message:
-            await query.message.edit_text("<i>Broadcast cancelled.</i>" if action == "no" else "<i>Back. Draft cancelled.</i>")
+            await query.message.edit_text("<i>Broadcast cancelled.</i>" if action == "no" else "<i>Back. Draft cancelled.</i>", parse_mode="HTML")
         return
     draft = await database.db.broadcast_drafts.find_one_and_update(
         {"admin_id": admin_id, "status": "draft", "draft_key": draft_key},
@@ -152,9 +152,9 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         }},
         upsert=True,
     )
-    await query.answer("<i>Broadcast queued.</i>")
+    await query.answer("<i>Broadcast queued.</i>".replace(/<\/?i>/g, "")))
     if query.message:
-        await query.message.edit_text("<i>Broadcast queued.</i> You will receive the delivery report when it finishes.")
+        await query.message.edit_text("<i>Broadcast queued.</i> You will receive the delivery report when it finishes.", parse_mode="HTML")
 
 async def _watch_broadcast_changes(db, wake_event: asyncio.Event, ready_event: asyncio.Event):
     """Wake the worker for job creation and recipient progress; never poll for completion."""
