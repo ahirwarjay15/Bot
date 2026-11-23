@@ -242,7 +242,8 @@ async def _export_database_collections(message: Message, settings: Settings, dat
             )
         await message.answer(
             "<i>Database export completed.\n"
-            f"Collections: {len(collection_names)} | Documents: {document_count} | Files: {total_parts}</i>"
+            f"Collections: {len(collection_names)} | Documents: {document_count} | Files: {total_parts}</i>",
+            parse_mode="HTML",
         )
     except Exception:
         # Do not expose database errors or credentials in chat.
