@@ -49,7 +49,7 @@ async def add_mod(message: Message, settings: Settings, database):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) <= 0:
-        await message.answer("<i>Usage: /addmod <code>TELEGRAM_USER_ID</code></i>")
+        await message.answer("<i>Usage: /addmod <code>TELEGRAM_USER_ID</code></i>", parse_mode="HTML")
         return
     uid = int(parts[1])
     if is_owner(uid, settings):
@@ -60,10 +60,10 @@ async def add_mod(message: Message, settings: Settings, database):
         return
     existing = await database.db.moderators.find_one({"user_id": uid})
     if existing:
-        await message.answer("<i>This user is already a moderator.</i>")
+        await message.answer("<i>This user is already a moderator.</i>", parse_mode="HTML")
         return
     if await database.db.moderators.count_documents({}) >= 3:
-        await message.answer("<i>A maximum of 3 moderators is allowed.</i>")
+        await message.answer("<i>A maximum of 3 moderators is allowed.</i>", parse_mode="HTML")
         return
     await database.db.moderators.insert_one({"user_id": uid, "first_name": f"User {uid}"})
     try:
@@ -71,7 +71,7 @@ async def add_mod(message: Message, settings: Settings, database):
     except Exception:
         # The database role remains authoritative; startup will retry menu registration.
         pass
-    await message.answer(f"<i>User <code>{uid}</code> was successfully added as a moderator.</i>")
+    await message.answer(f"<i>User <code>{uid}</code> was successfully added as a moderator.</i>", parse_mode="HTML")
 
 @router.message(Command("delmod"))
 async def del_mod(message: Message, settings: Settings, database):
@@ -79,7 +79,7 @@ async def del_mod(message: Message, settings: Settings, database):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
-        await message.answer("<i>Usage: /delmod <code>TELEGRAM_USER_ID</code></i>")
+        await message.answer("<i>Usage: /delmod <code>TELEGRAM_USER_ID</code></i>", parse_mode="HTML")
         return
     uid = int(parts[1])
     result = await database.db.moderators.delete_one({"user_id": uid})
