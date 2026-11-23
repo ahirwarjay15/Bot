@@ -136,7 +136,8 @@ async def _skip_command_and_cancel_collection(message: Message, state: FSMContex
     current = await state.get_state()
     if current not in (FileStates.waiting_for_message.state, FileStates.collecting.state):
         return False
-    await _clear_collection_ui(message.bot, state, message.chat.id)
+    # Let the actual command handler publish its new prompt/panel first.
+    # That handler owns cleanup of the previous collection UI after the send succeeds.
     raise SkipHandler
 
 

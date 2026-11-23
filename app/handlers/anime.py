@@ -189,9 +189,7 @@ async def _show_panel(message: Message, state: FSMContext):
             old_message_id = data.get("panel_message_id")
 
             # A new batch always gets a new message; never edit the previous panel.
-            if old_chat_id and old_message_id:
-                await _delete(message.bot, old_chat_id, old_message_id)
-
+            # Publish it successfully before removing the previous panel.
             panel = await _retry_step(
                 lambda: _send_message(message.bot, 
                     chat_id=dm_chat_id, text=panel_text,
@@ -203,6 +201,8 @@ async def _show_panel(message: Message, state: FSMContext):
                 panel_message_id=panel.message_id,
                 panel_chat_id=panel.chat.id,
             )
+            if old_chat_id and old_message_id:
+                await _delete(message.bot, old_chat_id, old_message_id)
         except asyncio.CancelledError:
             raise
         except Exception:
