@@ -1346,7 +1346,7 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         if old_post:
             try: await old_post.delete()
             except TelegramAPIError: pass
-        await bot.send_message(user_id,"<i>This link is invalid or has expired.</i>")
+        await bot.send_message(user_id,"<i>This link is invalid or has expired.</i>", parse_mode="HTML")
         return
     request_anchor = old_post.message_id if old_post else query.id
     request_key = f"forcejoin:{user_id}:{request_anchor}:{payload}"
@@ -1371,16 +1371,16 @@ async def _forcejoin_check_impl(query: CallbackQuery, settings: Settings, databa
         result=await deliver_payload(bot,database,settings,user_id,payload,record,request_key=request_key)
         is_batch = isinstance(record.get("items"), list)
         if is_batch and result[0]==0:
-            await bot.send_message(user_id,"<i>None of the batch files could be delivered.</i>")
+            await bot.send_message(user_id,"<i>None of the batch files could be delivered.</i>", parse_mode="HTML")
         elif not is_batch and result[0] == 0:
-            await bot.send_message(user_id,"<i>This file is currently unavailable. The source message may have been deleted or become inaccessible.</i>")
+            await bot.send_message(user_id,"<i>This file is currently unavailable. The source message may have been deleted or become inaccessible.</i>", parse_mode="HTML")
         success = result[0] > 0
     except TelegramAPIError:
         log.exception("Delivery after Force Sub failed")
-        await bot.send_message(user_id,"<i>File delivery failed. Contact the owner.</i>")
+        await bot.send_message(user_id,"<i>File delivery failed. Contact the owner.</i>", parse_mode="HTML")
     except Exception:
         log.exception("Unexpected delivery failure after Force Sub")
-        await bot.send_message(user_id,"<i>Delivery failed due to a temporary error.</i>")
+        await bot.send_message(user_id,"<i>Delivery failed due to a temporary error.</i>", parse_mode="HTML")
     finally:
         try: await finish_delivery_request(database.db, request_key, success)
         except Exception: log.exception("Could not update Force Sub delivery request status")
