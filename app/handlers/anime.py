@@ -226,7 +226,7 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
     if message.chat.type != "private":
         return
     if not settings.source_channel_id:
-        await _send_message(message.bot, chat_id=message.chat.id, text="<i>Storage is not configured. Set SOURCE_CHANNEL_ID to your private storage channel.</i>")
+        await _send_message(message.bot, chat_id=message.chat.id, text="<i>Storage is not configured. Set SOURCE_CHANNEL_ID to your private storage channel.</i>", parse_mode="HTML")
         try:
             await message.delete()
         except TelegramAPIError:
@@ -270,7 +270,7 @@ async def cancel_anime(message: Message, anime_fsm_storage: BaseStorage):
     ):
         raise SkipHandler
     await _clear_collection_ui(message.bot, state, message.chat.id)
-    await _send_message(message.bot, chat_id=message.chat.id, text="<i>Anime link creation cancelled.</i>")
+    await _send_message(message.bot, chat_id=message.chat.id, text="<i>Anime link creation cancelled.</i>", parse_mode="HTML")
     try:
         await message.delete()
     except TelegramAPIError:
@@ -281,7 +281,7 @@ async def cancel_anime(message: Message, anime_fsm_storage: BaseStorage):
 async def anime_back(callback: CallbackQuery, anime_fsm_storage: BaseStorage):
     state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id)
     await _clear_collection_ui(callback.bot, state, callback.message.chat.id)
-    await callback.answer("<i>Collection cancelled</i>".replace(/<\/?i>/g, "")))
+    await callback.answer("Collection cancelled")
 
 
 @router.callback_query(F.data == "anime:generate")
@@ -291,13 +291,13 @@ async def generate_anime_links(
     state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id)
     data = await state.get_data()
     if not data.get("collected"):
-        await callback.answer("<i>Send at least one file first.</i>".replace(/<\/?i>/g, "")), show_alert=True)
+        await callback.answer("Send at least one file first.", show_alert=True)
         return
     if await state.get_state() not in (AnimeStates.waiting_for_message.state, AnimeStates.collecting.state):
-        await callback.answer("<i>This collection has already ended. Start again with /anime.</i>".replace(/<\/?i>/g, "")), show_alert=True)
+        await callback.answer("This collection has already ended. Start again with /anime.", show_alert=True)
         return
     if data.get("generation_running"):
-        await callback.answer("<i>Link generation is already running.</i>".replace(/<\/?i>/g, "")))
+        await callback.answer("Link generation is already running.")
         return
     await callback.answer()
     await state.set_state(AnimeStates.generating)
@@ -311,9 +311,9 @@ async def retry_anime_generation(
     state = _user_state(anime_fsm_storage, callback.bot, callback.from_user.id)
     data = await state.get_data()
     if not data.get("generation_pending"):
-        await callback.answer("<i>There is no pending anime step.</i>".replace(/<\/?i>/g, "")), show_alert=True)
+        await callback.answer("There is no pending anime step.", show_alert=True)
         return
-    await callback.answer("<i>Resuming from the failed step...</i>".replace(/<\/?i>/g, "")))
+    await callback.answer("Resuming from the failed step...")
     await _delete(callback.bot, callback.message.chat.id, callback.message.message_id)
     await _run_anime_generation(callback, state, settings, database)
 
