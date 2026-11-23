@@ -1298,8 +1298,8 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
         values = {
             "{bot_mention}": bot_label, "{bot_name}": me.full_name or me.first_name or "Bot", "{bot}": bot_label,
             "{mention}": user_label, "{user_mention}": user_label, "{user}": user_label,
-            "{first_name}": query.from_user.first_name if query.from_user else "User",
-            "{last_name}": query.from_user.last_name if query.from_user else "",
+            "{first_name}": (query.from_user.first_name or "User") if query.from_user else "User",
+            "{last_name}": (query.from_user.last_name or "") if query.from_user else "",
             "{owner}": "Lexi", "{hindi_anime}": "Lexi Anime Hindi", "{anime}": "Lexi Anime",
         }
         for token, replacement in values.items():
@@ -1532,11 +1532,11 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
             "{bot_mention}": me.full_name or me.username or "Bot",
             "{bot_name}": me.full_name or me.first_name or "Bot",
             "{bot}": me.full_name or me.username or "Bot",
-            "{mention}": user.full_name if user else "User",
-            "{user_mention}": user.full_name if user else "User",
-            "{user}": user.full_name if user else "User",
-            "{first_name}": user.first_name if user else "User",
-            "{last_name}": user.last_name if user else "",
+            "{mention}": (user.full_name or user.username or "User") if user else "User",
+            "{user_mention}": (user.full_name or user.username or "User") if user else "User",
+            "{user}": (user.full_name or user.username or "User") if user else "User",
+            "{first_name}": (user.first_name or "User") if user else "User",
+            "{last_name}": (user.last_name or "") if user else "",
             "{owner}": "Lexi", "{anime}": "Lexi Anime", "{hindi_anime}": "Lexi Anime Hindi",
         }
         for token, replacement in values.items():
