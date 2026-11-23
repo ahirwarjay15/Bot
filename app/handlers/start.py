@@ -916,7 +916,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         # opaque without adding visible file/batch/deepcode prefixes.
         record = await repo.get_file(payload[:7]) if len(payload) == 22 and payload.isalnum() else None
         if not record:
-            await message.answer("<i>This link is invalid or has expired.</i>")
+            await message.answer("<i>This link is invalid or has expired.</i>", parse_mode="HTML")
             await delete_start_command_after(message, database.db)
             return
         if await gate_or_prompt(message,payload,settings,database,bot):
@@ -934,17 +934,17 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             result=await deliver_payload(bot,database,settings,message.chat.id,payload,record,request_key=request_key)
             is_batch = isinstance(record.get("items"), list) or (isinstance(record.get("id"), list) and len(record.get("id")) > 1) or isinstance(record.get("id"), dict) or isinstance(record.get("source_message_id"), list) or (isinstance(record.get("id"), str) and "," in record.get("id"))
             if is_batch and result[0]==0:
-                await message.answer("<i><i>None of the batch files could be delivered.</i> The source messages may be unavailable.</i>")
+                await message.answer("<i><i>None of the batch files could be delivered.</i> The source messages may be unavailable.</i>", parse_mode="HTML")
             elif is_batch and result[1]:
                 log.warning("Batch delivery partial: %s delivered, %s failed",*result)
             elif not is_batch and result[0] == 0:
-                await message.answer("<i>This file is currently unavailable. The source message may have been deleted or become inaccessible.</i>")
+                await message.answer("<i>This file is currently unavailable. The source message may have been deleted or become inaccessible.</i>", parse_mode="HTML")
             success = result[0] > 0
         except TelegramAPIError:
             log.exception("Delivery failed for %s",payload);await message.answer("This file is currently unavailable. Please contact the bot owner.")
         except Exception:
             log.exception("Unexpected delivery failure for %s", payload)
-            await message.answer("<i><i>Delivery failed due to a temporary error.</i> Please try the link again.</i>")
+            await message.answer("<i><i>Delivery failed due to a temporary error.</i> Please try the link again.</i>", parse_mode="HTML")
         finally:
             # The blink has already appeared before delivery.
             await delete_start_command_after(message, database.db, delay=False)
