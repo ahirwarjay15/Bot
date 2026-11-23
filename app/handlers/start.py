@@ -10,6 +10,7 @@ from aiogram import Router,F
 from aiogram.filters import CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message,InlineKeyboardMarkup,InlineKeyboardButton,CallbackQuery
+from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
 from aiogram.dispatcher.event.bases import SkipHandler
 from app.config import Settings
@@ -873,6 +874,26 @@ async def send_file_animation(bot, db, user_id: int) -> None:
                 log.debug("Blink delete failed; continuing delivery", exc_info=True)
 
 
+
+
+async def _cleanup_previous_file_collection(bot, state: FSMContext, fallback_chat_id: int) -> None:
+    """Remove an older /file collection only after the replacement post is sent."""
+    current = await state.get_state()
+    if not current or not current.startswith("FileStates:"):
+        return
+    data = await state.get_data()
+    await state.clear()
+    for chat_id, message_id in (
+        (data.get("prompt_chat_id", fallback_chat_id), data.get("prompt_message_id")),
+        (data.get("panel_chat_id", fallback_chat_id), data.get("panel_message_id")),
+    ):
+        if not chat_id or not message_id:
+            continue
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except TelegramAPIError:
+            log.debug("Could not remove previous file collection UI", exc_info=True)
+
 async def delete_start_command_after(message: Message, db, *, delay: bool = True) -> None:
     """Let the destination post appear, then delete /start after one configured beat."""
     try:
@@ -904,7 +925,7 @@ async def deliver_payload(bot,database,settings,user_id:int,payload:str,record:d
     return await deliver_reference(bot,database.db,settings,user_id=user_id,file_doc=record,deeplink=link,request_key=request_key)
 
 @router.message(CommandStart())
-async def start_command(message:Message,command:CommandObject,settings:Settings,database,bot):
+async def start_command(message:Message,command:CommandObject,settings:Settings,database,bot,state: FSMContext):
     user=message.from_user
     if not user:return
     repo=FileRepository(database.db)
@@ -917,9 +938,11 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         record = await repo.get_file(payload[:7]) if len(payload) == 22 and payload.isalnum() else None
         if not record:
             await message.answer("<i>This link is invalid or has expired.</i>", parse_mode="HTML")
+            await _cleanup_previous_file_collection(bot, state, message.chat.id)
             await delete_start_command_after(message, database.db)
             return
         if await gate_or_prompt(message,payload,settings,database,bot):
+            await _cleanup_previous_file_collection(bot, state, message.chat.id)
             await delete_start_command_after(message, database.db)
             return
         auto_delete_cfg = await database.db.settings.find_one({"key": "auto_delete", "enabled": True})
@@ -947,6 +970,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             await message.answer("<i><i>Delivery failed due to a temporary error.</i> Please try the link again.</i>", parse_mode="HTML")
         finally:
             # The blink has already appeared before delivery.
+            await _cleanup_previous_file_collection(bot, state, message.chat.id)
             await delete_start_command_after(message, database.db, delay=False)
             if request_key:
                 try: await finish_delivery_request(database.db, request_key, success)
@@ -957,6 +981,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
         return
     # Plain /start checks Force Sub first; this prompt intentionally has no Verify button.
     if await gate_or_prompt(message, "", settings, database, bot, verify_button=False):
+        await _cleanup_previous_file_collection(bot, state, message.chat.id)
         await delete_start_command_after(message, database.db)
         return
     cfg=await database.db.settings.find_one({"key":"start_message"}) or {}
@@ -977,6 +1002,7 @@ async def start_command(message:Message,command:CommandObject,settings:Settings,
             await message.answer_photo(cfg["poster_photo_id"], caption=text, reply_markup=markup, parse_mode="HTML")
         else:
             await message.answer(text, reply_markup=markup, parse_mode="HTML")
+    await _cleanup_previous_file_collection(bot, state, message.chat.id)
     await delete_start_command_after(message, database.db)
 
 @router.message(F.text.startswith("/"))
