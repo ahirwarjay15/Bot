@@ -185,7 +185,7 @@ async def set_user_banned(db, user_id: int, banned: bool) -> bool:
 
 async def count_active_users(db) -> int:
     """Count comma-delimited IDs across active buckets."""
-    rows = (await db.users.aggregate([
+    rows = await (await db.users.aggregate([
         {"$group": {"_id": None, "total": {"$sum": _count_ids_expression()}}},
     ])).to_list(length=1)
     return int(rows[0]["total"]) if rows else 0
@@ -193,7 +193,7 @@ async def count_active_users(db) -> int:
 
 async def count_user_totals(db) -> tuple[int, int]:
     """Return total registered and banned counts with one aggregate command."""
-    rows = (await db.banned_users.aggregate([
+    rows = await (await db.banned_users.aggregate([
         {"$match": {"_id": BANNED_DOCUMENT_ID}},
         {"$lookup": {
             "from": "users",
