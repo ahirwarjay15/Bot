@@ -194,7 +194,7 @@ async def file_limit(callback: CallbackQuery):
 @router.callback_query(F.data == "file:back")
 async def file_back(callback: CallbackQuery, state: FSMContext):
     await _clear_collection_ui(callback.bot, state, callback.message.chat.id)
-    await callback.answer("<i>Collection cancelled</i>".replace(/<\/?i>/g, "")))
+    await callback.answer("Collection cancelled")
 
 
 @router.callback_query(F.data == "file:generate")
@@ -204,12 +204,12 @@ async def generate_file_link(
     data = await state.get_data()
     collected = data.get("collected", [])
     if not collected:
-        await callback.answer("<i>Send at least one file first.</i>".replace(/<\/?i>/g, "")), show_alert=True)
+        await callback.answer("Send at least one file first.", show_alert=True)
         return
     if await state.get_state() not in (
         FileStates.waiting_for_message.state, FileStates.collecting.state
     ):
-        await callback.answer("<i>This collection has already ended. Start again with /file.</i>".replace(/<\/?i>/g, "")), show_alert=True)
+        await callback.answer("This collection has already ended. Start again with /file.", show_alert=True)
         return
 
     await callback.answer()
