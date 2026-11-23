@@ -39,7 +39,7 @@ MODERATOR_COMMANDS = [
     BotCommand(command="setshortener", description="Set shortener configuration"),
 ]
 
-# All available bot commands are visible to both owners and moderators.
+# Shared administrative commands remain visible to owners and moderators.
 # Authorization remains enforced by each command handler.
 MODERATOR_COMMANDS.extend([
     BotCommand(command="addmod", description="Add a moderator (owner only)"),
@@ -48,8 +48,10 @@ MODERATOR_COMMANDS.extend([
     BotCommand(command="exportfiles", description="Export file records"),
 ])
 
-# Owners and moderators share the complete command menu.
-OWNER_COMMANDS = MODERATOR_COMMANDS
+# Owner-only commands are added only to the owner-specific menu.
+OWNER_COMMANDS = MODERATOR_COMMANDS + [
+    BotCommand(command="pbroadcast", description="Broadcast a message and pin it"),
+]
 
 
 async def set_user_commands(bot, user_id: int) -> None:
