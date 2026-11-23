@@ -81,12 +81,12 @@ async def broadcast(message: Message, settings: Settings, database):
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
     if not message.reply_to_message:
-        await message.answer("<i>Reply to the message you want to broadcast, then send /broadcast.</i>")
+        await message.answer("<i>Reply to the message you want to broadcast, then send /broadcast.</i>", parse_mode="HTML")
         return
     admin_id = message.from_user.id
     active = await database.db.broadcast_drafts.find_one({"admin_id": admin_id, "status": {"$in": ["draft", "queued", "running"]}})
     if active:
-        await message.answer("<i>You already have a pending broadcast draft or an active broadcast. Finish it before starting another.</i>")
+        await message.answer("<i>You already have a pending broadcast draft or an active broadcast. Finish it before starting another.</i>", parse_mode="HTML")
         return
     source = message.reply_to_message
     command_name = (message.text or "").split()[0].split("@")[0].lstrip("/").lower()
@@ -103,12 +103,12 @@ async def broadcast(message: Message, settings: Settings, database):
     )
     draft = await database.db.broadcast_drafts.find_one({"admin_id": admin_id, "status": "draft"})
     if not draft:
-        await message.answer("<i>Could not create the broadcast draft. Please try again.</i>")
+        await message.answer("<i>Could not create the broadcast draft. Please try again.</i>", parse_mode="HTML")
         return
     draft_key = draft["draft_key"]
     keyboard = confirmation_keyboard(draft_key)
     action = "broadcast and pin" if pin_after_send else "broadcast"
-    await message.answer(f"<i>BROADCAST CONFIRMATION\nReview the message before sending it to users.\nAction: {action}\nRecipients: {recipients}</i>", reply_markup=keyboard)
+    await message.answer(f"<i>BROADCAST CONFIRMATION\nReview the message before sending it to users.\nAction: {action}\nRecipients: {recipients}</i>", reply_markup=keyboard, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("broadcast:"))
 async def confirm(query: CallbackQuery, settings: Settings, database):
