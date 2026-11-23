@@ -124,7 +124,7 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         if not deleted.deleted_count:
             await query.answer("This broadcast draft is no longer active.", show_alert=True)
             return
-        await query.answer("<i>Broadcast cancelled.</i>".replace(/<\/?i>/g, "")))
+        await query.answer("Broadcast cancelled.")
         if query.message:
             await query.message.edit_text("<i>Broadcast cancelled.</i>" if action == "no" else "<i>Back. Draft cancelled.</i>", parse_mode="HTML")
         return
@@ -152,7 +152,7 @@ async def confirm(query: CallbackQuery, settings: Settings, database):
         }},
         upsert=True,
     )
-    await query.answer("<i>Broadcast queued.</i>".replace(/<\/?i>/g, "")))
+    await query.answer("Broadcast queued.")
     if query.message:
         await query.message.edit_text("<i>Broadcast queued.</i> You will receive the delivery report when it finishes.", parse_mode="HTML")
 
