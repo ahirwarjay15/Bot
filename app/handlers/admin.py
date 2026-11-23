@@ -18,16 +18,16 @@ async def ban_user(message: Message, settings: Settings, database):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) <= 0:
-        await message.answer("<i>Usage: /ban <code>TELEGRAM_USER_ID</code></i>")
+        await message.answer("<i>Usage: /ban <code>TELEGRAM_USER_ID</code></i>", parse_mode="HTML")
         return
     uid = int(parts[1])
     if is_owner(uid, settings) or await database.db.moderators.find_one({"user_id": uid}):
-        await message.answer("<i>Owners and moderators cannot be banned.</i>")
+        await message.answer("<i>Owners and moderators cannot be banned.</i>", parse_mode="HTML")
         return
     if not await set_user_banned(database.db, uid, True):
-        await message.answer(f"<i>User <code>{uid}</code> is already banned.</i>")
+        await message.answer(f"<i>User <code>{uid}</code> is already banned.</i>", parse_mode="HTML")
         return
-    await message.answer(f"<i>User <code>{uid}</code> has been banned.</i>")
+    await message.answer(f"<i>User <code>{uid}</code> has been banned.</i>", parse_mode="HTML")
 
 @router.message(Command("unban"))
 async def unban_user(message: Message, settings: Settings, database):
@@ -35,13 +35,13 @@ async def unban_user(message: Message, settings: Settings, database):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) <= 0:
-        await message.answer("<i>Usage: /unban <code>TELEGRAM_USER_ID</code></i>")
+        await message.answer("<i>Usage: /unban <code>TELEGRAM_USER_ID</code></i>", parse_mode="HTML")
         return
     uid = int(parts[1])
     if not await set_user_banned(database.db, uid, False):
-        await message.answer("<i>That user is not currently banned.</i>")
+        await message.answer("<i>That user is not currently banned.</i>", parse_mode="HTML")
         return
-    await message.answer(f"<i>User <code>{uid}</code> has been unbanned.</i>")
+    await message.answer(f"<i>User <code>{uid}</code> has been unbanned.</i>", parse_mode="HTML")
 
 @router.message(Command("addmod"))
 async def add_mod(message: Message, settings: Settings, database):
@@ -53,10 +53,10 @@ async def add_mod(message: Message, settings: Settings, database):
         return
     uid = int(parts[1])
     if is_owner(uid, settings):
-        await message.answer("<i>The owner is not stored as a moderator.</i>")
+        await message.answer("<i>The owner is not stored as a moderator.</i>", parse_mode="HTML")
         return
     if await is_banned(database.db, uid):
-        await message.answer("<i>Unban this user before adding them as a moderator.</i>")
+        await message.answer("<i>Unban this user before adding them as a moderator.</i>", parse_mode="HTML")
         return
     existing = await database.db.moderators.find_one({"user_id": uid})
     if existing:
@@ -89,7 +89,7 @@ async def del_mod(message: Message, settings: Settings, database):
             await set_user_commands(message.bot, uid)
         except Exception:
             pass
-    await message.answer("<i>Moderator removed.</i>" if result.deleted_count else "<i>That user is not a moderator.</i>")
+    await message.answer("<i>Moderator removed.</i>" if result.deleted_count else "<i>That user is not a moderator.</i>", parse_mode="HTML")
 
 async def build_stats_text(bot, db):
     """Build the same stats content for /stats and Settings > Stats.
@@ -246,7 +246,7 @@ async def _export_database_collections(message: Message, settings: Settings, dat
         )
     except Exception:
         # Do not expose database errors or credentials in chat.
-        await message.answer("<i>Database export failed. Please check the bot logs and try again.</i>")
+        await message.answer("<i>Database export failed. Please check the bot logs and try again.</i>", parse_mode="HTML")
 
 
 @router.message(Command("export"))
