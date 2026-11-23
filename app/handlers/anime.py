@@ -219,7 +219,7 @@ async def _skip_command(message: Message):
 
 
 @router.message(Command("anime"))
-async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settings: Settings, database):
+async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settings: Settings, database, state: FSMContext):
     state = _user_state(anime_fsm_storage, message.bot, message.from_user.id) if message.from_user else None
     if not message.from_user or not await is_owner_or_moderator(database.db, message.from_user.id, settings):
         return
@@ -234,6 +234,8 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
         return
 
     old_data = await state.get_data()
+    previous_file_state = await state.get_state()
+    previous_file_data = await state.get_data()
     prompt = await _retry_step(
         lambda: _send_message(message.bot, 
             chat_id=message.chat.id,
@@ -252,6 +254,12 @@ async def anime_command(message: Message, anime_fsm_storage: BaseStorage, settin
     )
     await _delete(message.bot, old_data.get("prompt_chat_id", message.chat.id), old_data.get("prompt_message_id"))
     await _delete(message.bot, old_data.get("panel_chat_id", message.chat.id), old_data.get("panel_message_id"))
+    # The file router may have an older collection open. Retire it only after
+    # this /anime prompt has been sent successfully.
+    if previous_file_state and previous_file_state.startswith("FileStates:"):
+        await state.clear()
+        await _delete(message.bot, previous_file_data.get("prompt_chat_id", message.chat.id), previous_file_data.get("prompt_message_id"))
+        await _delete(message.bot, previous_file_data.get("panel_chat_id", message.chat.id), previous_file_data.get("panel_message_id"))
     try:
         await message.delete()
     except TelegramAPIError:
