@@ -1069,7 +1069,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                     keyboard=[
                         [KeyboardButton(text="ᴄʜᴀɴɴᴇʟ", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True)),
                          KeyboardButton(text="ɢʀᴏᴜᴘ", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
-                        [KeyboardButton(text="ᴏᴛʜᴇʀ ʟɪɴᴋⅹꜱ")],
+                        [KeyboardButton(text="ᴏᴛʜᴇʀ ʟɪɴᴋꜱ")],
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
             )
@@ -1086,7 +1086,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                     keyboard=[
                         [KeyboardButton(text="ᴄʜᴀɴɴᴇʟ", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True)),
                          KeyboardButton(text="ɢʀᴏᴜᴘ", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
-                        [KeyboardButton(text="ᴏᴛʜᴇʀ ʟɪɴᴋⅹꜱ")],
+                        [KeyboardButton(text="ᴏᴛʜᴇʀ ʟɪɴᴋꜱ")],
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
             )
