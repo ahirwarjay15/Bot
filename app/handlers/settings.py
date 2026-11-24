@@ -1068,7 +1068,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[
                         [KeyboardButton(text="ᴄʜᴀɴɴᴇʟ", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, user_administrator_rights=ChatAdministratorRights(is_anonymous=False, can_manage_chat=True, can_delete_messages=False, can_manage_video_chats=False, can_restrict_members=False, can_promote_members=False, can_change_info=False, can_invite_users=False, can_post_messages=False, can_edit_messages=False, can_pin_messages=False, can_manage_topics=False, can_post_stories=False, can_edit_stories=False, can_delete_stories=False, can_send_welcome_messages=False), request_title=True, request_username=True)),
-                         KeyboardButton(text="ɢʀᴏᴜᴘ", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
+                         KeyboardButton(text="ɢʀᴏᴜᴘ", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, user_administrator_rights=ChatAdministratorRights(is_anonymous=False, can_manage_chat=True, can_delete_messages=False, can_manage_video_chats=False, can_restrict_members=False, can_promote_members=False, can_change_info=False, can_invite_users=False, can_post_messages=False, can_edit_messages=False, can_pin_messages=False, can_manage_topics=False, can_post_stories=False, can_edit_stories=False, can_delete_stories=False, can_send_welcome_messages=False), request_title=True, request_username=True))],
                         [KeyboardButton(text="ᴏᴛʜᴇʀ ʟɪɴᴋꜱ")],
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
@@ -1085,7 +1085,7 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[
                         [KeyboardButton(text="ᴄʜᴀɴɴᴇʟ", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, user_administrator_rights=ChatAdministratorRights(is_anonymous=False, can_manage_chat=True, can_delete_messages=False, can_manage_video_chats=False, can_restrict_members=False, can_promote_members=False, can_change_info=False, can_invite_users=False, can_post_messages=False, can_edit_messages=False, can_pin_messages=False, can_manage_topics=False, can_post_stories=False, can_edit_stories=False, can_delete_stories=False, can_send_welcome_messages=False), request_title=True, request_username=True)),
-                         KeyboardButton(text="ɢʀᴏᴜᴘ", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
+                         KeyboardButton(text="ɢʀᴏᴜᴘ", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, user_administrator_rights=ChatAdministratorRights(is_anonymous=False, can_manage_chat=True, can_delete_messages=False, can_manage_video_chats=False, can_restrict_members=False, can_promote_members=False, can_change_info=False, can_invite_users=False, can_post_messages=False, can_edit_messages=False, can_pin_messages=False, can_manage_topics=False, can_post_stories=False, can_edit_stories=False, can_delete_stories=False, can_send_welcome_messages=False), request_title=True, request_username=True))],
                         [KeyboardButton(text="ᴏᴛʜᴇʀ ʟɪɴᴋꜱ")],
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
