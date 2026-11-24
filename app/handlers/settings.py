@@ -1067,9 +1067,9 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 "<i>Select A Option Below 👇</i>",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[
-                        [KeyboardButton(text="Channel", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True)),
-                         KeyboardButton(text="Group", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
-                        [KeyboardButton(text="Other Links")],
+                        [KeyboardButton(text=unicode_buttons("Channel"), request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True)),
+                         KeyboardButton(text=unicode_buttons("Group"), request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
+                        [KeyboardButton(text=unicode_buttons("Other Links"))],
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
             )
@@ -1084,8 +1084,9 @@ async def settings_callbacks(query: CallbackQuery, state: FSMContext, settings: 
                 "Choose Group or Channel below.",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[
-                        [KeyboardButton(text="Group", request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
-                        [KeyboardButton(text="Channel", request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True))],
+                        [KeyboardButton(text=unicode_buttons("Channel"), request_chat=KeyboardButtonRequestChat(request_id=5102, chat_is_channel=True, request_title=True, request_username=True)),
+                         KeyboardButton(text=unicode_buttons("Group"), request_chat=KeyboardButtonRequestChat(request_id=5101, chat_is_channel=False, request_title=True, request_username=True))],
+                        [KeyboardButton(text=unicode_buttons("Other Links"))],
                     ], resize_keyboard=True, one_time_keyboard=True,
                 ),
             )
@@ -1741,7 +1742,7 @@ async def send_button_settings_reply_panel(message: Message, db, kind: str, pane
     status3 = "ON ✅" if cfg.get("button3_enabled", False) else "OFF ❌"
     title = "START BUTTONS" if is_start else "INVALID BUTTONS"
     body = "Customize buttons shown with your start message." if is_start else "Customize buttons shown with invalid items."
-    markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=f"1 {status1}"), KeyboardButton(text=f"2 {status2}")], [KeyboardButton(text=f"3 {status3}")], [KeyboardButton(text="❮❮ BACK")]], resize_keyboard=True)
+    markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=unicode_buttons(f"1 {status1}")), KeyboardButton(text=unicode_buttons(f"2 {status2}"))], [KeyboardButton(text=unicode_buttons(f"3 {status3}"))], [KeyboardButton(text=unicode_buttons("❮❮ BACK"))]], resize_keyboard=True)
     page_text = format_settings_page(f"{title}\n{body}\n\nButton 1: {status1}\nButton 2: {status2}\nButton 3: {status3}")
     edited = False
     if panel_chat_id and panel_message_id:
