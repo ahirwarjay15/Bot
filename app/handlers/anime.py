@@ -21,7 +21,7 @@ from app.services.bot_identity import get_bot_identity
 from app.services.permissions import is_owner_or_moderator
 
 router = Router(name="anime")
-ANIME_LINKS_CHAT_ID = -1003953020663
+ANIME_LINKS_CHAT_ID = -1005822555597
 log = logging.getLogger(__name__)
 _panel_tasks = {}
 _receive_locks = {}
